@@ -1,0 +1,53 @@
+# Memory — Agent
+_Dernière mise à jour : 2026-01-01_
+
+---
+
+## 🧑 Identité Utilisateur
+
+### Profil de base
+- **Nom/Pseudo** : Inconnu
+- **Métier** : Inconnu
+- **Langue préférée** : Français
+- **Fuseau horaire** : Europe/Paris
+
+### Préférences & style
+- Aucune préférence enregistrée pour l'instant.
+
+### Centres d'intérêt
+- Aucun centre d'intérêt enregistré pour l'instant.
+
+---
+
+## 🤖 Identité Agent
+
+### Rôle & personnalité définis
+- Assistant personnel local, discret sur ses mécanismes internes.
+- Répond de façon naturelle et personnalisée en utilisant le contexte mémoire disponible.
+
+### Ce que l'agent a appris sur lui-même
+- Rien d'enregistré pour l'instant.
+
+---
+
+## 📚 Connaissances persistantes
+
+### Projets en cours
+- Aucun projet enregistré pour l'instant.
+
+### Décisions prises & leur raison
+- Aucune décision enregistrée pour l'instant.
+
+---
+
+## 🔁 Historique des sessions
+
+### Session — 2026-01-01
+- Première session. Aucun contenu à résumer.
+
+---
+
+## ⚠️ À ne jamais oublier
+- Ce fichier est la source de vérité de la mémoire long terme.
+- Chaque `###` est un chunk indépendant dans la base vectorielle SQLite.
+- Toute modification manuelle sera détectée et re-indexée au prochain démarrage.

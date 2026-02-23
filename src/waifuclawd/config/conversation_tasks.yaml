@@ -1,0 +1,52 @@
+evaluate_task:
+  description: >
+    Analyse ce message utilisateur : {user_message}
+
+    Retourne UNIQUEMENT un objet JSON valide, sans texte autour, avec cette structure :
+    {
+      "intent": "question | demande_action | mise_a_jour_info | conversation",
+      "entities": ["liste", "des", "entités", "nommées"],
+      "topics": ["sujets", "principaux"],
+      "needs_memory": true,
+      "complexity": "simple | moderate | complex",
+      "memory_query": "phrase courte et optimisée pour le retrieval mémoire"
+    }
+
+    needs_memory doit être false uniquement pour les messages triviaux (bonjour, merci, etc.).
+    memory_query doit être reformulée pour maximiser le rappel dans un index vectoriel.
+  expected_output: >
+    Un objet JSON valide et uniquement le JSON, sans markdown, sans explication.
+  agent: evaluator
+
+retrieve_task:
+  description: >
+    À partir de cette analyse : {evaluation_result}
+    Session courante ID : {session_id}
+
+    1. Si le champ needs_memory est true, utilise l'outil retrieve_memory
+       avec le champ memory_query comme query.
+    2. Utilise toujours get_session_memory avec le session_id fourni.
+    3. Retourne UNIQUEMENT un JSON avec cette structure :
+    {
+      "long_term_context": "chunks formatés ou null si needs_memory était false",
+      "session_context": { ...contenu JSON de la session... },
+      "context_summary": "résumé en 2 phrases de ce qui est pertinent pour répondre"
+    }
+  expected_output: >
+    Un objet JSON valide contenant le contexte mémoire assemblé.
+  agent: memory_retriever
+
+main_task:
+  description: >
+    Message de l'utilisateur : {user_message}
+
+    Contexte mémoire disponible :
+    {memory_context}
+
+    Réponds au message de façon naturelle et personnalisée.
+    Utilise le contexte mémoire si pertinent, sans le mentionner explicitement
+    sauf si l'utilisateur pose une question sur ta mémoire.
+    Ne préfixe pas ta réponse avec des labels comme "Réponse :" ou "Assistant :".
+  expected_output: >
+    La réponse finale destinée à l'utilisateur, en texte naturel.
+  agent: main_agent

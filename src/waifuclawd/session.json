@@ -1,0 +1,8 @@
+{
+  "session_id": "...",
+  "date": "...",
+  "user_intent_summary": "...",
+  "entities_mentioned": [],
+  "facts_extracted": [],
+  "to_persist": [] 
+}

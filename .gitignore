@@ -1,0 +1,36 @@
+# Environnement
+.env
+.venv/
+venv/
+
+# Mémoire — données personnelles, ne pas versionner
+memory.md
+memory.db
+sessions/
+
+# Fichiers Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# uv
+.uv/
+uv.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs CrewAI
+*.log
+latest_crew_run.log

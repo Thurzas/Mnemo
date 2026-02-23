@@ -1,0 +1,46 @@
+consolidate_task:
+  description: >
+    Voici le JSON complet de la session terminée :
+    {session_json}
+
+    Analyse l'intégralité de la conversation et extrais uniquement les faits
+    qui méritent une persistance long terme. Ignore les échanges triviaux,
+    les salutations, les questions sans réponse informative.
+
+    Retourne UNIQUEMENT un JSON avec cette structure :
+    {
+      "session_summary": "résumé de la session en 3 phrases maximum",
+      "worth_persisting": true,
+      "facts": [
+        {
+          "fact": "contenu du fait à mémoriser, formulé de façon concise",
+          "category": "projet | préférence | décision | identité | connaissance",
+          "target_section": "section ## exacte du Markdown cible",
+          "target_subsection": "sous-section ### exacte du Markdown cible"
+        }
+      ]
+    }
+
+    Si la session ne contient aucune information nouvelle à mémoriser,
+    retourne worth_persisting: false et facts: [].
+  expected_output: >
+    Un objet JSON valide avec les faits à persister et le résumé de session.
+  agent: session_consolidator
+
+write_task:
+  description: >
+    Voici les faits consolidés à persister :
+    {consolidated_facts}
+
+    Pour chaque fait dans le tableau facts (si worth_persisting est true) :
+    1. Utilise update_markdown_memory avec section, subsection, content ET category du fait.
+       La category est critique — elle détermine le poids du chunk dans les recherches futures :
+       identité (1.5) > décision (1.3) > projet (1.2) > préférence (1.1) > connaissance (1.0) > historique_session (0.7)
+    2. Évite les doublons — si une information similaire existe déjà dans cette
+       sous-section, enrichis-la plutôt que d'en créer une nouvelle entrée.
+    3. Une fois TOUS les faits écrits, appelle sync_memory_db pour re-indexer la base.
+
+    Retourne un résumé des modifications apportées (sections modifiées, nombre de faits écrits).
+  expected_output: >
+    Un résumé texte des modifications apportées à memory.md et à la base SQLite.
+  agent: memory_writer
