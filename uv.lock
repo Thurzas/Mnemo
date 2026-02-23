@@ -3035,7 +3035,7 @@ wheels = [
 ]
 
 [[package]]
-name = "waifuclawd"
+name = "Mnemo"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

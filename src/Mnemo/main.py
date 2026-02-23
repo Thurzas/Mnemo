@@ -7,8 +7,8 @@ from datetime import datetime
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
-from waifuclawd.crew import ConversationCrew, ConsolidationCrew
-from waifuclawd.tools.memory_tools import update_session_memory, load_session_json, SESSIONS_DIR, check_and_sync
+from Mnemo.crew import ConversationCrew, ConsolidationCrew
+from Mnemo.tools.memory_tools import update_session_memory, load_session_json, SESSIONS_DIR, check_and_sync
 
 
 # ══════════════════════════════════════════════════════════════

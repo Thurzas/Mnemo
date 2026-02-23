@@ -1,7 +1,7 @@
 [project]
-name = "waifuclawd"
+name = "Mnemo"
 version = "0.1.0"
-description = "WaifuClawd using crewAI"
+description = "Mnemo using crewAI"
 authors = [{ name = "Your Name", email = "you@example.com" }]
 requires-python = ">=3.10,<3.13"
 dependencies = [
@@ -13,11 +13,11 @@ dependencies = [
 ]
 
 [project.scripts]
-waifuclawd = "waifuclawd.main:run"
-run_crew = "waifuclawd.main:run"
-train = "waifuclawd.main:train"
-replay = "waifuclawd.main:replay"
-test = "waifuclawd.main:test"
+Mnemo = "Mnemo.main:run"
+run_crew = "Mnemo.main:run"
+train = "Mnemo.main:train"
+replay = "Mnemo.main:replay"
+test = "Mnemo.main:test"
 
 [build-system]
 requires = ["hatchling"]
