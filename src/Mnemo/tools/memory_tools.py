@@ -221,8 +221,19 @@ def parse_markdown_chunks(md_path: Path) -> list[dict]:
     chunks, current_section, current_subsection, current_content, current_line = [], "", "", [], 0
     for i, line in enumerate(lines):
         if line.startswith("## "):
+            # Sauvegarde le chunk en cours avant de changer de section
+            # BUG CORRIGÉ : sans ça, le dernier ### de chaque ## était perdu
+            if current_content and current_subsection:
+                chunks.append({
+                    "section":     current_section,
+                    "subsection":  current_subsection,
+                    "content":     "\n".join(current_content).strip(),
+                    "source_line": current_line,
+                    "category":    infer_category_from_section(current_section),
+                })
             current_section = line.lstrip("# ").strip()
             current_subsection = ""
+            current_content = []
         elif line.startswith("### "):
             if current_content and current_subsection:
                 chunks.append({
@@ -246,7 +257,6 @@ def parse_markdown_chunks(md_path: Path) -> list[dict]:
             "category":   infer_category_from_section(current_section),
         })
     return [c for c in chunks if len(c["content"]) > 50]
-
 
 def upsert_chunk(
     db: sqlite3.Connection,
@@ -454,7 +464,7 @@ def check_and_sync(md_path: Path = MARKDOWN_PATH) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════
-# TOOLS — Classe BaseTool (format CrewAI moderne) 
+# TOOLS — Classe BaseTool (format CrewAI moderne) |  
 # ══════════════════════════════════════════════════════════════
 
 class RetrieveMemoryInput(BaseModel):

@@ -20,7 +20,7 @@ The core of the project. Everything else builds on top of it.
 - [x] CTRL+C protection via `finally` + orphaned session recovery
 - [x] Unicode surrogate sanitization (Ollama bug)
 - [x] Separate YAML per crew (CrewAI KeyError fix)
-- [x] Ollama Modelfile with `num_ctx 8192`
+- [x] Ollama Modelfile with `num_ctx 8192` (`num_ctx 16 384`)
 
 ---
 
