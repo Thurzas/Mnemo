@@ -11,7 +11,10 @@ dependencies = [
     "numpy>=1.26.0", 
     "python-dotenv>=1.0.0", 
 ]
-
+[tool.pytest.ini_options]
+markers = [
+    "ollama: tests nécessitant Ollama + nomic-embed-text en fonctionnement",
+]
 [project.scripts]
 Mnemo = "Mnemo.main:run"
 run_crew = "Mnemo.main:run"

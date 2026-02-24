@@ -103,6 +103,9 @@ def importance_score(category: str, weight: float | None = None) -> float:
 # ══════════════════════════════════════════════════════════════
 
 def search_keyword(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH) -> list[dict]:
+    # FTS5 plante sur une query vide ou composée uniquement d'espaces
+    if not query or not query.strip():
+        return []
     rows = db.execute("""
         SELECT c.id, c.section, c.subsection, c.content,
                bm25(chunks_fts) as score,
@@ -112,7 +115,7 @@ def search_keyword(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH
         WHERE chunks_fts MATCH ?
         ORDER BY score
         LIMIT ?
-    """, (query, top_k)).fetchall()
+    """, (query.strip(), top_k)).fetchall()
     return [{
         "id": r[0], "section": r[1], "subsection": r[2], "content": r[3],
         "score_fts": abs(r[4]),
