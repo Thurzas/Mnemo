@@ -4,7 +4,7 @@ Welcome to the Mnemo Crew project, powered by [crewAI](https://crewai.com). This
 
 ## What is Mnemo ?
 
-It's an assembly of crews, each with its own objective: the conversational crew can search two types of memory: short-term, session-based, and long-term, based on a Markdown file with a database for indexing.
+It's an assembly of crews, each with its own objective: the conversational crew can search two types of memory: short-term, session-based, and long-term, based on a Markdown file with a database for indexing. I'm using FTS5 as a search engine for vectors and key word.
 
 The consolidation crew is used to synchronize and maintain the database and the Markdown file.
 
