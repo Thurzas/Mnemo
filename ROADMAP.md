@@ -28,22 +28,22 @@ The core of the project. Everything else builds on top of it.
 
 Make the system reliable over time before adding new features.
 
-- [ ] **Level 1 unit tests** — low-level building blocks without LLM
-  - [ ] `parse_markdown_chunks` — correct splitting of `##` / `###`
-  - [ ] `compute_hash` — determinism and change sensitivity
-  - [ ] `update_markdown_section` — upsert without duplication, neighboring sections intact
-  - [ ] `sync_markdown_to_db` — chunk addition, update, deletion
-  - [ ] `load_session_json` — handle empty, corrupted, or missing files
-  - [ ] `freshness_score` / `importance_score` — correct values and decay behavior
-- [ ] **Level 2 tests** — hybrid retrieval (with Ollama, without reasoning LLM)
-  - [ ] Manual chunk insertion → verify top-1 retrieval result
-  - [ ] Short query → adaptive_weights switches to keyword mode
-  - [ ] Empty query → no crash
-- [ ] **Level 3 tests** — full session cycle (without LLM)
-  - [ ] `update_session_memory` × N → correct accumulation
-  - [ ] Empty session scenario → "nothing to consolidate" without crash
-- [ ] Add a `CONTRIBUTING.md` and GitHub issue templates
-- [ ] Support for CrewAI `knowledge/` as an optional documentation layer  
+- [x] **Level 1 unit tests** — low-level building blocks without LLM
+  - [x] `parse_markdown_chunks` — correct splitting of `##` / `###`
+  - [x] `compute_hash` — determinism and change sensitivity
+  - [x] `update_markdown_section` — upsert without duplication, neighboring sections intact
+  - [x] `sync_markdown_to_db` — chunk addition, update, deletion
+  - [x] `load_session_json` — handle empty, corrupted, or missing files
+  - [x] `freshness_score` / `importance_score` — correct values and decay behavior
+- [x] **Level 2 tests** — hybrid retrieval (with Ollama, without reasoning LLM)
+  - [x] Manual chunk insertion → verify top-1 retrieval result
+  - [x] Short query → adaptive_weights switches to keyword mode
+  - [x] Empty query → no crash
+- [x] **Level 3 tests** — full session cycle (without LLM)
+  - [x] `update_session_memory` × N → correct accumulation
+  - [x] Empty session scenario → "nothing to consolidate" without crash
+- [x] Add a `CONTRIBUTING.md` and GitHub issue templates
+- [?] Support for CrewAI `knowledge/` as an optional documentation layer  
   *(static, factual — distinct from episodic `memory.md` memory)*
 
 ---
