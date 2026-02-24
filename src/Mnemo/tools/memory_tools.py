@@ -35,7 +35,7 @@ CATEGORY_WEIGHTS: dict[str, float] = {
 
 
 # ══════════════════════════════════════════════════════════════
-# Sanitization
+# Sanitization | Nettoyage de texte pour éviter les problèmes d'encodage
 # ══════════════════════════════════════════════════════════════
 
 def sanitize_str(text: str) -> str:
@@ -46,7 +46,7 @@ TOP_K_FINAL  = 5
 
 
 # ══════════════════════════════════════════════════════════════
-# Helpers bas niveau
+# Helpers bas niveau | Low level helpers
 # ══════════════════════════════════════════════════════════════
 
 def get_db() -> sqlite3.Connection:
@@ -71,7 +71,7 @@ def build_chunk_text(section: str, subsection: str, content: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# Pondération — fraîcheur & importance
+# Pondération — fraîcheur & importance | Weighting — freshness & importance
 # ══════════════════════════════════════════════════════════════
 
 def freshness_score(updated_at: str, half_life_days: float = HALF_LIFE_DAYS) -> float:
@@ -99,7 +99,7 @@ def importance_score(category: str, weight: float | None = None) -> float:
 
 
 # ══════════════════════════════════════════════════════════════
-# Retrieval hybride
+# Retrieval hybride | récupération hybride keyword + vectorielle + fusion adaptative (RRF)
 # ══════════════════════════════════════════════════════════════
 
 def search_keyword(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH) -> list[dict]:
@@ -190,7 +190,7 @@ def format_chunks_for_prompt(chunks: list[dict]) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# Markdown helpers
+# Markdown helpers | Helpers pour le parsing et l'upsert dans le Markdown
 # ══════════════════════════════════════════════════════════════
 
 # Mapping section → catégorie pour l'inférence lors du parsing Markdown
@@ -351,7 +351,7 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
 
 
 # ══════════════════════════════════════════════════════════════
-# Session helpers
+# Session helpers | Helpers pour la mémoire spécifique à une session (historique, entités, faits extraits)
 # ══════════════════════════════════════════════════════════════
 
 def load_session_json(session_id: str) -> dict:
@@ -386,7 +386,7 @@ def update_session_memory(session_id: str, user_message: str, agent_response: st
 
 
 # ══════════════════════════════════════════════════════════════
-# Détection de modification du Markdown + cohérence DB
+# Détection de modification du Markdown + cohérence DB | Detection of Markdown changes + DB consistency
 # ══════════════════════════════════════════════════════════════
 
 def get_file_hash(path: Path) -> str:
@@ -454,7 +454,7 @@ def check_and_sync(md_path: Path = MARKDOWN_PATH) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════
-# TOOLS — Classe BaseTool (format CrewAI moderne)
+# TOOLS — Classe BaseTool (format CrewAI moderne) 
 # ══════════════════════════════════════════════════════════════
 
 class RetrieveMemoryInput(BaseModel):

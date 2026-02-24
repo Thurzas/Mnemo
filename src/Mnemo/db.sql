@@ -26,6 +26,11 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(
     tokenize = "unicode61"  -- gère les accents
 );
 
+CREATE TABLE IF NOT EXISTS 'chunks_fts_data'(id INTEGER PRIMARY KEY, block BLOB);
+CREATE TABLE IF NOT EXISTS 'chunks_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS 'chunks_fts_content'(id INTEGER PRIMARY KEY, c0, c1, c2, c3);
+CREATE TABLE IF NOT EXISTS 'chunks_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+CREATE TABLE IF NOT EXISTS 'chunks_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID;
 -- Sessions : lien entre JSON de session et faits persistés
 CREATE TABLE sessions (
     id           TEXT PRIMARY KEY,  -- session_id du JSON
@@ -44,7 +49,13 @@ CREATE TABLE session_facts (
     persisted   INTEGER DEFAULT 0,  -- 0 = en attente, 1 = écrit dans le Markdown
     chunk_id    TEXT REFERENCES chunks(id)  -- rempli après consolidation
 );
-
+CREATE TABLE sqlite_sequence(name,seq);
+CREATE TABLE file_state (
+            path        TEXT PRIMARY KEY,
+            mtime       REAL NOT NULL,       -- os.stat().st_mtime
+            file_hash   TEXT NOT NULL,       -- MD5 du contenu complet du fichier
+            synced_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
 
 --**La logique derrière :**
 --**`chunks.id` = hash du contenu** — c'est le mécanisme de sync. Au re-scan du Markdown, si le hash d'un `###` n'a pas changé, tu ne re-vectorises pas. Ça évite des appels API inutiles.

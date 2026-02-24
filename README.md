@@ -2,6 +2,12 @@
 
 Welcome to the Mnemo Crew project, powered by [crewAI](https://crewai.com). This template is designed to help you set up a multi-agent AI system with ease, leveraging the powerful and flexible framework provided by crewAI. Our goal is to enable your agents to collaborate effectively on complex tasks, maximizing their collective intelligence and capabilities.
 
+## What is Mnemo ?
+
+It's an assembly of crews, each with its own objective: the conversational crew can search two types of memory: short-term, session-based, and long-term, based on a Markdown file with a database for indexing.
+
+The consolidation crew is used to synchronize and maintain the database and the Markdown file.
+
 ## Installation
 
 Ensure you have Python >=3.10 <3.13 installed on your system. This project uses [UV](https://docs.astral.sh/uv/) for dependency management and package handling, offering a seamless setup and execution experience.
