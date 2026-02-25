@@ -195,6 +195,158 @@ def extract_text_pages(path: Path) -> list[dict]:
 
 
 # ══════════════════════════════════════════════════════════════
+# Extraction Code source
+# ══════════════════════════════════════════════════════════════
+
+# Mapping extension → langage (pour le header des chunks et la détection)
+CODE_EXTENSIONS: dict[str, str] = {
+    ".py":   "python",
+    ".js":   "javascript",
+    ".ts":   "typescript",
+    ".c":    "c",
+    ".cpp":  "cpp",
+    ".h":    "c_header",
+    ".cs":   "csharp",
+    ".java": "java",
+    ".sh":   "bash",
+    ".bash": "bash",
+    ".ps1":  "powershell",
+}
+
+# Patterns regex de début de fonction/classe par langage
+_FUNC_PATTERNS: dict[str, str] = {
+    "javascript":  r"^(export\s+)?(async\s+)?function\s+\w+|^(export\s+)?const\s+\w+\s*=\s*(async\s+)?\(",
+    "typescript":  r"^(export\s+)?(async\s+)?function\s+\w+|^(export\s+)?const\s+\w+\s*=\s*(async\s+)?\(",
+    "c":           r"^\w[\w\s\*]+\s+\w+\s*\(",
+    "cpp":         r"^\w[\w\s\*:<>]+\s+\w+\s*\(",
+    "c_header":    r"^\w[\w\s\*:<>]+\s+\w+\s*\(",
+    "csharp":      r"^\s*(public|private|protected|internal|static|override|virtual|async).*\s+\w+\s*\(",
+    "java":        r"^\s*(public|private|protected|static|final|abstract|synchronized).*\s+\w+\s*\(",
+    "bash":        r"^\w[\w\-]*\s*\(\s*\)|^function\s+\w+",
+    "powershell":  r"^function\s+\w+",
+}
+
+
+def _split_by_ast(source: str, filename: str) -> list[str]:
+    """
+    Découpe un fichier Python en chunks par fonction/classe via l'AST.
+    Retourne une liste de strings, chacune étant une fonction ou classe complète.
+    Les toplevel statements hors fonctions/classes sont regroupés en un bloc 'module'.
+    Note : pas de seuil MIN_CHUNK_LEN ici — une fonction de 2 lignes est un chunk valide.
+    """
+    import ast as _ast
+
+    try:
+        tree = _ast.parse(source)
+    except SyntaxError:
+        # Si l'AST échoue, on revient sur le découpage par lignes
+        return _split_by_lines(source)
+
+    lines   = source.splitlines()
+    chunks  = []
+    covered = set()  # lignes déjà dans un chunk
+
+    # Seulement les noeuds de premier niveau (pas les méthodes imbriquées dans classes)
+    for node in _ast.iter_child_nodes(tree):
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)):
+            start = node.lineno - 1
+            end   = node.end_lineno
+            block = chr(10).join(lines[start:end]).strip()
+            if block:
+                chunks.append(block)
+            covered.update(range(start, end))
+
+    # Lignes hors fonctions/classes → bloc "module level"
+    orphan_lines = [l for i, l in enumerate(lines) if i not in covered]
+    orphan_text  = chr(10).join(orphan_lines).strip()
+    if orphan_text:
+        chunks.append(orphan_text)
+
+    return chunks if chunks else _split_by_lines(source)
+
+
+def _split_by_regex(source: str, language: str) -> list[str]:
+    """
+    Découpe un fichier source en chunks en détectant les débuts de
+    fonctions/classes via regex. Universel pour les langages non-Python.
+    Note : pas de seuil MIN_CHUNK_LEN ici — chaque fonction est un chunk valide.
+    """
+    import re as _re
+
+    pattern = _FUNC_PATTERNS.get(language)
+    if not pattern:
+        return _split_by_lines(source)
+
+    lines   = source.splitlines()
+    chunks  = []
+    current = []
+
+    for line in lines:
+        if current and _re.match(pattern, line):
+            block = chr(10).join(current).strip()
+            if block:
+                chunks.append(block)
+            current = [line]
+        else:
+            current.append(line)
+
+    if current:
+        block = chr(10).join(current).strip()
+        if block:
+            chunks.append(block)
+
+    return chunks if chunks else _split_by_lines(source)
+
+
+def _split_by_lines(source: str, lines_per_chunk: int = 60) -> list[str]:
+    """Fallback : découpe en blocs de N lignes."""
+    lines  = source.splitlines()
+    chunks = []
+    for i in range(0, len(lines), lines_per_chunk):
+        block = chr(10).join(lines[i:i + lines_per_chunk]).strip()
+        if len(block) >= MIN_CHUNK_LEN:
+            chunks.append(block)
+    return chunks
+
+
+def extract_code_pages(path: Path) -> list[dict]:
+    """
+    Extrait les chunks d'un fichier source.
+    - Python : découpage AST (fonctions + classes)
+    - Autres : découpage regex sur les patterns de fonctions/classes
+    Retourne une liste de dicts {page: int, text: str}.
+    Le "numéro de page" correspond à l'index du chunk dans le fichier.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Fichier introuvable : {path}")
+
+    ext      = path.suffix.lower()
+    language = CODE_EXTENSIONS.get(ext)
+    if not language:
+        raise ValueError(f"Extension non supportée : {ext}")
+
+    source = sanitize_str(path.read_text(encoding="utf-8", errors="ignore"))
+    if not source.strip():
+        return []
+
+    if language == "python":
+        raw_chunks = _split_by_ast(source, path.name)
+    else:
+        raw_chunks = _split_by_regex(source, language)
+
+    # Chaque chunk devient une "page" avec un header indiquant le langage et le fichier
+    pages = []
+    for i, chunk in enumerate(raw_chunks):
+        header = f"# [{language}] {path.name}"
+        pages.append({
+            "page": i + 1,
+            "text": f"{header}\n{chunk}",
+
+        })
+    return pages
+
+
+# ══════════════════════════════════════════════════════════════
 # Chunking
 # ══════════════════════════════════════════════════════════════
 
@@ -470,10 +622,20 @@ def ingest_text(path: Path, db_path: Path = DB_PATH) -> dict:
     return _ingest_pages(path, pages, page_count, mime, db_path)
 
 
+def ingest_code(path: Path, db_path: Path = DB_PATH) -> dict:
+    """Ingère un fichier source dans la base de connaissances."""
+    pages      = extract_code_pages(path)
+    page_count = len(pages)
+    language   = CODE_EXTENSIONS.get(path.suffix.lower(), "code")
+    mime       = f"text/x-{language}"
+    return _ingest_pages(path, pages, page_count, mime, db_path)
+
+
 def ingest_file(path: Path, db_path: Path = DB_PATH) -> dict:
     """
     Dispatcher universel — détecte le format et appelle le bon ingester.
-    Formats supportés : .pdf, .docx, .txt, .md
+    Formats supportés : .pdf, .docx, .txt, .md, .py, .js, .ts,
+                        .c, .cpp, .h, .cs, .java, .sh, .bash, .ps1
     """
     ext = path.suffix.lower()
     if ext == ".pdf":
@@ -482,9 +644,13 @@ def ingest_file(path: Path, db_path: Path = DB_PATH) -> dict:
         return ingest_docx(path, db_path)
     elif ext in (".txt", ".md"):
         return ingest_text(path, db_path)
+    elif ext in CODE_EXTENSIONS:
+        return ingest_code(path, db_path)
     else:
         raise ValueError(
-            f"Format non supporté : {ext}\nFormats acceptés : .pdf, .docx, .txt, .md"
+            f"Format non supporté : {ext}\n"
+            f"Formats acceptés : .pdf, .docx, .txt, .md, "
+            f".py, .js, .ts, .c, .cpp, .h, .cs, .java, .sh, .bash, .ps1"
         )
 
 

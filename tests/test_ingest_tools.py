@@ -640,3 +640,378 @@ class TestSearchDocsKeyword:
     def test_top_k_respecte(self, db_with_doc):
         results = search_docs_keyword(db_with_doc, "tombeau", top_k=1)
         assert len(results) <= 1
+
+# ══════════════════════════════════════════════════════════════
+# extract_text_pages
+# ══════════════════════════════════════════════════════════════
+
+class TestExtractTextPages:
+
+    def test_fichier_inexistant_leve_erreur(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_text_pages
+        with pytest.raises(FileNotFoundError):
+            extract_text_pages(tmp_path / "inexistant.txt")
+
+    def test_extension_non_supportee_leve_erreur(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_text_pages
+        f = tmp_path / "doc.pdf"
+        f.write_text("texte", encoding="utf-8")
+        with pytest.raises(ValueError):
+            extract_text_pages(f)
+
+    def test_fichier_vide_retourne_liste_vide(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_text_pages
+        f = tmp_path / "vide.txt"
+        f.write_text("", encoding="utf-8")
+        assert extract_text_pages(f) == []
+
+    def test_retourne_pages_avec_structure(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_text_pages
+        f = tmp_path / "notes.txt"
+        f.write_text("mot " * 100, encoding="utf-8")
+        pages = extract_text_pages(f)
+        assert len(pages) > 0
+        assert "page" in pages[0]
+        assert "text" in pages[0]
+
+    def test_numerotation_commence_a_1(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_text_pages
+        f = tmp_path / "notes.txt"
+        f.write_text("mot " * 100, encoding="utf-8")
+        pages = extract_text_pages(f)
+        assert pages[0]["page"] == 1
+
+    def test_texte_long_produit_plusieurs_pages(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_text_pages
+        f = tmp_path / "long.txt"
+        f.write_text("mot " * 1200, encoding="utf-8")
+        pages = extract_text_pages(f)
+        assert len(pages) > 1
+
+    def test_markdown_accepte(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_text_pages
+        f = tmp_path / "readme.md"
+        f.write_text("# Titre\n\n" + "mot " * 100, encoding="utf-8")
+        pages = extract_text_pages(f)
+        assert len(pages) > 0
+
+    def test_contenu_preserve(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_text_pages
+        f = tmp_path / "notes.txt"
+        f.write_text("mnemo assistant personnel " * 20, encoding="utf-8")
+        pages = extract_text_pages(f)
+        all_text = " ".join(p["text"] for p in pages)
+        assert "mnemo" in all_text
+
+
+# ══════════════════════════════════════════════════════════════
+# extract_docx_pages
+# ══════════════════════════════════════════════════════════════
+
+class TestExtractDocxPages:
+
+    def _make_docx(self, tmp_path, paragraphs: list[str], heading: str = None) -> Path:
+        """Crée un DOCX minimal avec python-docx."""
+        pytest.importorskip("docx")
+        import docx as python_docx
+        doc  = python_docx.Document()
+        if heading:
+            doc.add_heading(heading, level=1)
+        for p in paragraphs:
+            doc.add_paragraph(p)
+        path = tmp_path / "test.docx"
+        doc.save(str(path))
+        return path
+
+    def test_fichier_inexistant_leve_erreur(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_docx_pages
+        with pytest.raises(FileNotFoundError):
+            extract_docx_pages(tmp_path / "inexistant.docx")
+
+    def test_extension_non_supportee_leve_erreur(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_docx_pages
+        f = tmp_path / "doc.txt"
+        f.write_text("x")
+        with pytest.raises(ValueError):
+            extract_docx_pages(f)
+
+    def test_docx_simple_retourne_pages(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_docx_pages
+        path = self._make_docx(tmp_path, ["mot " * 100, "mot " * 100])
+        pages = extract_docx_pages(path)
+        assert len(pages) > 0
+
+    def test_contenu_preserve(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_docx_pages
+        path = self._make_docx(tmp_path, ["Mnemo est un assistant personnel avec mémoire hybride. " * 10])
+        pages = extract_docx_pages(path)
+        all_text = " ".join(p["text"] for p in pages)
+        assert "Mnemo" in all_text
+
+    def test_heading_prefixe_avec_diese(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_docx_pages
+        path = self._make_docx(tmp_path, ["Contenu " * 20], heading="Introduction")
+        pages = extract_docx_pages(path)
+        all_text = " ".join(p["text"] for p in pages)
+        assert "#" in all_text
+
+    def test_style_none_ne_crash_pas(self, tmp_path):
+        """Un paragraphe avec style=None ne doit pas faire planter l'extraction."""
+        pytest.importorskip("docx")
+        import docx as python_docx
+        from Mnemo.tools.ingest_tools import extract_docx_pages
+        doc  = python_docx.Document()
+        para = doc.add_paragraph("Paragraphe sans style explicite " * 10)
+        para.style = None  # Simule le cas réel du bug corrigé
+        path = tmp_path / "nostyle.docx"
+        doc.save(str(path))
+        # Ne doit pas lever AttributeError
+        pages = extract_docx_pages(path)
+        assert isinstance(pages, list)
+
+    def test_numerotation_commence_a_1(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_docx_pages
+        path = self._make_docx(tmp_path, ["mot " * 600])
+        pages = extract_docx_pages(path)
+        assert pages[0]["page"] == 1
+
+
+# ══════════════════════════════════════════════════════════════
+# extract_code_pages — AST Python
+# ══════════════════════════════════════════════════════════════
+
+SAMPLE_PYTHON = '''import os
+from pathlib import Path
+
+CONSTANT = 42
+
+
+def fonction_simple(x: int) -> int:
+    """Une fonction simple."""
+    return x * 2
+
+
+def autre_fonction(a, b):
+    return a + b
+
+
+class MaClasse:
+    def __init__(self):
+        self.value = 0
+
+    def methode(self):
+        return self.value
+'''
+
+SAMPLE_JS = '''const CONFIG = { debug: false };
+
+function fetchData(url) {
+    return fetch(url).then(r => r.json());
+}
+
+async function processData(data) {
+    const result = await transform(data);
+    return result;
+}
+
+const helper = (x) => x * 2;
+'''
+
+
+class TestExtractCodePagesAST:
+
+    def test_fichier_inexistant_leve_erreur(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        with pytest.raises(FileNotFoundError):
+            extract_code_pages(tmp_path / "inexistant.py")
+
+    def test_extension_non_supportee_leve_erreur(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "doc.rb"
+        f.write_text("puts 'hello'")
+        with pytest.raises(ValueError):
+            extract_code_pages(f)
+
+    def test_fichier_vide_retourne_liste_vide(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "empty.py"
+        f.write_text("")
+        assert extract_code_pages(f) == []
+
+    def test_python_retourne_pages(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "code.py"
+        f.write_text(SAMPLE_PYTHON)
+        pages = extract_code_pages(f)
+        assert len(pages) > 0
+
+    def test_python_detecte_fonctions(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "code.py"
+        f.write_text(SAMPLE_PYTHON)
+        pages = extract_code_pages(f)
+        all_text = " ".join(p["text"] for p in pages)
+        assert "fonction_simple" in all_text
+        assert "autre_fonction" in all_text
+
+    def test_python_detecte_classes(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "code.py"
+        f.write_text(SAMPLE_PYTHON)
+        pages = extract_code_pages(f)
+        all_text = " ".join(p["text"] for p in pages)
+        assert "MaClasse" in all_text
+
+    def test_header_contient_langage_et_fichier(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "mon_code.py"
+        f.write_text(SAMPLE_PYTHON)
+        pages = extract_code_pages(f)
+        assert any("python" in p["text"] for p in pages)
+        assert any("mon_code.py" in p["text"] for p in pages)
+
+    def test_python_syntaxe_invalide_fallback_lignes(self, tmp_path):
+        """Un fichier Python invalide ne doit pas crasher — fallback par lignes."""
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "broken.py"
+        f.write_text("def cassé(\n    # fin abrupte\n" + "x = 1\n" * 60)
+        pages = extract_code_pages(f)
+        assert isinstance(pages, list)
+
+    def test_numerotation_commence_a_1(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "code.py"
+        f.write_text(SAMPLE_PYTHON)
+        pages = extract_code_pages(f)
+        assert pages[0]["page"] == 1
+
+
+# ══════════════════════════════════════════════════════════════
+# extract_code_pages — Regex (JS, TS, Java, etc.)
+# ══════════════════════════════════════════════════════════════
+
+class TestExtractCodePagesRegex:
+
+    def test_javascript_detecte_fonctions(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "app.js"
+        f.write_text(SAMPLE_JS)
+        pages = extract_code_pages(f)
+        all_text = " ".join(p["text"] for p in pages)
+        assert "fetchData" in all_text
+
+    def test_typescript_accepte(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        ts_code = "function greet(name: string): string {\n    return `Hello ${name}`;\n}\n" * 5
+        f = tmp_path / "app.ts"
+        f.write_text(ts_code)
+        pages = extract_code_pages(f)
+        assert len(pages) > 0
+
+    def test_shell_accepte(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        sh_code = "#!/bin/bash\n\nsetup() {\n    echo 'setup'\n}\n\n" + "echo test\n" * 30
+        f = tmp_path / "deploy.sh"
+        f.write_text(sh_code)
+        pages = extract_code_pages(f)
+        assert len(pages) > 0
+
+    def test_header_contient_bon_langage(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        f = tmp_path / "app.js"
+        f.write_text(SAMPLE_JS)
+        pages = extract_code_pages(f)
+        assert any("javascript" in p["text"] for p in pages)
+
+    def test_c_accepte(self, tmp_path):
+        from Mnemo.tools.ingest_tools import extract_code_pages
+        c_code = "#include <stdio.h>\n\nint main(int argc, char* argv[]) {\n    printf('hello');\n    return 0;\n}\n" + "// comment\n" * 30
+        f = tmp_path / "main.c"
+        f.write_text(c_code)
+        pages = extract_code_pages(f)
+        assert len(pages) > 0
+
+
+# ══════════════════════════════════════════════════════════════
+# ingest_file — dispatcher
+# ══════════════════════════════════════════════════════════════
+
+class TestIngestFileDispatcher:
+
+    @pytest.fixture(autouse=True)
+    def mock_ingesters(self):
+        """Mock tous les ingesters pour tester uniquement le dispatch."""
+        fake_result = {"status": "ingested", "doc_id": "x", "filename": "x", "pages": 1, "chunks": 1}
+        with patch("Mnemo.tools.ingest_tools.ingest_pdf",   return_value=fake_result) as mock_pdf, \
+             patch("Mnemo.tools.ingest_tools.ingest_docx",  return_value=fake_result) as mock_docx, \
+             patch("Mnemo.tools.ingest_tools.ingest_text",  return_value=fake_result) as mock_text, \
+             patch("Mnemo.tools.ingest_tools.ingest_code",  return_value=fake_result) as mock_code:
+            self.mock_pdf  = mock_pdf
+            self.mock_docx = mock_docx
+            self.mock_text = mock_text
+            self.mock_code = mock_code
+            yield
+
+    def test_pdf_appelle_ingest_pdf(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file
+        f = tmp_path / "doc.pdf"
+        f.write_bytes(b"x")
+        ingest_file(f)
+        self.mock_pdf.assert_called_once()
+
+    def test_docx_appelle_ingest_docx(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file
+        f = tmp_path / "doc.docx"
+        f.write_bytes(b"x")
+        ingest_file(f)
+        self.mock_docx.assert_called_once()
+
+    def test_txt_appelle_ingest_text(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file
+        f = tmp_path / "notes.txt"
+        f.write_text("x")
+        ingest_file(f)
+        self.mock_text.assert_called_once()
+
+    def test_md_appelle_ingest_text(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file
+        f = tmp_path / "readme.md"
+        f.write_text("x")
+        ingest_file(f)
+        self.mock_text.assert_called_once()
+
+    def test_py_appelle_ingest_code(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file
+        f = tmp_path / "script.py"
+        f.write_text("x")
+        ingest_file(f)
+        self.mock_code.assert_called_once()
+
+    def test_js_appelle_ingest_code(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file
+        f = tmp_path / "app.js"
+        f.write_text("x")
+        ingest_file(f)
+        self.mock_code.assert_called_once()
+
+    def test_sh_appelle_ingest_code(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file
+        f = tmp_path / "deploy.sh"
+        f.write_text("x")
+        ingest_file(f)
+        self.mock_code.assert_called_once()
+
+    def test_extension_inconnue_leve_erreur(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file
+        f = tmp_path / "archive.zip"
+        f.write_bytes(b"x")
+        with pytest.raises(ValueError):
+            ingest_file(f)
+
+    def test_toutes_extensions_code_supportees(self, tmp_path):
+        from Mnemo.tools.ingest_tools import ingest_file, CODE_EXTENSIONS
+        for ext in CODE_EXTENSIONS:
+            f = tmp_path / f"test{ext}"
+            f.write_text("x")
+            ingest_file(f)
+        assert self.mock_code.call_count == len(CODE_EXTENSIONS)
