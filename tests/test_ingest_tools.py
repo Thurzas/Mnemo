@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-from waifuclawd.tools.ingest_tools import (
+from Mnemo.tools.ingest_tools import (
     clean_text,
     chunk_text,
     chunk_pages,
@@ -381,16 +381,21 @@ class TestListIngestedDocuments:
     def test_ordre_decroissant_par_date(self, db_file, tmp_path):
         """Le document le plus récent doit apparaître en premier."""
         db = sqlite3.connect(str(db_file))
-        for i, name in enumerate(["ancien.pdf", "recent.pdf"]):
+        # On injecte des timestamps explicites pour ne pas dépendre
+        # de la précision à la seconde de CURRENT_TIMESTAMP SQLite
+        for name, ts in [("ancien.pdf", "2024-01-01 10:00:00"), ("recent.pdf", "2024-06-01 10:00:00")]:
             f = tmp_path / name
-            f.write_bytes(f"contenu {i}".encode())
-            register_document(db, f"hash_{i}", f, 1, 1)
-            db.commit()
+            f.write_bytes(f"contenu {name}".encode())
+            db.execute("""
+                INSERT INTO documents (id, filename, path, mime_type, page_count, chunk_count, ingested_at)
+                VALUES (?, ?, ?, 'application/pdf', 1, 1, ?)
+            """, (f"hash_{name}", name, str(f), ts))
+        db.commit()
         db.close()
 
         result = list_ingested_documents(db_file)
         assert len(result) == 2
-        # Le plus récent (recent.pdf) doit être en premier
+        # Le plus récent (recent.pdf, juin) doit être en premier
         assert result[0]["filename"] == "recent.pdf"
 
 
@@ -412,19 +417,19 @@ class TestExtractPdfPages:
         return mock_reader
 
     def test_fichier_inexistant_leve_erreur(self, tmp_path):
-        from waifuclawd.tools.ingest_tools import extract_pdf_pages
+        from Mnemo.tools.ingest_tools import extract_pdf_pages
         with pytest.raises(FileNotFoundError):
             extract_pdf_pages(tmp_path / "inexistant.pdf")
 
     def test_extension_non_pdf_leve_erreur(self, tmp_path):
-        from waifuclawd.tools.ingest_tools import extract_pdf_pages
+        from Mnemo.tools.ingest_tools import extract_pdf_pages
         f = tmp_path / "doc.docx"
         f.write_bytes(b"x")
         with pytest.raises(ValueError):
             extract_pdf_pages(f)
 
     def test_extraction_retourne_pages_avec_texte(self, tmp_path):
-        from waifuclawd.tools.ingest_tools import extract_pdf_pages, HAS_PYPDF
+        from Mnemo.tools.ingest_tools import extract_pdf_pages, HAS_PYPDF
         if not HAS_PYPDF:
             pytest.skip("pypdf non installé")
 
@@ -432,7 +437,7 @@ class TestExtractPdfPages:
         f.write_bytes(b"x")  # Fichier bidon, on mock le reader
 
         mock_reader = self._make_mock_reader(["Texte de la page 1", "Texte de la page 2", ""])
-        with patch("waifuclawd.tools.ingest_tools.PdfReader", return_value=mock_reader):
+        with patch("Mnemo.tools.ingest_tools.PdfReader", return_value=mock_reader):
             pages = extract_pdf_pages(f)
 
         # La page vide doit être filtrée
@@ -441,7 +446,7 @@ class TestExtractPdfPages:
         assert pages[1]["page"] == 2
 
     def test_pages_vides_filtrees(self, tmp_path):
-        from waifuclawd.tools.ingest_tools import extract_pdf_pages, HAS_PYPDF
+        from Mnemo.tools.ingest_tools import extract_pdf_pages, HAS_PYPDF
         if not HAS_PYPDF:
             pytest.skip("pypdf non installé")
 
@@ -449,13 +454,13 @@ class TestExtractPdfPages:
         f.write_bytes(b"x")
 
         mock_reader = self._make_mock_reader(["", "", ""])
-        with patch("waifuclawd.tools.ingest_tools.PdfReader", return_value=mock_reader):
+        with patch("Mnemo.tools.ingest_tools.PdfReader", return_value=mock_reader):
             pages = extract_pdf_pages(f)
 
         assert pages == []
 
     def test_numerotation_commence_a_1(self, tmp_path):
-        from waifuclawd.tools.ingest_tools import extract_pdf_pages, HAS_PYPDF
+        from Mnemo.tools.ingest_tools import extract_pdf_pages, HAS_PYPDF
         if not HAS_PYPDF:
             pytest.skip("pypdf non installé")
 
@@ -463,7 +468,7 @@ class TestExtractPdfPages:
         f.write_bytes(b"x")
 
         mock_reader = self._make_mock_reader(["Page A", "Page B"])
-        with patch("waifuclawd.tools.ingest_tools.PdfReader", return_value=mock_reader):
+        with patch("Mnemo.tools.ingest_tools.PdfReader", return_value=mock_reader):
             pages = extract_pdf_pages(f)
 
         assert pages[0]["page"] == 1
@@ -485,7 +490,7 @@ class TestIngestPdfPipeline:
     def mock_embed(self):
         """Mock embed() pour retourner un vecteur aléatoire fixe."""
         import numpy as np
-        with patch("waifuclawd.tools.ingest_tools.embed",
+        with patch("Mnemo.tools.ingest_tools.embed",
                    return_value=np.ones(768, dtype=np.float32)):
             yield
 
@@ -496,9 +501,9 @@ class TestIngestPdfPipeline:
             {"page": 1, "text": "mot " * 200},
             {"page": 2, "text": "mot " * 200},
         ]
-        with patch("waifuclawd.tools.ingest_tools.extract_pdf_pages",
+        with patch("Mnemo.tools.ingest_tools.extract_pdf_pages",
                    return_value=fake_pages), \
-             patch("waifuclawd.tools.ingest_tools.get_pdf_page_count",
+             patch("Mnemo.tools.ingest_tools.get_pdf_page_count",
                    return_value=2):
             yield
 
@@ -563,7 +568,7 @@ class TestIngestPdfPipeline:
     def test_pdf_vide_retourne_status_empty(self, db_file, tmp_path):
         f = tmp_path / "vide.pdf"
         f.write_bytes(b"contenu")
-        with patch("waifuclawd.tools.ingest_tools.extract_pdf_pages", return_value=[]):
+        with patch("Mnemo.tools.ingest_tools.extract_pdf_pages", return_value=[]):
             result = ingest_pdf(f, db_path=db_file)
         assert result["status"] == "empty"
         assert result["chunks"] == 0

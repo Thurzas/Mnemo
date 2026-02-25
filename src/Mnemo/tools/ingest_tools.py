@@ -176,9 +176,12 @@ def upsert_doc_chunk(
 ) -> None:
     """
     Insère un chunk de document dans doc_chunks + doc_embeddings + doc_chunks_fts.
-    Le chunk_id est le MD5 du contenu — idempotent.
+    Le chunk_id est le MD5 de (doc_id + page + chunk_index + contenu) —
+    garantit l'unicité même si deux passages du document ont le même texte.
     """
-    chunk_id = compute_hash(chunk["content"])
+    # BUG CORRIGÉ : hash sur contenu seul → collision si même texte apparaît
+    # deux fois dans le document (ex: headers répétés, formules identiques)
+    chunk_id = compute_hash(f"{doc_id}:{chunk['page']}:{chunk['chunk_index']}:{chunk['content']}")
 
     # Idempotence — on ne réinsère pas un chunk identique
     if db.execute("SELECT 1 FROM doc_chunks WHERE id = ?", (chunk_id,)).fetchone():

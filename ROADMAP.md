@@ -53,7 +53,7 @@ Make the system reliable over time before adding new features.
 Give Mnemo the ability to perceive its environment beyond typed text.
 
 - [ ] **File ingestion**
-  - [ ] PDF → text extraction + chunking → long-term memory injection
+  - [X] PDF → text extraction + chunking → long-term memory injection
   - [ ] DOCX, TXT, Markdown
   - [ ] Source code (with language detection)
 - [ ] **Temporal awareness**
