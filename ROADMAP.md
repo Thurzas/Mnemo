@@ -54,7 +54,7 @@ Give Mnemo the ability to perceive its environment beyond typed text.
 
 - [ ] **File ingestion**
   - [x] PDF → text extraction + chunking → long-term memory injection
-  - [ ] DOCX, TXT, Markdown
+  - [x] DOCX, TXT, Markdown
   - [ ] Source code (with language detection)
 - [ ] **Temporal awareness**
   - [ ] Automatic injection of current date/time into each session
