@@ -3,6 +3,7 @@ import sys
 import json
 import uuid
 import warnings
+from pathlib import Path
 from datetime import datetime
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
@@ -79,7 +80,7 @@ def consolidate_orphan_sessions():
             print(f"   ✅ OK — {summary[:80]}...")
         except Exception as e:
             print(f"   ❌ Échec : {e}")
-            # On marque quand même comme fait pour éviter de boucler indéfiniment
+            # On marque quand même comme done pour éviter de boucler indéfiniment
             (SESSIONS_DIR / f"{session_id}.done").touch()
             print(f"   ↳ Session marquée comme traitée pour ne pas bloquer au prochain démarrage.")
 

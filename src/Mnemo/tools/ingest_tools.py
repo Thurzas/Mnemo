@@ -24,7 +24,7 @@ try:
 except ImportError:
     HAS_PYPDF = False
 
-from waifuclawd.tools.memory_tools import (
+from Mnemo.tools.memory_tools import (
     DB_PATH,
     EMBED_MODEL,
     CATEGORY_WEIGHTS,
@@ -263,8 +263,16 @@ def ingest_pdf(path: Path, db_path: Path = DB_PATH) -> dict:
     chunks = chunk_pages(pages)
 
     # ── Indexation ────────────────────────────────────────────
-    for chunk in chunks:
+    total = len(chunks)
+    for i, chunk in enumerate(chunks, start=1):
         upsert_doc_chunk(db, doc_id, chunk, path.name)
+        # Progression toutes les 10 chunks ou sur le dernier
+        if i % 10 == 0 or i == total:
+            pct = int(i / total * 100)
+            bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
+            print(f"\r   [{bar}] {pct:3d}%  chunk {i}/{total}", end="", flush=True)
+
+    print()  # Saut de ligne final
 
     register_document(db, doc_id, path, page_count, len(chunks))
     db.commit()
