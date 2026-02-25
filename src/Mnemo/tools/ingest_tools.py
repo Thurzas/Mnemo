@@ -1,12 +1,17 @@
 """
 Phase 2 — Ingestion de documents externes.
-Gère l'extraction, le chunking et l'indexation de fichiers PDF dans SQLite.
+Gère l'extraction, le chunking et l'indexation de fichiers PDF, DOCX et TXT/MD.
 
 Séparation volontaire de memory_tools.py :
   - memory_tools → mémoire personnelle (memory.md + chunks)
   - ingest_tools  → documents de référence (doc_chunks)
 
 Les doc_chunks participent au retrieval hybride global via retrieve_all().
+
+Formats supportés :
+  - .pdf  → pypdf      (uv add pypdf)
+  - .docx → python-docx (uv add python-docx)
+  - .txt / .md → lecture directe, chunking par mots
 """
 import hashlib
 import sqlite3
@@ -17,12 +22,18 @@ from typing import Iterator
 
 import numpy as np
 
-# ── Dépendances optionnelles — installées via uv add pypdf ──
+# ── Dépendances optionnelles ─────────────────────────────────
 try:
     from pypdf import PdfReader
     HAS_PYPDF = True
 except ImportError:
     HAS_PYPDF = False
+
+try:
+    import docx as python_docx
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
 
 from Mnemo.tools.memory_tools import (
     DB_PATH,
@@ -75,6 +86,112 @@ def get_pdf_page_count(path: Path) -> int:
     if not HAS_PYPDF:
         raise ImportError("pypdf n'est pas installé. Lance : uv add pypdf")
     return len(PdfReader(str(path)).pages)
+
+
+# ══════════════════════════════════════════════════════════════
+# Extraction DOCX
+# ══════════════════════════════════════════════════════════════
+
+def extract_docx_pages(path: Path) -> list[dict]:
+    """
+    Extrait le texte d'un fichier DOCX : paragraphes, headings et tableaux.
+    Retourne une liste de dicts {page: int, text: str}.
+    Le "numéro de page" est fictif (1 par bloc de ~500 mots) car DOCX
+    n'a pas de notion native de page accessible sans Word.
+    Lève ImportError si python-docx n'est pas installé.
+    """
+    if not HAS_DOCX:
+        raise ImportError("python-docx n'est pas installé. Lance : uv add python-docx")
+    if not path.exists():
+        raise FileNotFoundError(f"Fichier introuvable : {path}")
+    if path.suffix.lower() != ".docx":
+        raise ValueError(f"Format non supporté : {path.suffix} (attendu : .docx)")
+
+    doc    = python_docx.Document(str(path))
+    blocks = []
+
+    # ── Paragraphes et headings ───────────────────────────────
+    for para in doc.paragraphs:
+        text = sanitize_str(para.text.strip())
+        if text:
+            # Préfixe les headings pour préserver la structure sémantique
+            if para.style and para.style.name and para.style.name.startswith("Heading"):
+                level = para.style.name.replace("Heading ", "").strip()
+                text  = f"{'#' * int(level) if level.isdigit() else '#'} {text}"
+            blocks.append(text)
+
+    # ── Tableaux ──────────────────────────────────────────────
+    for table in doc.tables:
+        rows = []
+        for row in table.rows:
+            cells = [sanitize_str(cell.text.strip()) for cell in row.cells if cell.text.strip()]
+            if cells:
+                rows.append(" | ".join(cells))
+        if rows:
+            blocks.append(chr(10).join(rows))
+
+
+
+    if not blocks:
+        return []
+
+    # Regroupe les blocs en "pages" fictives de ~500 mots
+    pages       = []
+    page_num    = 1
+    word_count  = 0
+    page_blocks = []
+    WORDS_PER_FAKE_PAGE = 500
+
+    for block in blocks:
+        page_blocks.append(block)
+        word_count += len(block.split())
+        if word_count >= WORDS_PER_FAKE_PAGE:
+            pages.append({"page": page_num, "text": chr(10).join(page_blocks)})
+
+
+            page_num   += 1
+            word_count  = 0
+            page_blocks = []
+
+    if page_blocks:
+        pages.append({"page": page_num, "text": chr(10).join(page_blocks)})
+
+
+
+    return pages
+
+
+# ══════════════════════════════════════════════════════════════
+# Extraction TXT / Markdown
+# ══════════════════════════════════════════════════════════════
+
+def extract_text_pages(path: Path) -> list[dict]:
+    """
+    Extrait le texte d'un fichier .txt ou .md.
+    Pas de dépendance externe — lecture directe UTF-8.
+    Retourne une liste de dicts {page: int, text: str}
+    en découpant en blocs de ~500 mots (pages fictives).
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Fichier introuvable : {path}")
+    if path.suffix.lower() not in (".txt", ".md"):
+        raise ValueError(f"Format non supporté : {path.suffix} (attendu : .txt ou .md)")
+
+    text = sanitize_str(path.read_text(encoding="utf-8", errors="ignore"))
+    if not text.strip():
+        return []
+
+    # Découpe en blocs de ~500 mots (pages fictives)
+    words               = text.split()
+    WORDS_PER_FAKE_PAGE = 500
+    pages               = []
+    for i in range(0, len(words), WORDS_PER_FAKE_PAGE):
+        chunk_words = words[i:i + WORDS_PER_FAKE_PAGE]
+        pages.append({
+            "page": len(pages) + 1,
+            "text": " ".join(chunk_words),
+        })
+    return pages
 
 
 # ══════════════════════════════════════════════════════════════
@@ -288,6 +405,89 @@ def ingest_pdf(path: Path, db_path: Path = DB_PATH) -> dict:
         "pages":    page_count,
         "chunks":   len(chunks),
     }
+
+
+def _ingest_pages(
+    path: Path,
+    pages: list[dict],
+    page_count: int,
+    mime_type: str,
+    db_path: Path = DB_PATH,
+) -> dict:
+    """
+    Pipeline d'indexation commun à tous les formats.
+    Appelé par ingest_pdf, ingest_docx, ingest_text après extraction.
+    """
+    db     = sqlite3.connect(str(db_path))
+    doc_id = file_hash(path)
+
+    if is_already_ingested(db, doc_id):
+        db.close()
+        return {"status": "already_ingested", "doc_id": doc_id,
+                "filename": path.name, "pages": 0, "chunks": 0}
+
+    if not pages:
+        db.close()
+        return {"status": "empty", "doc_id": doc_id,
+                "filename": path.name, "pages": page_count, "chunks": 0}
+
+    chunks = chunk_pages(pages)
+    total  = len(chunks)
+
+    for i, chunk in enumerate(chunks, start=1):
+        upsert_doc_chunk(db, doc_id, chunk, path.name)
+        if i % 10 == 0 or i == total:
+            pct = int(i / total * 100)
+            bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
+            print(f"\r   [{bar}] {pct:3d}%  chunk {i}/{total}", end="", flush=True)
+
+    print()
+
+    # Surcharge mime_type dans documents pour DOCX/TXT
+    db.execute("""
+        INSERT INTO documents (id, filename, path, mime_type, page_count, chunk_count)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (doc_id, path.name, str(path.resolve()), mime_type, page_count, total))
+    db.commit()
+    db.close()
+
+    return {"status": "ingested", "doc_id": doc_id,
+            "filename": path.name, "pages": page_count, "chunks": total}
+
+
+def ingest_docx(path: Path, db_path: Path = DB_PATH) -> dict:
+    """Ingère un fichier DOCX dans la base de connaissances."""
+    pages      = extract_docx_pages(path)
+    page_count = len(pages)  # pages fictives
+    return _ingest_pages(path, pages, page_count, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", db_path)
+
+
+def ingest_text(path: Path, db_path: Path = DB_PATH) -> dict:
+    """Ingère un fichier TXT ou Markdown dans la base de connaissances."""
+    pages      = extract_text_pages(path)
+    page_count = len(pages)  # pages fictives
+    mime       = "text/markdown" if path.suffix.lower() == ".md" else "text/plain"
+    return _ingest_pages(path, pages, page_count, mime, db_path)
+
+
+def ingest_file(path: Path, db_path: Path = DB_PATH) -> dict:
+    """
+    Dispatcher universel — détecte le format et appelle le bon ingester.
+    Formats supportés : .pdf, .docx, .txt, .md
+    """
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        return ingest_pdf(path, db_path)
+    elif ext == ".docx":
+        return ingest_docx(path, db_path)
+    elif ext in (".txt", ".md"):
+        return ingest_text(path, db_path)
+    else:
+        raise ValueError(
+            f"Format non supporté : {ext}\nFormats acceptés : .pdf, .docx, .txt, .md"
+        )
+
+
 
 
 # ══════════════════════════════════════════════════════════════
