@@ -9,6 +9,7 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 from Mnemo.crew import ConversationCrew, ConsolidationCrew
 from Mnemo.tools.memory_tools import update_session_memory, load_session_json, SESSIONS_DIR, check_and_sync
+from Mnemo.tools.ingest_tools import ingest_pdf, list_ingested_documents
 
 
 # ══════════════════════════════════════════════════════════════
@@ -78,7 +79,7 @@ def consolidate_orphan_sessions():
             print(f"   ✅ OK — {summary[:80]}...")
         except Exception as e:
             print(f"   ❌ Échec : {e}")
-            # On marque quand même comme done pour éviter de boucler indéfiniment
+            # On marque quand même comme fait pour éviter de boucler indéfiniment
             (SESSIONS_DIR / f"{session_id}.done").touch()
             print(f"   ↳ Session marquée comme traitée pour ne pas bloquer au prochain démarrage.")
 
@@ -183,6 +184,61 @@ def test():
 
 
 # ══════════════════════════════════════════════════════════════
+# Commandes Phase 2 — Ingestion de documents
+# ══════════════════════════════════════════════════════════════
+
+def ingest(file_path: str) -> None:
+    """
+    Ingère un fichier PDF dans la base de connaissances.
+    Appelé via : crewai run -- ingest chemin/vers/fichier.pdf
+    Ou directement : python -m Mnemo.main ingest fichier.pdf
+    """
+    path = Path(file_path)
+    if not path.exists():
+        print(f"❌ Fichier introuvable : {file_path}")
+        return
+    if path.suffix.lower() != ".pdf":
+        print(f"❌ Format non supporté : {path.suffix}")
+        print("   Formats supportés : .pdf")
+        return
+
+    print(f"📄 Ingestion de {path.name}...")
+    try:
+        result = ingest_pdf(path)
+    except ImportError as e:
+        print(f"❌ Dépendance manquante : {e}")
+        return
+    except Exception as e:
+        print(f"❌ Erreur lors de l'ingestion : {e}")
+        raise
+
+    if result["status"] == "already_ingested":
+        print(f"ℹ️  {path.name} est déjà dans la base (même contenu). Rien à faire.")
+    elif result["status"] == "empty":
+        print(f"⚠️  {path.name} ne contient pas de texte extractible ({result['pages']} pages).")
+        print("   Le fichier est peut-être scanné (image). OCR non supporté pour l'instant.")
+    else:
+        print(f"✅ Ingestion terminée !")
+        print(f"   Fichier  : {result['filename']}")
+        print(f"   Pages    : {result['pages']}")
+        print(f"   Chunks   : {result['chunks']}")
+        print(f"   ID doc   : {result['doc_id'][:12]}...")
+
+
+def list_docs() -> None:
+    """Affiche la liste des documents ingérés."""
+    docs = list_ingested_documents()
+    if not docs:
+        print("📚 Aucun document ingéré pour l'instant.")
+        print("   Lance : mnemo ingest fichier.pdf")
+        return
+    print(f"📚 {len(docs)} document(s) ingéré(s) :\n")
+    for doc in docs:
+        print(f"  • {doc['filename']}")
+        print(f"    Pages : {doc['pages']} — Chunks : {doc['chunks']} — Ingéré le : {doc['ingested_at'][:10]}")
+
+
+# ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -192,5 +248,15 @@ if __name__ == "__main__":
             replay()
         elif sys.argv[1] == "test":
             test()
+        elif sys.argv[1] == "ingest":
+            if len(sys.argv) < 3:
+                print("Usage : python -m Mnemo.main ingest <fichier.pdf>")
+            else:
+                ingest(sys.argv[2])
+        elif sys.argv[1] == "docs":
+            list_docs()
+        else:
+            print(f"Commande inconnue : {sys.argv[1]}")
+            print("Commandes disponibles : run, train, replay, test, ingest, docs")
     else:
         run()

@@ -68,6 +68,48 @@ def init_db():
             file_hash   TEXT NOT NULL,       -- MD5 du contenu complet du fichier
             synced_at   DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        -- ── Phase 2 : Ingestion de documents externes ─────────────────
+        -- Catalogue des fichiers ingérés (PDF, DOCX...)
+        -- Permet d'éviter la double ingestion si le fichier n'a pas changé
+        CREATE TABLE IF NOT EXISTS documents (
+            id          TEXT PRIMARY KEY,    -- MD5 du contenu du fichier
+            filename    TEXT NOT NULL,       -- nom original (ex: rapport.pdf)
+            path        TEXT NOT NULL,       -- chemin absolu au moment de l'ingestion
+            mime_type   TEXT NOT NULL,       -- ex: application/pdf
+            page_count  INTEGER,             -- nb de pages (PDF) ou NULL
+            chunk_count INTEGER DEFAULT 0,   -- nb de chunks produits
+            ingested_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Chunks issus des documents (séparés de la mémoire personnelle)
+        -- Participent au retrieval hybride comme les chunks normaux
+        CREATE TABLE IF NOT EXISTS doc_chunks (
+            id               TEXT PRIMARY KEY,
+            doc_id           TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            page             INTEGER,         -- numéro de page source
+            chunk_index      INTEGER,         -- position dans le document
+            content          TEXT NOT NULL,
+            importance_weight REAL DEFAULT 1.0,
+            category         TEXT DEFAULT 'connaissance',
+            created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Embeddings des doc_chunks (même structure que pour les chunks mémoire)
+        CREATE TABLE IF NOT EXISTS doc_embeddings (
+            chunk_id    TEXT PRIMARY KEY REFERENCES doc_chunks(id) ON DELETE CASCADE,
+            model       TEXT NOT NULL,
+            vector      BLOB NOT NULL,
+            dim         INTEGER NOT NULL
+        );
+
+        -- Index FTS5 pour la recherche keyword dans les documents
+        CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(
+            chunk_id UNINDEXED,
+            content,
+            filename,
+            tokenize = "unicode61"
+        );
     """)
     db.commit()
     db.close()
@@ -88,6 +130,38 @@ def migrate_db():
             mtime       REAL NOT NULL,
             file_hash   TEXT NOT NULL,
             synced_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        # Phase 2 — tables documents
+        """CREATE TABLE IF NOT EXISTS documents (
+            id          TEXT PRIMARY KEY,
+            filename    TEXT NOT NULL,
+            path        TEXT NOT NULL,
+            mime_type   TEXT NOT NULL,
+            page_count  INTEGER,
+            chunk_count INTEGER DEFAULT 0,
+            ingested_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS doc_chunks (
+            id                TEXT PRIMARY KEY,
+            doc_id            TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            page              INTEGER,
+            chunk_index       INTEGER,
+            content           TEXT NOT NULL,
+            importance_weight REAL DEFAULT 1.0,
+            category          TEXT DEFAULT 'connaissance',
+            created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS doc_embeddings (
+            chunk_id    TEXT PRIMARY KEY REFERENCES doc_chunks(id) ON DELETE CASCADE,
+            model       TEXT NOT NULL,
+            vector      BLOB NOT NULL,
+            dim         INTEGER NOT NULL
+        )""",
+        """CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(
+            chunk_id UNINDEXED,
+            content,
+            filename,
+            tokenize = 'unicode61'
         )""",
     ]
     for sql in migrations:
