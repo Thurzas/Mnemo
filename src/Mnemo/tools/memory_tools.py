@@ -606,3 +606,31 @@ class SyncMemoryDbTool(BaseTool):
     def _run(self, reason: str = "post-write sync") -> str:
         sync_markdown_to_db()
         return f"✓ Synchronisation SQLite terminée ({reason})"
+
+
+class ListDocumentsInput(BaseModel):
+    dummy: str = Field(default="", description="Paramètre non utilisé — appelle sans argument.")
+
+class ListDocumentsTool(BaseTool):
+    name: str = "list_documents"
+    description: str = (
+        "Liste tous les documents ingérés dans la base de connaissances "
+        "(PDF, DOCX, TXT, Markdown, code source). "
+        "À utiliser quand l'utilisateur demande quels documents, livres ou fichiers "
+        "sont disponibles dans la documentation. "
+        "Retourne le titre, le nombre de pages et la date d'ingestion de chaque document."
+    )
+    args_schema: Type[BaseModel] = ListDocumentsInput
+
+    def _run(self, dummy: str = "") -> str:
+        from Mnemo.tools.ingest_tools import list_ingested_documents
+        docs = list_ingested_documents()
+        if not docs:
+            return "Aucun document ingéré pour le moment."
+        lines = ["Documents disponibles dans la base de connaissances :\n"]
+        for d in docs:
+            lines.append(
+                f"- {d['filename']}  "
+                f"({d['pages']} pages · {d['chunks']} chunks · ingéré le {d['ingested_at'][:10]})"
+            )
+        return "\n".join(lines)

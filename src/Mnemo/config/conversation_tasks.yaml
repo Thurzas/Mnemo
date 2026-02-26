@@ -25,8 +25,11 @@ retrieve_task:
 
     1. Si le champ needs_memory est true, utilise l'outil retrieve_memory
        avec le champ memory_query comme query.
-    2. Utilise toujours get_session_memory avec le session_id fourni.
-    3. Retourne UNIQUEMENT un JSON avec cette structure :
+    2. Si l'utilisateur pose une question sur les documents disponibles
+       (quels livres, quels fichiers, quelle documentation), utilise l'outil
+       list_documents pour obtenir le catalogue complet des documents ingérés.
+    3. Utilise toujours get_session_memory avec le session_id fourni.
+    4. Retourne UNIQUEMENT un JSON avec cette structure :
     {
       "long_term_context": "chunks formatés ou null si needs_memory était false",
       "session_context": { ...contenu JSON de la session... },
