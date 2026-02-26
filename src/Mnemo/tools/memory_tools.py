@@ -386,11 +386,15 @@ def _normalize_section(title: str) -> str:
 
 def update_markdown_section(section: str, subsection: str, content: str, md_path: Path = MARKDOWN_PATH, category: str = "connaissance"):
     """Upsert propre d'une sous-section dans le Markdown."""
-    # Sanitize — le memory_writer peut recevoir du texte corrompu du modèle
-    section    = sanitize_str(section)
-    subsection = sanitize_str(subsection)
+    section    = sanitize_str(section).lstrip("#").strip()  # retire les ## accidentels
+    subsection = sanitize_str(subsection).lstrip("#").strip()
     content    = sanitize_str(content)
-    text = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+
+    # Sous-section vide → fallback sur le nom de section pour éviter ### vide
+    if not subsection:
+        subsection = section.split(">")[-1].strip() or "Général"
+
+    text  = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
     lines = text.splitlines()
 
     section_norm = _normalize_section(section)
@@ -417,16 +421,36 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
                 subsection_end = i
                 break
 
-    new_block = [f"### {subsection}", content, ""]
+    # Marqueurs de placeholder — contenu vide sémantiquement, à remplacer
+    PLACEHOLDERS = (
+        "pas encore renseigné",
+        "aucun",
+        "aucune",
+        "pour l'instant",
+        "je dois questionner",
+        "je me demande",
+    )
 
     if in_target_subsection and subsection_start != -1:
-        # Remplace le bloc existant
+        # Récupère le contenu existant (lignes entre ### et le suivant)
+        existing_lines   = lines[subsection_start + 1 : subsection_end]
+        existing_content = "\n".join(existing_lines).strip()
+
+        is_placeholder = not existing_content or any(
+            p in existing_content.lower() for p in PLACEHOLDERS
+        )
+
+        merged    = content if is_placeholder else existing_content + "\n" + content
+        new_block = [f"### {subsection}", merged, ""]
         lines[subsection_start:subsection_end] = new_block
+
     elif section_start != -1:
         # Insère dans la section existante
+        new_block = [f"### {subsection}", content, ""]
         lines.insert(subsection_end, "\n".join(new_block))
     else:
         # Crée la section et sous-section
+        new_block = [f"### {subsection}", content, ""]
         lines += ["", f"## {section}", ""] + new_block
 
     md_path.write_text("\n".join(lines), encoding="utf-8")

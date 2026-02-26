@@ -7,11 +7,13 @@ from pathlib import Path
 from datetime import datetime
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
+# ─────────────────────────────────────────────────────────────
 
 from Mnemo.crew import ConversationCrew, ConsolidationCrew, CuriosityCrew
 from Mnemo.tools.memory_tools import (
     update_session_memory, load_session_json, SESSIONS_DIR,
     check_and_sync, MARKDOWN_PATH, get_db, compute_hash,
+    update_markdown_section, sync_markdown_to_db,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 
@@ -26,27 +28,29 @@ MAX_QUESTIONS = 5
 # Chaque champ est un tuple (aliases[], question, section_cible, subsection_cible)
 # aliases : liste de mots-clés alternatifs — si L'UN d'eux est présent dans la
 # section correspondante, le champ est considéré comme rempli.
-MEMORY_SCHEMA: dict[str, list[tuple[list[str], str, str, str]]] = {
+# Tuple : (aliases, question, section, subsection, label_markdown)
+# La clé du dict doit correspondre au titre ## normalisé dans memory.md.
+# "préférences" ne correspond à aucun ## → regroupé sous "identité utilisateur".
+MEMORY_SCHEMA: dict[str, list[tuple[list[str], str, str, str, str]]] = {
     "identité utilisateur": [
         (["prénom", "nom", "pseudo", "s'appelle", "matt", "name"],
          "Comment tu t'appelles ?",
-         "Identité Utilisateur", "Profil de base"),
+         "Identité Utilisateur", "Profil de base", "Nom/Pseudo"),
         (["profession", "métier", "développeur", "ingénieur", "designer", "travail"],
          "Quelle est ta profession ou ton domaine d'activité ?",
-         "Identité Utilisateur", "Profil de base"),
+         "Identité Utilisateur", "Profil de base", "Métier"),
         (["localisation", "ville", "pays", "france", "paris", "région", "fuseau"],
          "Dans quelle ville ou pays tu te trouves ?",
-         "Identité Utilisateur", "Profil de base"),
-    ],
-    "préférences": [
-        (["style", "réponse", "courte", "détaillée", "verbeux", "concis"],
+         "Identité Utilisateur", "Profil de base", "Localisation"),
+        # Sous "## 🧑 Identité Utilisateur" → ### Préférences & style
+        (["style", "communication", "courte", "détaillée", "verbeux", "concis", "direct"],
          "Tu préfères des réponses courtes et directes, ou détaillées ?",
-         "Identité Utilisateur", "Préférences & style"),
+         "Identité Utilisateur", "Préférences & style", "Style de communication"),
     ],
     "identité agent": [
         (["prénom", "nom", "s'appelle", "mitsune", "mnemo", "assistant"],
          "Comment tu veux appeler l'agent ? Il a un nom ?",
-         "Identité Agent", "Rôle & personnalité définis"),
+         "Identité Agent", "Rôle & personnalité définis", "Nom de l'agent"),
     ],
 }
 
@@ -74,29 +78,67 @@ def _extract_section_content(memory_content: str, section_key: str) -> str:
     return "\n".join(content)
 
 
+# Marqueurs de placeholder — une ligne qui ne contient QUE ça n'est pas une vraie valeur
+_PLACEHOLDER_MARKERS = (
+    "pas encore renseigné",
+    "aucun",
+    "aucune",
+    "pour l'instant",
+    "je dois questionner",
+    "je me demande",
+)
+
+def _line_is_real_value(line: str, alias: str) -> bool:
+    """
+    Retourne True si la ligne contenant l'alias est une vraie valeur,
+    pas juste un label de template ou un placeholder.
+    Exemples :
+      "- **Nom/Pseudo** : pas encore renseigné" → False (label + placeholder)
+      "- **Nom/Pseudo** : Matt"                 → True
+      "Matt, développeur web"                   → True
+    """
+    line_lower = line.lower()
+    # Alias trouvé sur une ligne de placeholder → pas une vraie valeur
+    if any(p in line_lower for p in _PLACEHOLDER_MARKERS):
+        return False
+    # Alias trouvé uniquement dans un label Markdown (entre ** **)
+    # ex: "**Nom/Pseudo**" — si la partie après ":" est vide, pas de valeur
+    if "**" in line_lower:
+        parts = line_lower.split(":", 1)
+        if len(parts) == 2:
+            value_part = parts[1].strip()
+            return bool(value_part) and not any(p in value_part for p in _PLACEHOLDER_MARKERS)
+        return False
+    return True
+
+
 def _detect_structural_gaps(memory_content: str) -> list[dict]:
     """
     Détecte les lacunes structurelles dans memory.md en comparant
     le contenu avec MEMORY_SCHEMA.
     - Cherche les aliases dans la section correspondante (pas dans tout le fichier)
+    - Ignore les matches sur les labels de template (** **) et les placeholders
     - Insensible à la casse et aux emojis
     - Pure Python — aucun LLM, résultat garanti.
     """
+    import re
     gaps = []
 
     for section_key, fields in MEMORY_SCHEMA.items():
-        # Extrait le contenu de la section concernée
         section_content = _extract_section_content(memory_content, section_key)
         section_present = bool(section_content.strip())
 
-        for (aliases, question, sec, subsec) in fields:
+        for (aliases, question, sec, subsec, label) in fields:
             q_id = compute_hash(question)
-            # Le champ est considéré rempli si AU MOINS UN alias est présent
-            # dans le contenu de la section (pas dans tout le fichier)
+            found = False
             if section_present:
-                found = any(alias.lower() in section_content for alias in aliases)
-            else:
-                found = False
+                for line in section_content.splitlines():
+                    for alias in aliases:
+                        if alias.lower() in line and _line_is_real_value(line, alias):
+                            found = True
+                            break
+                    if found:
+                        break
 
             if not found:
                 priority = 1 if not section_present else 2
@@ -105,6 +147,7 @@ def _detect_structural_gaps(memory_content: str) -> list[dict]:
                     "question":   question,
                     "section":    sec,
                     "subsection": subsec,
+                    "label":      label,
                     "priority":   priority,
                     "type":       "structural",
                 })
@@ -168,6 +211,7 @@ def _collect_answers(questions: list[dict]) -> list[dict]:
                 "answer":     raw,
                 "section":    q.get("section", "Connaissances"),
                 "subsection": q.get("subsection", "Général"),
+                "label":      q.get("label", ""),
             })
 
     return answers
@@ -208,8 +252,6 @@ def curiosity_session(session_summary: str) -> None:
     if remaining_slots > 0 and session_summary:
         print("\n🔍 Analyse contextuelle en cours...")
         try:
-            # Le gap_detection_task est maintenant focalisé sur les trous
-            # contextuels — le JSON structurel lui est fourni pour éviter les doublons
             structural_summary = "\n".join(
                 f"- {g['question']}" for g in structural_gaps
             ) or "Aucun trou structurel détecté."
@@ -249,23 +291,36 @@ def curiosity_session(session_summary: str) -> None:
 
     # ── Phase 3 : menu CLI ──
     answers = _collect_answers(all_questions)
+
+    # ── Phase 4 : écriture directe Python — pas de LLM ──
+    # On écrit les réponses directement sans passer par le LLM
+    # pour éviter les hallucinations sur answers_json vide ou mal compris.
     if not answers:
         print("  (Toutes les questions ont été passées)")
         return
 
-    # ── Phase 4 : QuestionnaireAgent reformule + écrit ──
     print("\n✍️  Intégration des réponses dans la mémoire...")
-    try:
-        CuriosityCrew().crew().kickoff(inputs={
-            "memory_content":     memory_content[:6000],
-            "session_summary":    session_summary,
-            "skipped_questions":  skipped_text,
-            "structural_gaps":    "",
-            "answers_json":       json.dumps(answers, ensure_ascii=False, indent=2),
-        })
-        print("  ✅ Réponses intégrées dans memory.md")
-    except Exception as e:
-        print(f"  ❌ Échec de l'intégration : {e}")
+    written = 0
+    for ans in answers:
+        try:
+            label   = ans.get("label", "")
+            raw_ans = ans["answer"]
+            # Formate en ligne structurée si un label est disponible
+            # ex: "- **Localisation** : France"
+            content = f"- **{label}** : {raw_ans}" if label else raw_ans
+            update_markdown_section(
+                section    = ans.get("section", "Identité Utilisateur"),
+                subsection = ans.get("subsection", "Profil de base"),
+                content    = content,
+                category   = "identité",
+            )
+            written += 1
+        except Exception as e:
+            print(f"  ⚠️  Erreur écriture '{ans.get('question', '?')}' : {e}")
+
+    if written:
+        sync_markdown_to_db()
+        print(f"  ✅ {written} réponse(s) intégrée(s) dans memory.md + sync SQLite")
 
 
 
@@ -331,8 +386,7 @@ def end_session(session_id: str) -> str:
         return "Session vide, rien à consolider."
 
     result = ConsolidationCrew().crew().kickoff(inputs={
-        "session_json":       json.dumps(session, ensure_ascii=False, indent=2),
-        "consolidated_facts": "",
+        "session_json": json.dumps(session, ensure_ascii=False, indent=2),
     })
 
     # Marque la session comme consolidée
@@ -393,6 +447,17 @@ def run():
     session_id = new_session_id()
     print(f"\n🧠 Agent démarré — session : {session_id}")
     print("Tape 'exit' pour terminer proprement.\n")
+
+    # Premier lancement — memory.md vierge → questionnaire d'initialisation
+    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
+        if MARKDOWN_PATH.exists() else ""
+    structural_gaps = _detect_structural_gaps(memory_content)
+    skipped_ids     = _get_skipped_questions()
+    unfilled_gaps   = [g for g in structural_gaps if g["id"] not in skipped_ids]
+    if unfilled_gaps:
+        print("👋 Bienvenue ! Avant de commencer, quelques questions pour initialiser ta mémoire.\n")
+        curiosity_session("")
+        print()
 
     try:
         while True:

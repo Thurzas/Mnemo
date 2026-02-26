@@ -22,6 +22,20 @@ gap_detection_task:
     - Une préférence implicite dans la façon de parler qui n'est jamais formulée explicitement
     - Un événement ou deadline mentionné sans qu'on sache s'il est toujours d'actualité
 
+    Pour chaque question, détermine aussi le label et le format d'écriture selon la section cible :
+
+    Sections ATOMIQUES — réponse écrite sous forme "- **Label** : valeur" :
+      "Identité Utilisateur" > "Profil de base"        → labels : Nom/Pseudo, Métier, Localisation, Langue préférée, Fuseau horaire
+      "Identité Utilisateur" > "Préférences & style"   → labels : Style de communication, Ton préféré
+      "Identité Utilisateur" > "Centres d'intérêt"     → labels : libres mais concis
+      "Identité Agent"       > "Rôle & personnalité définis" → labels : Nom de l'agent, Rôle, Personnalité
+
+    Sections NARRATIVES — réponse écrite en prose libre (label vide "") :
+      "Connaissances persistantes" > "Projets en cours"
+      "Connaissances persistantes" > "Décisions prises & leur raison"
+      "Historique des sessions"
+      "Identité Agent" > "Ce que l'agent a appris sur lui-même"
+
     Ne génère pas plus de 3 questions. Si rien de pertinent n'est détectable
     depuis la session, retourne has_gaps: false.
 
@@ -34,6 +48,7 @@ gap_detection_task:
           "question": "Question claire et directe ?",
           "section": "section_cible_dans_memory_md",
           "subsection": "sous_section_cible",
+          "label": "Label markdown si section atomique, sinon chaîne vide",
           "priority": 3
         }
       ]
@@ -44,21 +59,25 @@ gap_detection_task:
 
 write_answers_task:
   description: >
-    L'utilisateur a répondu aux questions suivantes. Pour chaque réponse,
-    reformule-la en fait clair et bien structuré, puis écris-la dans memory.md
-    via l'outil update_markdown_section.
-
-    Questions et réponses collectées :
+    L'utilisateur vient de répondre à des questions sur lui-même.
+    Voici ses réponses au format JSON :
     {answers_json}
 
-    Pour chaque entrée :
-    1. Reformule la réponse brute en fait précis et utile (1-3 phrases max)
-    2. Identifie la section et sous-section appropriées dans memory.md
-    3. Appelle update_markdown_section avec le contenu reformulé
-    4. Après avoir traité toutes les réponses, appelle sync_memory_db
+    Pour chaque entrée dans le JSON :
+    1. Si le champ "label" est présent et non vide, formate le contenu en :
+         - **{label}** : {réponse}
+       Sinon, reformule en prose concise (1-3 phrases).
+    2. Appelle update_markdown_memory avec :
+       - section    : la valeur du champ "section" dans le JSON
+       - subsection : la valeur du champ "subsection" dans le JSON
+       - content    : le contenu formaté selon la règle ci-dessus
+       - category   : déduis-la du contenu (identité | préférence | projet | connaissance)
+    3. Après avoir écrit TOUS les faits, appelle sync_memory_db
 
-    Ne pas traiter les réponses vides ou les "passer".
-    Être concis — un fait par réponse, pas de paraphrase inutile.
+    RÈGLES :
+    - Ne jamais inclure ## ou ### dans section ou subsection
+    - Ne jamais inventer de contenu non présent dans les réponses
+    - Si une réponse est vide ou "passer", l'ignorer complètement
   expected_output: >
     Confirmation que chaque réponse a été écrite dans memory.md et que
     la synchronisation SQLite a été déclenchée.
