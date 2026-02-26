@@ -8,12 +8,12 @@ from datetime import datetime
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
-from waifuclawd.crew import ConversationCrew, ConsolidationCrew, CuriosityCrew
-from waifuclawd.tools.memory_tools import (
+from Mnemo.crew import ConversationCrew, ConsolidationCrew, CuriosityCrew
+from Mnemo.tools.memory_tools import (
     update_session_memory, load_session_json, SESSIONS_DIR,
     check_and_sync, MARKDOWN_PATH, get_db, compute_hash,
 )
-from waifuclawd.tools.ingest_tools import ingest_file, list_ingested_documents
+from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 
 
 # ══════════════════════════════════════════════════════════════
@@ -21,6 +21,91 @@ from waifuclawd.tools.ingest_tools import ingest_file, list_ingested_documents
 # ══════════════════════════════════════════════════════════════
 
 MAX_QUESTIONS = 5
+
+# Schéma de référence : section → liste de champs attendus
+# Chaque champ est un tuple (clé_recherche, question_si_absent)
+MEMORY_SCHEMA: dict[str, list[tuple[str, str, str, str]]] = {
+    # (clé_recherche, question, section_cible, subsection_cible)
+    "identité utilisateur": [
+        ("prénom",      "Comment tu t'appelles ?",                                   "Identité Utilisateur", "Prénom"),
+        ("profession",  "Quelle est ta profession ou ton domaine d'activité ?",       "Identité Utilisateur", "Profession"),
+        ("localisation","Dans quelle ville ou pays tu te trouves ?",                  "Identité Utilisateur", "Localisation"),
+    ],
+    "projets": [
+        # Section optionnelle — on vérifie juste qu'elle n'est pas vide
+    ],
+    "préférences": [
+        ("style",       "Tu préfères des réponses courtes et directes, ou détaillées ?", "Préférences", "Style de réponse"),
+        ("langue",      "Tu préfères qu'on parle en français ou en anglais ?",            "Préférences", "Langue"),
+    ],
+    "identité agent": [
+        ("prénom",      "Comment tu veux appeler l'agent ? Il a un nom ?",            "Identité Agent", "Prénom"),
+    ],
+}
+
+
+def _detect_structural_gaps(memory_content: str) -> list[dict]:
+    """
+    Détecte les lacunes structurelles dans memory.md en comparant
+    le contenu avec MEMORY_SCHEMA.
+    Retourne une liste de dicts compatibles avec le format des questions
+    du GapDetector LLM.
+    Pure Python — aucun LLM, résultat garanti.
+    """
+    if not memory_content.strip():
+        # memory.md vide = toutes les sections manquantes
+        gaps = []
+        for section, fields in MEMORY_SCHEMA.items():
+            for (key, question, sec, subsec) in fields:
+                gaps.append({
+                    "id":         compute_hash(question),
+                    "question":   question,
+                    "section":    sec,
+                    "subsection": subsec,
+                    "priority":   1,
+                    "type":       "structural",
+                })
+        return gaps
+
+    content_lower = memory_content.lower()
+    gaps          = []
+
+    for section_key, fields in MEMORY_SCHEMA.items():
+        # Vérifie si la section existe dans le markdown
+        section_present = section_key in content_lower
+
+        if not fields:
+            # Section sans champs définis (ex: Projets) — on vérifie juste
+            # qu'elle a du contenu au-delà du titre
+            continue
+
+        if not section_present:
+            # Section entière absente → toutes ses questions sont pertinentes
+            for (key, question, sec, subsec) in fields:
+                gaps.append({
+                    "id":         compute_hash(question),
+                    "question":   question,
+                    "section":    sec,
+                    "subsection": subsec,
+                    "priority":   1,
+                    "type":       "structural",
+                })
+            continue
+
+        # Section présente → on cherche les champs manquants
+        for (key, question, sec, subsec) in fields:
+            if key not in content_lower:
+                gaps.append({
+                    "id":         compute_hash(question),
+                    "question":   question,
+                    "section":    sec,
+                    "subsection": subsec,
+                    "priority":   2,
+                    "type":       "structural",
+                })
+
+    return gaps
+
 
 
 def _get_skipped_questions() -> list[str]:
@@ -86,69 +171,97 @@ def _collect_answers(questions: list[dict]) -> list[dict]:
 def curiosity_session(session_summary: str) -> None:
     """
     Lance une session de questionnement proactif post-consolidation.
-    1. GapDetector analyse memory.md + session → produit les questions
-    2. Menu CLI → collecte les réponses utilisateur
-    3. QuestionnaireAgent reformule + écrit dans memory.md
+
+    Phase 1a — Python pur : détecte les lacunes structurelles (schéma fixe)
+    Phase 1b — LLM léger  : détecte les lacunes contextuelles (session récente)
+    Phase 2  — Fusion      : merge + dédup + priorité + max 5 questions
+    Phase 3  — Menu CLI    : collecte les réponses utilisateur
+    Phase 4  — LLM         : QuestionnaireAgent reformule + écrit dans memory.md
     """
-    # Lit le contenu de memory.md
     memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
         if MARKDOWN_PATH.exists() else ""
 
-    # Questions déjà refusées
-    skipped_ids  = _get_skipped_questions()
-    db           = get_db()
-    skipped_rows = db.execute(
-        "SELECT question FROM curiosity_skipped"
-    ).fetchall()
+    # ── Phase 1a : trous structurels (Python pur, garanti) ──
+    structural_gaps = _detect_structural_gaps(memory_content)
+    skipped_ids     = _get_skipped_questions()
+
+    # Filtre immédiatement les questions déjà skippées
+    structural_gaps = [
+        g for g in structural_gaps
+        if g["id"] not in skipped_ids
+    ]
+
+    # ── Phase 1b : trous contextuels (LLM, best-effort) ──
+    contextual_gaps = []
+    db              = get_db()
+    skipped_rows    = db.execute("SELECT question FROM curiosity_skipped").fetchall()
     db.close()
-    skipped_text = "\n".join(f"- {r[0]}" for r in skipped_rows) or "Aucune"
+    skipped_text    = "\n".join(f"- {r[0]}" for r in skipped_rows) or "Aucune"
 
-    # Phase 1 — GapDetector
-    print("\n🔍 Analyse des lacunes mémoire en cours...")
-    try:
-        result = CuriosityCrew().crew().kickoff(inputs={
-            "memory_content":    memory_content[:8000],  # limite pour le contexte
-            "session_summary":   session_summary or "Pas de résumé disponible.",
-            "skipped_questions": skipped_text,
-            "answers_json":      "[]",  # non utilisé dans gap_detection_task
-        })
-        detection = json.loads(result.raw) if isinstance(result.raw, str) else {}
-    except Exception as e:
-        print(f"  ⚠️  Analyse impossible : {e}")
-        return
+    # On ne lance le LLM que s'il reste de la place après les trous structurels
+    remaining_slots = MAX_QUESTIONS - len(structural_gaps)
+    if remaining_slots > 0 and session_summary:
+        print("\n🔍 Analyse contextuelle en cours...")
+        try:
+            # Le gap_detection_task est maintenant focalisé sur les trous
+            # contextuels — le JSON structurel lui est fourni pour éviter les doublons
+            structural_summary = "\n".join(
+                f"- {g['question']}" for g in structural_gaps
+            ) or "Aucun trou structurel détecté."
 
-    if not detection.get("has_gaps") or not detection.get("questions"):
+            result = CuriosityCrew().crew().kickoff(inputs={
+                "memory_content":     memory_content[:6000],
+                "session_summary":    session_summary,
+                "skipped_questions":  skipped_text,
+                "structural_gaps":    structural_summary,
+                "answers_json":       "[]",
+            })
+            raw = result.raw.strip() if result.raw else ""
+            # Extrait le JSON même si le LLM a ajouté du texte autour
+            start = raw.find("{")
+            end   = raw.rfind("}") + 1
+            if start != -1 and end > start:
+                detection = json.loads(raw[start:end])
+                if detection.get("has_gaps"):
+                    for q in detection.get("questions", [])[:remaining_slots]:
+                        q_id = q.get("id") or compute_hash(q.get("question", ""))
+                        if q_id not in skipped_ids:
+                            q["id"]   = q_id
+                            q["type"] = "contextual"
+                            contextual_gaps.append(q)
+        except Exception as e:
+            print(f"  ⚠️  Analyse contextuelle ignorée : {e}")
+
+    # ── Phase 2 : fusion ──
+    # Structurel d'abord (priorité 1/2), contextuel ensuite
+    all_questions = sorted(structural_gaps, key=lambda q: q.get("priority", 9))
+    all_questions += contextual_gaps
+    all_questions  = all_questions[:MAX_QUESTIONS]
+
+    if not all_questions:
         print("  ✓ Aucune lacune détectée — mémoire complète pour cette session.")
         return
 
-    questions = detection["questions"][:MAX_QUESTIONS]
-
-    # Filtre les questions déjà skippées
-    questions = [
-        q for q in questions
-        if (q.get("id") or compute_hash(q["question"])) not in skipped_ids
-    ]
-    if not questions:
-        return
-
-    # Phase 2 — Menu CLI
-    answers = _collect_answers(questions)
+    # ── Phase 3 : menu CLI ──
+    answers = _collect_answers(all_questions)
     if not answers:
         print("  (Toutes les questions ont été passées)")
         return
 
-    # Phase 3 — QuestionnaireAgent reformule + écrit
+    # ── Phase 4 : QuestionnaireAgent reformule + écrit ──
     print("\n✍️  Intégration des réponses dans la mémoire...")
     try:
         CuriosityCrew().crew().kickoff(inputs={
-            "memory_content":    memory_content[:8000],
-            "session_summary":   session_summary or "",
-            "skipped_questions": skipped_text,
-            "answers_json":      json.dumps(answers, ensure_ascii=False, indent=2),
+            "memory_content":     memory_content[:6000],
+            "session_summary":    session_summary,
+            "skipped_questions":  skipped_text,
+            "structural_gaps":    "",
+            "answers_json":       json.dumps(answers, ensure_ascii=False, indent=2),
         })
         print("  ✅ Réponses intégrées dans memory.md")
     except Exception as e:
         print(f"  ❌ Échec de l'intégration : {e}")
+
 
 
 
@@ -311,12 +424,12 @@ def run():
             print(f"   Session sauvegardée dans sessions/{session_id}.json")
             print(f"   Elle sera consolidée automatiquement au prochain démarrage.")
 
-        # Questionnement proactif — uniquement si la consolidation a réussi
-        if session_summary:
-            try:
-                curiosity_session(session_summary)
-            except Exception as e:
-                print(f"  ⚠️  Questionnement ignoré : {e}")
+        # Questionnement proactif — déclenché même si le résumé est vide
+        # (les trous structurels sont détectés par Python, pas par le LLM)
+        try:
+            curiosity_session(session_summary or "")
+        except Exception as e:
+            print(f"  ⚠️  Questionnement ignoré : {e}")
 
 
 def train():
@@ -372,7 +485,7 @@ def ingest(file_path: str) -> None:
     """
     Ingère un fichier PDF dans la base de connaissances.
     Appelé via : crewai run -- ingest chemin/vers/fichier.pdf
-    Ou directement : python -m waifuclawd.main ingest fichier.pdf
+    Ou directement : python -m Mnemo.main ingest fichier.pdf
     """
     path = Path(file_path)
     if not path.exists():
@@ -408,7 +521,35 @@ def ingest(file_path: str) -> None:
         print(f"   ID doc   : {result['doc_id'][:12]}...")
 
 
-def list_docs() -> None:
+def debug_curiosity() -> None:
+    """
+    Déclenche le questionnement directement sans passer par une session complète.
+    Utile pour tester CuriosityCrew en isolation.
+    Usage : python -m Mnemo.main curiosity
+    """
+    print("🧪 Mode debug — déclenchement direct du questionnaire\n")
+
+    # Affiche l'état de memory.md
+    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
+        if MARKDOWN_PATH.exists() else ""
+    print(f"📄 memory.md : {len(memory_content)} caractères")
+
+    # Détection structurelle
+    structural = _detect_structural_gaps(memory_content)
+    skipped    = _get_skipped_questions()
+    structural = [g for g in structural if g["id"] not in skipped]
+    print(f"🔍 Trous structurels détectés : {len(structural)}")
+    for g in structural:
+        print(f"   [{g['priority']}] {g['question']}")
+
+    print(f"🚫 Questions skippées en DB : {len(skipped)}")
+    print()
+
+    # Lance le questionnaire avec un résumé de test
+    curiosity_session("Session de debug — test du questionnement proactif.")
+
+
+
     """Affiche la liste des documents ingérés."""
     docs = list_ingested_documents()
     if not docs:
@@ -433,13 +574,15 @@ if __name__ == "__main__":
             test()
         elif sys.argv[1] == "ingest":
             if len(sys.argv) < 3:
-                print("Usage : python -m waifuclawd.main ingest <fichier.pdf>")
+                print("Usage : python -m Mnemo.main ingest <fichier.pdf>")
             else:
                 ingest(sys.argv[2])
         elif sys.argv[1] == "docs":
             list_docs()
+        elif sys.argv[1] == "curiosity":
+            debug_curiosity()
         else:
             print(f"Commande inconnue : {sys.argv[1]}")
-            print("Commandes disponibles : run, train, replay, test, ingest, docs")
+            print("Commandes disponibles : run, train, replay, test, ingest, docs, curiosity")
     else:
         run()

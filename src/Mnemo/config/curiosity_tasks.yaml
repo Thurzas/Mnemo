@@ -1,28 +1,29 @@
 gap_detection_task:
   description: >
+    Ton rôle est de détecter UNIQUEMENT les lacunes CONTEXTUELLES dans la mémoire
+    de l'agent — celles qu'un schéma statique ne peut pas voir.
+
+    Les lacunes structurelles (prénom absent, section vide...) ont DÉJÀ été
+    détectées automatiquement et sont listées ici — ne les répète pas :
+    {structural_gaps}
+
     Voici le contenu actuel de memory.md :
     {memory_content}
 
     Voici le résumé de la session qui vient de se terminer :
     {session_summary}
 
-    Voici les questions déjà refusées par l'utilisateur (ne pas reproposer) :
+    Questions déjà refusées par l'utilisateur (ne pas reproposer) :
     {skipped_questions}
 
-    Identifie jusqu'à 5 lacunes importantes dans la mémoire de l'agent.
-    Une lacune = une information qui serait utile à connaître mais qui est absente
-    ou trop vague dans memory.md.
+    Cherche uniquement des lacunes contextuelles, par exemple :
+    - Un projet mentionné dans la session mais sans objectifs ni contexte dans memory.md
+    - Une technologie ou outil évoqué sans préciser l'usage (hobby ? pro ? apprentissage ?)
+    - Une préférence implicite dans la façon de parler qui n'est jamais formulée explicitement
+    - Un événement ou deadline mentionné sans qu'on sache s'il est toujours d'actualité
 
-    Exemples de bonnes lacunes :
-    - Un projet est mentionné mais ses objectifs ne sont pas décrits
-    - L'utilisateur a des préférences implicites jamais exprimées explicitement
-    - Un contexte personnel ou professionnel est flou
-    - Des outils ou technologies sont mentionnés sans contexte d'usage
-
-    Exemples de mauvaises lacunes (à éviter) :
-    - Questions sur des sujets déjà bien couverts dans memory.md
-    - Questions triviales (âge, prénom si déjà connu)
-    - Questions déjà dans la liste des refusées
+    Ne génère pas plus de 3 questions. Si rien de pertinent n'est détectable
+    depuis la session, retourne has_gaps: false.
 
     Retourne UNIQUEMENT un objet JSON valide :
     {
@@ -30,18 +31,15 @@ gap_detection_task:
       "questions": [
         {
           "id": "hash_court_unique",
-          "question": "Question claire et directe à poser à l'utilisateur ?",
+          "question": "Question claire et directe ?",
           "section": "section_cible_dans_memory_md",
           "subsection": "sous_section_cible",
-          "priority": 1
+          "priority": 3
         }
       ]
     }
-
-    Si aucune lacune pertinente n'est détectée, retourne :
-    { "has_gaps": false, "questions": [] }
   expected_output: >
-    Un objet JSON valide avec has_gaps et la liste des questions (0 à 5).
+    Un objet JSON valide avec has_gaps et la liste des questions contextuelles (0 à 3).
   agent: gap_detector
 
 write_answers_task:
