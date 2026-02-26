@@ -110,6 +110,14 @@ def init_db():
             filename,
             tokenize = "unicode61"
         );
+
+        -- ── CuriosityCrew — questions skippées ────────────────────────
+        -- Mémorise les questions refusées pour ne pas les reproposer.
+        CREATE TABLE IF NOT EXISTS curiosity_skipped (
+            id          TEXT PRIMARY KEY,   -- hash MD5 de la question normalisée
+            question    TEXT NOT NULL,      -- texte original de la question
+            skipped_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     db.commit()
     db.close()
@@ -162,6 +170,12 @@ def migrate_db():
             content,
             filename,
             tokenize = 'unicode61'
+        )""",
+        # CuriosityCrew
+        """CREATE TABLE IF NOT EXISTS curiosity_skipped (
+            id          TEXT PRIMARY KEY,
+            question    TEXT NOT NULL,
+            skipped_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         )""",
     ]
     for sql in migrations:

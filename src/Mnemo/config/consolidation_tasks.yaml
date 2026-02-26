@@ -7,40 +7,100 @@ consolidate_task:
     qui méritent une persistance long terme. Ignore les échanges triviaux,
     les salutations, les questions sans réponse informative.
 
-    Retourne UNIQUEMENT un JSON avec cette structure :
+    SECTIONS VALIDES dans memory.md — utilise UNIQUEMENT ces valeurs exactes
+    pour target_section et target_subsection, sans préfixe ## ou ### :
+
+    - "Identité Utilisateur"       → sous-sections : "Profil de base", "Préférences & style", "Centres d'intérêt"
+    - "Identité Agent"             → sous-sections : "Rôle & personnalité définis", "Ce que l'agent a appris sur lui-même"
+    - "Connaissances persistantes" → sous-sections : "Projets en cours", "Décisions prises & leur raison"
+    - "Historique des sessions"    → sous-sections : date de session (ex: "Session 2026-02-26")
+    - "À ne jamais oublier"        → sous-sections : libres
+
+    RÈGLES DE ROUTAGE :
+    - Nom, prénom, pseudo, métier, localisation, langue, fuseau → "Identité Utilisateur" > "Profil de base"
+    - Style de communication, préférences de réponse           → "Identité Utilisateur" > "Préférences & style"
+    - Loisirs, passions, sujets d'intérêt                      → "Identité Utilisateur" > "Centres d'intérêt"
+    - Nom/rôle/personnalité de l'agent                         → "Identité Agent" > "Rôle & personnalité définis"
+    - Projet actif, stack technique, objectifs                  → "Connaissances persistantes" > "Projets en cours"
+    - Choix technique ou architectural et sa justification      → "Connaissances persistantes" > "Décisions prises & leur raison"
+    - Résumé de la session                                      → "Historique des sessions" > "Session YYYY-MM-DD"
+
+    RÈGLES DE FORMAT — critique, à respecter absolument :
+
+    Sections ATOMIQUES — chaque fait est une ligne labellisée :
+      "Identité Utilisateur" > "Profil de base"
+        → format : - **Label** : valeur
+        → labels autorisés : Nom/Pseudo, Métier, Localisation, Langue préférée, Fuseau horaire
+        → exemple : - **Nom/Pseudo** : Matt
+
+      "Identité Utilisateur" > "Préférences & style"
+        → format : - **Label** : valeur
+        → labels autorisés : Style de communication, Langue préférée, Ton préféré
+        → exemple : - **Style de communication** : réponses courtes et directes
+
+      "Identité Utilisateur" > "Centres d'intérêt"
+        → format : - **Label** : valeur
+        → labels autorisés : libres mais concis (ex: Développement web, IA, Jeux vidéo)
+        → exemple : - **IA & Agentisation** : passionné, développe des agents avec CrewAI
+
+      "Identité Agent" > "Rôle & personnalité définis"
+        → format : - **Label** : valeur
+        → labels autorisés : Nom de l'agent, Rôle, Personnalité, Langue
+        → exemple : - **Nom de l'agent** : Mnemo
+
+    Sections NARRATIVES — prose enrichie, pas de liste à puces :
+      "Connaissances persistantes" > "Projets en cours"
+        → prose concise décrivant le projet, la stack, l'état d'avancement
+        → exemple : Agent IA en Python/CrewAI avec mémoire long terme persistante (SQLite + embeddings Ollama).
+          Objectif : personnalisation de l'assistant via memory.md. En cours de développement actif.
+
+      "Connaissances persistantes" > "Décisions prises & leur raison"
+        → prose : décision + contexte + raison du choix
+        → exemple : Choix de SQLite plutôt qu'une BDD externe pour simplifier le déploiement local.
+
+      "Historique des sessions" > "Session YYYY-MM-DD"
+        → résumé narratif de 2-4 phrases de ce qui s'est passé dans la session
+
+      "Identité Agent" > "Ce que l'agent a appris sur lui-même"
+        → prose libre, introspection de l'agent
+
+    RÈGLE CRITIQUE : ne jamais écrire ## ou ### dans les valeurs de target_section ou target_subsection.
+
+    Retourne UNIQUEMENT un JSON valide avec cette structure :
     {
       "session_summary": "résumé de la session en 3 phrases maximum",
       "worth_persisting": true,
       "facts": [
         {
-          "fact": "contenu du fait à mémoriser, formulé de façon concise",
-          "category": "projet | préférence | décision | identité | connaissance",
-          "target_section": "section ## exacte du Markdown cible",
-          "target_subsection": "sous-section ### exacte du Markdown cible"
+          "fact": "contenu formaté selon les règles ci-dessus",
+          "category": "identité | préférence | projet | décision | connaissance | historique_session",
+          "target_section": "nom exact de la section",
+          "target_subsection": "nom exact de la sous-section"
         }
       ]
     }
 
-    Si la session ne contient aucune information nouvelle à mémoriser,
-    retourne worth_persisting: false et facts: [].
+    Si la session ne contient aucune information nouvelle, retourne worth_persisting: false et facts: [].
   expected_output: >
-    Un objet JSON valide avec les faits à persister et le résumé de session.
+    Un objet JSON valide avec les faits correctement formatés et le résumé de session.
   agent: session_consolidator
 
 write_task:
   description: >
-    Voici les faits consolidés à persister :
-    {consolidated_facts}
+    Le session_consolidator vient de produire un JSON de faits consolidés.
+    Récupère ce JSON depuis le contexte de la tâche précédente.
 
     Pour chaque fait dans le tableau facts (si worth_persisting est true) :
-    1. Utilise update_markdown_memory avec section, subsection, content ET category du fait.
-       La category est critique — elle détermine le poids du chunk dans les recherches futures :
+    1. Appelle update_markdown_memory avec section, subsection, content ET category.
+       La category détermine le poids dans les recherches futures :
        identité (1.5) > décision (1.3) > projet (1.2) > préférence (1.1) > connaissance (1.0) > historique_session (0.7)
-    2. Évite les doublons — si une information similaire existe déjà dans cette
-       sous-section, enrichis-la plutôt que d'en créer une nouvelle entrée.
-    3. Une fois TOUS les faits écrits, appelle sync_memory_db pour re-indexer la base.
+    2. Le champ "fact" contient déjà le contenu formaté correctement — utilise-le
+       tel quel comme valeur du paramètre "content". Ne reformate pas.
+    3. Une fois TOUS les faits écrits, appelle sync_memory_db pour re-indexer.
 
-    Retourne un résumé des modifications apportées (sections modifiées, nombre de faits écrits).
+    Si worth_persisting est false, ne rien écrire et retourner "Rien à persister."
+
+    Retourne un résumé des modifications apportées (sections modifiées, faits écrits).
   expected_output: >
     Un résumé texte des modifications apportées à memory.md et à la base SQLite.
   agent: memory_writer

@@ -370,14 +370,34 @@ def sync_markdown_to_db(md_path: Path = MARKDOWN_PATH):
     update_file_state(md_path)
 
 
+def _normalize_section(title: str) -> str:
+    """
+    Normalise un titre de section pour la comparaison :
+    supprime les emojis, espaces et # en tête, met en minuscules.
+    Ex: "🧑 Identité Utilisateur" → "identité utilisateur"
+    """
+    import re
+    # Retire les # de début
+    title = title.lstrip("# ").strip()
+    # Retire les emojis et caractères non-alphanumérique en début de chaîne
+    title = re.sub(r'^[\U00010000-\U0010ffff\u2600-\u26FF\u2700-\u27BF\s]+', '', title)
+    return title.strip().lower()
+
+
 def update_markdown_section(section: str, subsection: str, content: str, md_path: Path = MARKDOWN_PATH, category: str = "connaissance"):
     """Upsert propre d'une sous-section dans le Markdown."""
-    # Sanitize — le memory_writer peut recevoir du texte corrompu du modèle
-    section    = sanitize_str(section)
-    subsection = sanitize_str(subsection)
+    section    = sanitize_str(section).lstrip("#").strip()  # retire les ## accidentels
+    subsection = sanitize_str(subsection).lstrip("#").strip()
     content    = sanitize_str(content)
-    text = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+
+    # Sous-section vide → fallback sur le nom de section pour éviter ### vide
+    if not subsection:
+        subsection = section.split(">")[-1].strip() or "Général"
+
+    text  = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
     lines = text.splitlines()
+
+    section_norm = _normalize_section(section)
 
     in_target_section    = False
     in_target_subsection = False
@@ -386,28 +406,51 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
     subsection_end       = len(lines)
 
     for i, line in enumerate(lines):
-        if line.startswith("## ") and line.lstrip("# ").strip() == section:
-            in_target_section = True
-            section_start = i
-        elif line.startswith("## ") and in_target_section:
-            in_target_section = False
-        if in_target_section and line.startswith("### ") and line.lstrip("# ").strip() == subsection:
-            in_target_subsection = True
-            subsection_start = i
-        elif in_target_subsection and (line.startswith("## ") or line.startswith("### ")):
-            subsection_end = i
-            break
+        if line.startswith("## "):
+            if _normalize_section(line) == section_norm:
+                in_target_section = True
+                section_start = i
+            elif in_target_section:
+                in_target_section = False
+        if in_target_section and line.startswith("### "):
+            sub_norm = line.lstrip("# ").strip().lower()
+            if sub_norm == subsection.strip().lower():
+                in_target_subsection = True
+                subsection_start = i
+            elif in_target_subsection:
+                subsection_end = i
+                break
 
-    new_block = [f"### {subsection}", content, ""]
+    # Marqueurs de placeholder — contenu vide sémantiquement, à remplacer
+    PLACEHOLDERS = (
+        "pas encore renseigné",
+        "aucun",
+        "aucune",
+        "pour l'instant",
+        "je dois questionner",
+        "je me demande",
+    )
 
     if in_target_subsection and subsection_start != -1:
-        # Remplace le bloc existant
+        # Récupère le contenu existant (lignes entre ### et le suivant)
+        existing_lines   = lines[subsection_start + 1 : subsection_end]
+        existing_content = "\n".join(existing_lines).strip()
+
+        is_placeholder = not existing_content or any(
+            p in existing_content.lower() for p in PLACEHOLDERS
+        )
+
+        merged    = content if is_placeholder else existing_content + "\n" + content
+        new_block = [f"### {subsection}", merged, ""]
         lines[subsection_start:subsection_end] = new_block
+
     elif section_start != -1:
         # Insère dans la section existante
+        new_block = [f"### {subsection}", content, ""]
         lines.insert(subsection_end, "\n".join(new_block))
     else:
         # Crée la section et sous-section
+        new_block = [f"### {subsection}", content, ""]
         lines += ["", f"## {section}", ""] + new_block
 
     md_path.write_text("\n".join(lines), encoding="utf-8")
@@ -634,3 +677,49 @@ class ListDocumentsTool(BaseTool):
                 f"({d['pages']} pages · {d['chunks']} chunks · ingéré le {d['ingested_at'][:10]})"
             )
         return "\n".join(lines)
+
+
+class GetSkippedQuestionsInput(BaseModel):
+    dummy: str = Field(default="", description="Paramètre non utilisé.")
+
+class GetSkippedQuestionsTool(BaseTool):
+    name: str = "get_skipped_questions"
+    description: str = (
+        "Retourne la liste des questions que l'utilisateur a déjà refusé de répondre. "
+        "À utiliser avant de générer de nouvelles questions pour éviter de reproposer "
+        "les mêmes."
+    )
+    args_schema: Type[BaseModel] = GetSkippedQuestionsInput
+
+    def _run(self, dummy: str = "") -> str:
+        db   = get_db()
+        rows = db.execute(
+            "SELECT question FROM curiosity_skipped ORDER BY skipped_at DESC"
+        ).fetchall()
+        db.close()
+        if not rows:
+            return "[]"
+        return "\n".join(f"- {r[0]}" for r in rows)
+
+
+class MarkQuestionSkippedInput(BaseModel):
+    question_id: str = Field(..., description="ID de la question (hash) à marquer comme skippée.")
+    question:    str = Field(..., description="Texte complet de la question.")
+
+class MarkQuestionSkippedTool(BaseTool):
+    name: str = "mark_question_skipped"
+    description: str = (
+        "Marque une question comme refusée par l'utilisateur. "
+        "Cette question ne sera plus proposée dans les futures sessions."
+    )
+    args_schema: Type[BaseModel] = MarkQuestionSkippedInput
+
+    def _run(self, question_id: str, question: str) -> str:
+        db = get_db()
+        db.execute(
+            "INSERT OR REPLACE INTO curiosity_skipped (id, question) VALUES (?, ?)",
+            (question_id, question)
+        )
+        db.commit()
+        db.close()
+        return f"✓ Question marquée comme skippée : {question_id}"

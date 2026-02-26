@@ -7,22 +7,335 @@ from pathlib import Path
 from datetime import datetime
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
+# ─────────────────────────────────────────────────────────────
 
-from Mnemo.crew import ConversationCrew, ConsolidationCrew
-from Mnemo.tools.memory_tools import update_session_memory, load_session_json, SESSIONS_DIR, check_and_sync
+from Mnemo.crew import ConversationCrew, ConsolidationCrew, CuriosityCrew
+from Mnemo.tools.memory_tools import (
+    update_session_memory, load_session_json, SESSIONS_DIR,
+    check_and_sync, MARKDOWN_PATH, get_db, compute_hash,
+    update_markdown_section, sync_markdown_to_db,
+)
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 
 
 # ══════════════════════════════════════════════════════════════
-# Session helpers
+# CuriosityCrew — menu de questionnement
 # ══════════════════════════════════════════════════════════════
+
+MAX_QUESTIONS = 5
+
+# Schéma de référence : section → liste de champs attendus
+# Chaque champ est un tuple (aliases[], question, section_cible, subsection_cible)
+# aliases : liste de mots-clés alternatifs — si L'UN d'eux est présent dans la
+# section correspondante, le champ est considéré comme rempli.
+# Tuple : (aliases, question, section, subsection, label_markdown)
+# La clé du dict doit correspondre au titre ## normalisé dans memory.md.
+# "préférences" ne correspond à aucun ## → regroupé sous "identité utilisateur".
+MEMORY_SCHEMA: dict[str, list[tuple[list[str], str, str, str, str]]] = {
+    "identité utilisateur": [
+        (["prénom", "nom", "pseudo", "s'appelle", "matt", "name"],
+         "Comment tu t'appelles ?",
+         "Identité Utilisateur", "Profil de base", "Nom/Pseudo"),
+        (["profession", "métier", "développeur", "ingénieur", "designer", "travail"],
+         "Quelle est ta profession ou ton domaine d'activité ?",
+         "Identité Utilisateur", "Profil de base", "Métier"),
+        (["localisation", "ville", "pays", "france", "paris", "région", "fuseau"],
+         "Dans quelle ville ou pays tu te trouves ?",
+         "Identité Utilisateur", "Profil de base", "Localisation"),
+        # Sous "## 🧑 Identité Utilisateur" → ### Préférences & style
+        (["style", "communication", "courte", "détaillée", "verbeux", "concis", "direct"],
+         "Tu préfères des réponses courtes et directes, ou détaillées ?",
+         "Identité Utilisateur", "Préférences & style", "Style de communication"),
+    ],
+    "identité agent": [
+        (["prénom", "nom", "s'appelle", "mitsune", "mnemo", "assistant"],
+         "Comment tu veux appeler l'agent ? Il a un nom ?",
+         "Identité Agent", "Rôle & personnalité définis", "Nom de l'agent"),
+    ],
+}
+
+
+def _extract_section_content(memory_content: str, section_key: str) -> str:
+    """
+    Extrait le contenu d'une section spécifique dans memory.md.
+    Insensible à la casse et aux emojis.
+    Retourne le texte entre ce ## et le ## suivant.
+    """
+    import re
+    lines   = memory_content.splitlines()
+    content = []
+    inside  = False
+    for line in lines:
+        if line.startswith("## "):
+            norm = re.sub(r'^[\U00010000-\U0010ffff\u2600-\u26FF\u2700-\u27BF\s]+', '', line.lstrip("# ").strip()).strip().lower()
+            if section_key in norm or norm in section_key:
+                inside = True
+                continue
+            elif inside:
+                break
+        elif inside:
+            content.append(line.lower())
+    return "\n".join(content)
+
+
+# Marqueurs de placeholder — une ligne qui ne contient QUE ça n'est pas une vraie valeur
+_PLACEHOLDER_MARKERS = (
+    "pas encore renseigné",
+    "aucun",
+    "aucune",
+    "pour l'instant",
+    "je dois questionner",
+    "je me demande",
+)
+
+def _line_is_real_value(line: str, alias: str) -> bool:
+    """
+    Retourne True si la ligne contenant l'alias est une vraie valeur,
+    pas juste un label de template ou un placeholder.
+    Exemples :
+      "- **Nom/Pseudo** : pas encore renseigné" → False (label + placeholder)
+      "- **Nom/Pseudo** : Matt"                 → True
+      "Matt, développeur web"                   → True
+    """
+    line_lower = line.lower()
+    # Alias trouvé sur une ligne de placeholder → pas une vraie valeur
+    if any(p in line_lower for p in _PLACEHOLDER_MARKERS):
+        return False
+    # Alias trouvé uniquement dans un label Markdown (entre ** **)
+    # ex: "**Nom/Pseudo**" — si la partie après ":" est vide, pas de valeur
+    if "**" in line_lower:
+        parts = line_lower.split(":", 1)
+        if len(parts) == 2:
+            value_part = parts[1].strip()
+            return bool(value_part) and not any(p in value_part for p in _PLACEHOLDER_MARKERS)
+        return False
+    return True
+
+
+def _detect_structural_gaps(memory_content: str) -> list[dict]:
+    """
+    Détecte les lacunes structurelles dans memory.md en comparant
+    le contenu avec MEMORY_SCHEMA.
+    - Cherche les aliases dans la section correspondante (pas dans tout le fichier)
+    - Ignore les matches sur les labels de template (** **) et les placeholders
+    - Insensible à la casse et aux emojis
+    - Pure Python — aucun LLM, résultat garanti.
+    """
+    import re
+    gaps = []
+
+    for section_key, fields in MEMORY_SCHEMA.items():
+        section_content = _extract_section_content(memory_content, section_key)
+        section_present = bool(section_content.strip())
+
+        for (aliases, question, sec, subsec, label) in fields:
+            q_id = compute_hash(question)
+            found = False
+            if section_present:
+                for line in section_content.splitlines():
+                    for alias in aliases:
+                        if alias.lower() in line and _line_is_real_value(line, alias):
+                            found = True
+                            break
+                    if found:
+                        break
+
+            if not found:
+                priority = 1 if not section_present else 2
+                gaps.append({
+                    "id":         q_id,
+                    "question":   question,
+                    "section":    sec,
+                    "subsection": subsec,
+                    "label":      label,
+                    "priority":   priority,
+                    "type":       "structural",
+                })
+
+    return gaps
+
+
+
+def _get_skipped_questions() -> list[str]:
+    """Retourne les IDs des questions déjà skippées."""
+    db   = get_db()
+    rows = db.execute("SELECT id FROM curiosity_skipped").fetchall()
+    db.close()
+    return [r[0] for r in rows]
+
+
+def _mark_skipped(question_id: str, question: str) -> None:
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO curiosity_skipped (id, question) VALUES (?, ?)",
+        (question_id, question)
+    )
+    db.commit()
+    db.close()
+
+
+def _display_menu(questions: list[dict]) -> None:
+    """Affiche le menu de questions généré par le GapDetector."""
+    print("\n" + "─" * 55)
+    print("🤔 Mnemo a quelques questions pour mieux te connaître :")
+    print("─" * 55)
+    for i, q in enumerate(questions, start=1):
+        print(f"  [{i}] {q['question']}")
+    print(f"  [0] Passer")
+    print("─" * 55)
+
+
+def _collect_answers(questions: list[dict]) -> list[dict]:
+    """
+    Affiche le menu et collecte les réponses de l'utilisateur.
+    Retourne une liste de dicts {question, answer, section, subsection}.
+    Les questions skippées sont marquées en DB.
+    """
+    _display_menu(questions)
+    answers = []
+
+    for q in questions:
+        q_id = q.get("id") or compute_hash(q["question"])
+        try:
+            raw = input(f"\n  → {q['question']}\n    Toi > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  ⚠️  Questionnaire interrompu.")
+            break
+
+        if not raw or raw == "0":
+            _mark_skipped(q_id, q["question"])
+            print("  (Passé — cette question ne sera plus posée)")
+        else:
+            answers.append({
+                "question":   q["question"],
+                "answer":     raw,
+                "section":    q.get("section", "Connaissances"),
+                "subsection": q.get("subsection", "Général"),
+                "label":      q.get("label", ""),
+            })
+
+    return answers
+
+
+def curiosity_session(session_summary: str) -> None:
+    """
+    Lance une session de questionnement proactif post-consolidation.
+
+    Phase 1a — Python pur : détecte les lacunes structurelles (schéma fixe)
+    Phase 1b — LLM léger  : détecte les lacunes contextuelles (session récente)
+    Phase 2  — Fusion      : merge + dédup + priorité + max 5 questions
+    Phase 3  — Menu CLI    : collecte les réponses utilisateur
+    Phase 4  — LLM         : QuestionnaireAgent reformule + écrit dans memory.md
+    """
+    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
+        if MARKDOWN_PATH.exists() else ""
+
+    # ── Phase 1a : trous structurels (Python pur, garanti) ──
+    structural_gaps = _detect_structural_gaps(memory_content)
+    skipped_ids     = _get_skipped_questions()
+
+    # Filtre immédiatement les questions déjà skippées
+    structural_gaps = [
+        g for g in structural_gaps
+        if g["id"] not in skipped_ids
+    ]
+
+    # ── Phase 1b : trous contextuels (LLM, best-effort) ──
+    contextual_gaps = []
+    db              = get_db()
+    skipped_rows    = db.execute("SELECT question FROM curiosity_skipped").fetchall()
+    db.close()
+    skipped_text    = "\n".join(f"- {r[0]}" for r in skipped_rows) or "Aucune"
+
+    # On ne lance le LLM que s'il reste de la place après les trous structurels
+    remaining_slots = MAX_QUESTIONS - len(structural_gaps)
+    if remaining_slots > 0 and session_summary:
+        print("\n🔍 Analyse contextuelle en cours...")
+        try:
+            structural_summary = "\n".join(
+                f"- {g['question']}" for g in structural_gaps
+            ) or "Aucun trou structurel détecté."
+
+            result = CuriosityCrew().crew().kickoff(inputs={
+                "memory_content":     memory_content[:6000],
+                "session_summary":    session_summary,
+                "skipped_questions":  skipped_text,
+                "structural_gaps":    structural_summary,
+                "answers_json":       "[]",
+            })
+            raw = result.raw.strip() if result.raw else ""
+            # Extrait le JSON même si le LLM a ajouté du texte autour
+            start = raw.find("{")
+            end   = raw.rfind("}") + 1
+            if start != -1 and end > start:
+                detection = json.loads(raw[start:end])
+                if detection.get("has_gaps"):
+                    for q in detection.get("questions", [])[:remaining_slots]:
+                        q_id = q.get("id") or compute_hash(q.get("question", ""))
+                        if q_id not in skipped_ids:
+                            q["id"]   = q_id
+                            q["type"] = "contextual"
+                            contextual_gaps.append(q)
+        except Exception as e:
+            print(f"  ⚠️  Analyse contextuelle ignorée : {e}")
+
+    # ── Phase 2 : fusion ──
+    # Structurel d'abord (priorité 1/2), contextuel ensuite
+    all_questions = sorted(structural_gaps, key=lambda q: q.get("priority", 9))
+    all_questions += contextual_gaps
+    all_questions  = all_questions[:MAX_QUESTIONS]
+
+    if not all_questions:
+        print("  ✓ Aucune lacune détectée — mémoire complète pour cette session.")
+        return
+
+    # ── Phase 3 : menu CLI ──
+    answers = _collect_answers(all_questions)
+
+    # ── Phase 4 : écriture directe Python — pas de LLM ──
+    # On écrit les réponses directement sans passer par le LLM
+    # pour éviter les hallucinations sur answers_json vide ou mal compris.
+    if not answers:
+        print("  (Toutes les questions ont été passées)")
+        return
+
+    print("\n✍️  Intégration des réponses dans la mémoire...")
+    written = 0
+    for ans in answers:
+        try:
+            label   = ans.get("label", "")
+            raw_ans = ans["answer"]
+            # Formate en ligne structurée si un label est disponible
+            # ex: "- **Localisation** : France"
+            content = f"- **{label}** : {raw_ans}" if label else raw_ans
+            update_markdown_section(
+                section    = ans.get("section", "Identité Utilisateur"),
+                subsection = ans.get("subsection", "Profil de base"),
+                content    = content,
+                category   = "identité",
+            )
+            written += 1
+        except Exception as e:
+            print(f"  ⚠️  Erreur écriture '{ans.get('question', '?')}' : {e}")
+
+    if written:
+        sync_markdown_to_db()
+        print(f"  ✅ {written} réponse(s) intégrée(s) dans memory.md + sync SQLite")
+
+
+
+
 
 def new_session_id() -> str:
     return f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
 
 def handle_message(user_message: str, session_id: str) -> str:
-    """Traite un message utilisateur et retourne la réponse de l'agent."""
+    """
+    Traite un message utilisateur et retourne la réponse de l'agent.
+    Si l'évaluateur signale needs_clarification, pose d'abord une question
+    de clarification inline avant de répondre.
+    """
     result = ConversationCrew().crew().kickoff(inputs={
         "user_message":      user_message,
         "session_id":        session_id,
@@ -30,6 +343,38 @@ def handle_message(user_message: str, session_id: str) -> str:
         "memory_context":    "",
     })
     response = result.raw
+
+    # Détection inline de needs_clarification
+    # Le crew retourne parfois le JSON d'évaluation dans le contexte —
+    # on tente de l'extraire pour décider si on doit poser une question
+    try:
+        # L'évaluateur expose needs_clarification dans son output JSON
+        # CrewAI stocke les outputs intermédiaires dans result.tasks_output
+        if hasattr(result, "tasks_output") and result.tasks_output:
+            eval_raw = result.tasks_output[0].raw if result.tasks_output else ""
+            eval_json = json.loads(eval_raw) if eval_raw.strip().startswith("{") else {}
+            if eval_json.get("needs_clarification") and eval_json.get("clarification_reason"):
+                reason = eval_json["clarification_reason"]
+                print(f"\n  🤔 Mnemo a besoin d'une précision : {reason}")
+                try:
+                    clarif = input("    Toi > ").strip()
+                    if clarif:
+                        # Relance avec le message enrichi
+                        enriched = f"{user_message}\n[Précision : {clarif}]"
+                        result2  = ConversationCrew().crew().kickoff(inputs={
+                            "user_message":      enriched,
+                            "session_id":        session_id,
+                            "evaluation_result": "",
+                            "memory_context":    "",
+                        })
+                        response = result2.raw
+                        update_session_memory(session_id, user_message, response)
+                        return response
+                except (EOFError, KeyboardInterrupt):
+                    pass  # On continue avec la réponse originale
+    except (json.JSONDecodeError, AttributeError, IndexError):
+        pass  # Silencieux — le needs_clarification est best-effort
+
     update_session_memory(session_id, user_message, response)
     return response
 
@@ -41,8 +386,7 @@ def end_session(session_id: str) -> str:
         return "Session vide, rien à consolider."
 
     result = ConsolidationCrew().crew().kickoff(inputs={
-        "session_json":       json.dumps(session, ensure_ascii=False, indent=2),
-        "consolidated_facts": "",
+        "session_json": json.dumps(session, ensure_ascii=False, indent=2),
     })
 
     # Marque la session comme consolidée
@@ -104,6 +448,17 @@ def run():
     print(f"\n🧠 Agent démarré — session : {session_id}")
     print("Tape 'exit' pour terminer proprement.\n")
 
+    # Premier lancement — memory.md vierge → questionnaire d'initialisation
+    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
+        if MARKDOWN_PATH.exists() else ""
+    structural_gaps = _detect_structural_gaps(memory_content)
+    skipped_ids     = _get_skipped_questions()
+    unfilled_gaps   = [g for g in structural_gaps if g["id"] not in skipped_ids]
+    if unfilled_gaps:
+        print("👋 Bienvenue ! Avant de commencer, quelques questions pour initialiser ta mémoire.\n")
+        curiosity_session("")
+        print()
+
     try:
         while True:
             try:
@@ -130,13 +485,21 @@ def run():
     finally:
         # S'exécute toujours — CTRL+C, exit normal, crash Python
         print("⏳ Consolidation de la session en cours...")
+        session_summary = ""
         try:
-            summary = end_session(session_id)
-            print(f"✅ Session consolidée :\n{summary}\n")
+            session_summary = end_session(session_id)
+            print(f"✅ Session consolidée :\n{session_summary}\n")
         except Exception as e:
             print(f"❌ Consolidation échouée : {e}")
             print(f"   Session sauvegardée dans sessions/{session_id}.json")
             print(f"   Elle sera consolidée automatiquement au prochain démarrage.")
+
+        # Questionnement proactif — déclenché même si le résumé est vide
+        # (les trous structurels sont détectés par Python, pas par le LLM)
+        try:
+            curiosity_session(session_summary or "")
+        except Exception as e:
+            print(f"  ⚠️  Questionnement ignoré : {e}")
 
 
 def train():
@@ -228,7 +591,35 @@ def ingest(file_path: str) -> None:
         print(f"   ID doc   : {result['doc_id'][:12]}...")
 
 
-def list_docs() -> None:
+def debug_curiosity() -> None:
+    """
+    Déclenche le questionnement directement sans passer par une session complète.
+    Utile pour tester CuriosityCrew en isolation.
+    Usage : python -m Mnemo.main curiosity
+    """
+    print("🧪 Mode debug — déclenchement direct du questionnaire\n")
+
+    # Affiche l'état de memory.md
+    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
+        if MARKDOWN_PATH.exists() else ""
+    print(f"📄 memory.md : {len(memory_content)} caractères")
+
+    # Détection structurelle
+    structural = _detect_structural_gaps(memory_content)
+    skipped    = _get_skipped_questions()
+    structural = [g for g in structural if g["id"] not in skipped]
+    print(f"🔍 Trous structurels détectés : {len(structural)}")
+    for g in structural:
+        print(f"   [{g['priority']}] {g['question']}")
+
+    print(f"🚫 Questions skippées en DB : {len(skipped)}")
+    print()
+
+    # Lance le questionnaire avec un résumé de test
+    curiosity_session("Session de debug — test du questionnement proactif.")
+
+
+
     """Affiche la liste des documents ingérés."""
     docs = list_ingested_documents()
     if not docs:
@@ -258,8 +649,10 @@ if __name__ == "__main__":
                 ingest(sys.argv[2])
         elif sys.argv[1] == "docs":
             list_docs()
+        elif sys.argv[1] == "curiosity":
+            debug_curiosity()
         else:
             print(f"Commande inconnue : {sys.argv[1]}")
-            print("Commandes disponibles : run, train, replay, test, ingest, docs")
+            print("Commandes disponibles : run, train, replay, test, ingest, docs, curiosity")
     else:
         run()

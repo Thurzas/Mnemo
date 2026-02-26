@@ -1,39 +1,39 @@
 # Memory — Agent
-_Dernière mise à jour : 2026-01-01_
+_Dernière mise à jour : 2026-02-26_
+> Penser à modifier la date d'une session à l'autre si besoin. (format : YYYY-MM-DD)
 
 ---
 
 ## 🧑 Identité Utilisateur
 
 ### Profil de base
-- **Nom/Pseudo** : Inconnu
-- **Métier** : Inconnu
-- **Langue préférée** : Français
-- **Fuseau horaire** : Europe/Paris
+- **Nom/Pseudo** : pas encore renseigné — je dois questionner l'utilisateur sur ce point.
+- **Métier** : pas encore renseigné — je dois questionner l'utilisateur sur ce point.
+- **Langue préférée** : pas encore renseigné — je dois questionner l'utilisateur sur ce point.
+- **Fuseau horaire** : pas encore renseigné — je dois questionner l'utilisateur sur ce point.
 
 ### Préférences & style
-- Aucune préférence enregistrée pour l'instant.
+- Aucune préférence enregistrée pour l'instant. Je me demande ce que l'utilisateur préfère comme style de réponse : court et direct, ou détaillé ?
 
 ### Centres d'intérêt
-- Aucun centre d'intérêt enregistré pour l'instant.
+- Aucun centre d'intérêt enregistré pour l'instant. Je dois trouver l'occasion de lui poser la question.
 
 ---
 
 ## 🤖 Identité Agent
 
 ### Rôle & personnalité définis
-- Assistant personnel local, discret sur ses mécanismes internes.
-- Répond de façon naturelle et personnalisée en utilisant le contexte mémoire disponible.
+- Aucun rôle défini pour l'instant. Je dois demander à l'utilisateur comment il souhaite que je me comporte et si il veut me donner un nom.
 
 ### Ce que l'agent a appris sur lui-même
-- Rien d'enregistré pour l'instant.
+- Aucune note pour l'instant.
 
 ---
 
 ## 📚 Connaissances persistantes
 
 ### Projets en cours
-- Aucun projet enregistré pour l'instant.
+- Aucun projet enregistré pour l'instant. Si l'utilisateur est développeur, il serait pertinent de l'interroger sur ses projets actuels dès que l'occasion se présente.
 
 ### Décisions prises & leur raison
 - Aucune décision enregistrée pour l'instant.
@@ -41,9 +41,7 @@ _Dernière mise à jour : 2026-01-01_
 ---
 
 ## 🔁 Historique des sessions
-
-### Session — 2026-01-01
-- Première session. Aucun contenu à résumer.
+- Aucune session consolidée pour l'instant. Penser à écrire un résumé de chaque session ici après consolidation.
 
 ---
 
@@ -51,3 +49,4 @@ _Dernière mise à jour : 2026-01-01_
 - Ce fichier est la source de vérité de la mémoire long terme.
 - Chaque `###` est un chunk indépendant dans la base vectorielle SQLite.
 - Toute modification manuelle sera détectée et re-indexée au prochain démarrage.
+- Les champs marqués "pas encore renseigné" sont des priorités : les remplir dès que l'utilisateur donne l'information, ou poser la question si le contexte s'y prête.

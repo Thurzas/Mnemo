@@ -1,0 +1,84 @@
+gap_detection_task:
+  description: >
+    Ton rôle est de détecter UNIQUEMENT les lacunes CONTEXTUELLES dans la mémoire
+    de l'agent — celles qu'un schéma statique ne peut pas voir.
+
+    Les lacunes structurelles (prénom absent, section vide...) ont DÉJÀ été
+    détectées automatiquement et sont listées ici — ne les répète pas :
+    {structural_gaps}
+
+    Voici le contenu actuel de memory.md :
+    {memory_content}
+
+    Voici le résumé de la session qui vient de se terminer :
+    {session_summary}
+
+    Questions déjà refusées par l'utilisateur (ne pas reproposer) :
+    {skipped_questions}
+
+    Cherche uniquement des lacunes contextuelles, par exemple :
+    - Un projet mentionné dans la session mais sans objectifs ni contexte dans memory.md
+    - Une technologie ou outil évoqué sans préciser l'usage (hobby ? pro ? apprentissage ?)
+    - Une préférence implicite dans la façon de parler qui n'est jamais formulée explicitement
+    - Un événement ou deadline mentionné sans qu'on sache s'il est toujours d'actualité
+
+    Pour chaque question, détermine aussi le label et le format d'écriture selon la section cible :
+
+    Sections ATOMIQUES — réponse écrite sous forme "- **Label** : valeur" :
+      "Identité Utilisateur" > "Profil de base"        → labels : Nom/Pseudo, Métier, Localisation, Langue préférée, Fuseau horaire
+      "Identité Utilisateur" > "Préférences & style"   → labels : Style de communication, Ton préféré
+      "Identité Utilisateur" > "Centres d'intérêt"     → labels : libres mais concis
+      "Identité Agent"       > "Rôle & personnalité définis" → labels : Nom de l'agent, Rôle, Personnalité
+
+    Sections NARRATIVES — réponse écrite en prose libre (label vide "") :
+      "Connaissances persistantes" > "Projets en cours"
+      "Connaissances persistantes" > "Décisions prises & leur raison"
+      "Historique des sessions"
+      "Identité Agent" > "Ce que l'agent a appris sur lui-même"
+
+    Ne génère pas plus de 3 questions. Si rien de pertinent n'est détectable
+    depuis la session, retourne has_gaps: false.
+
+    Retourne UNIQUEMENT un objet JSON valide :
+    {
+      "has_gaps": true,
+      "questions": [
+        {
+          "id": "hash_court_unique",
+          "question": "Question claire et directe ?",
+          "section": "section_cible_dans_memory_md",
+          "subsection": "sous_section_cible",
+          "label": "Label markdown si section atomique, sinon chaîne vide",
+          "priority": 3
+        }
+      ]
+    }
+  expected_output: >
+    Un objet JSON valide avec has_gaps et la liste des questions contextuelles (0 à 3).
+  agent: gap_detector
+
+write_answers_task:
+  description: >
+    L'utilisateur vient de répondre à des questions sur lui-même.
+    Voici ses réponses au format JSON :
+    {answers_json}
+
+    Pour chaque entrée dans le JSON :
+    1. Si le champ "label" est présent et non vide, formate le contenu en :
+         - **{label}** : {réponse}
+       Sinon, reformule en prose concise (1-3 phrases).
+    2. Appelle update_markdown_memory avec :
+       - section    : la valeur du champ "section" dans le JSON
+       - subsection : la valeur du champ "subsection" dans le JSON
+       - content    : le contenu formaté selon la règle ci-dessus
+       - category   : déduis-la du contenu (identité | préférence | projet | connaissance)
+    3. Après avoir écrit TOUS les faits, appelle sync_memory_db
+
+    RÈGLES :
+    - Ne jamais inclure ## ou ### dans section ou subsection
+    - Ne jamais inventer de contenu non présent dans les réponses
+    - Si une réponse est vide ou "passer", l'ignorer complètement
+  expected_output: >
+    Confirmation que chaque réponse a été écrite dans memory.md et que
+    la synchronisation SQLite a été déclenchée.
+  agent: questionnaire_agent
