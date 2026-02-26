@@ -35,7 +35,7 @@ CATEGORY_WEIGHTS: dict[str, float] = {
 
 
 # ══════════════════════════════════════════════════════════════
-# Sanitization | Nettoyage de texte pour éviter les problèmes d'encodage
+# Sanitization
 # ══════════════════════════════════════════════════════════════
 
 def sanitize_str(text: str) -> str:
@@ -46,7 +46,7 @@ TOP_K_FINAL  = 5
 
 
 # ══════════════════════════════════════════════════════════════
-# Helpers bas niveau | Low level helpers
+# Helpers bas niveau
 # ══════════════════════════════════════════════════════════════
 
 def get_db() -> sqlite3.Connection:
@@ -71,7 +71,7 @@ def build_chunk_text(section: str, subsection: str, content: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# Pondération — fraîcheur & importance | Weighting — freshness & importance
+# Pondération — fraîcheur & importance
 # ══════════════════════════════════════════════════════════════
 
 def freshness_score(updated_at: str, half_life_days: float = HALF_LIFE_DAYS) -> float:
@@ -99,7 +99,7 @@ def importance_score(category: str, weight: float | None = None) -> float:
 
 
 # ══════════════════════════════════════════════════════════════
-# Retrieval hybride | récupération hybride keyword + vectorielle + fusion adaptative (RRF)
+# Retrieval hybride
 # ══════════════════════════════════════════════════════════════
 
 def search_keyword(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH) -> list[dict]:
@@ -179,6 +179,7 @@ def reciprocal_rank_fusion(kw: list[dict], vec: list[dict], k: int = 60) -> list
 
 
 def retrieve(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
+    """Recherche uniquement dans la mémoire personnelle (chunks de memory.md)."""
     db = get_db()
     kw  = search_keyword(db, query)
     vec = search_vector(db, query)
@@ -187,13 +188,61 @@ def retrieve(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     return merged[:top_k_final]
 
 
+def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
+    """
+    Recherche hybride globale : mémoire personnelle + documents ingérés.
+    Fusionne les deux sources via RRF avant de retourner le top_k_final.
+
+    Les chunks mémoire et les doc_chunks sont normalisés dans le même format
+    avant la fusion — le champ 'source_type' permet de les distinguer dans le prompt.
+    """
+    # Import ici pour éviter la dépendance circulaire (ingest_tools importe memory_tools)
+    from Mnemo.tools.ingest_tools import search_docs_keyword, search_docs_vector
+
+    db = get_db()
+
+    # ── Mémoire personnelle ────────────────────────────────────
+    kw_mem  = search_keyword(db, query)
+    vec_mem = search_vector(db, query)
+    for c in kw_mem + vec_mem:
+        c.setdefault("source_type", "memory")
+        c.setdefault("source", f"{c.get('section', '')} > {c.get('subsection', '')}")
+
+    # ── Documents ingérés ──────────────────────────────────────
+    kw_doc  = search_docs_keyword(db, query)
+    vec_doc = search_docs_vector(db, query)
+    for c in kw_doc + vec_doc:
+        c.setdefault("source_type", "document")
+
+    db.close()
+
+    # ── Fusion RRF globale ─────────────────────────────────────
+    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem)
+    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc)
+
+    all_results = merged_mem + merged_doc
+    all_results.sort(key=lambda x: x["score_final"], reverse=True)
+
+    return all_results[:top_k_final]
+
+
 def format_chunks_for_prompt(chunks: list[dict]) -> str:
-    parts = [f"[{c['section']} > {c['subsection']}]\n{c['content']}" for c in chunks]
+    """
+    Formate les chunks pour injection dans le prompt.
+    Distingue la source (mémoire personnelle vs document) dans le header.
+    """
+    parts = []
+    for c in chunks:
+        if c.get("source_type") == "document":
+            header = f"[📄 {c.get('source', 'document')} — p.{c.get('page', '?')}]"
+        else:
+            header = f"[🧠 {c.get('section', '')} > {c.get('subsection', '')}]"
+        parts.append(f"{header}\n{c['content']}")
     return "\n\n---\n\n".join(parts) if parts else "Aucun souvenir pertinent trouvé."
 
 
 # ══════════════════════════════════════════════════════════════
-# Markdown helpers | Helpers pour le parsing et l'upsert dans le Markdown
+# Markdown helpers
 # ══════════════════════════════════════════════════════════════
 
 # Mapping section → catégorie pour l'inférence lors du parsing Markdown
@@ -260,6 +309,7 @@ def parse_markdown_chunks(md_path: Path) -> list[dict]:
             "category":   infer_category_from_section(current_section),
         })
     return [c for c in chunks if len(c["content"]) > 50]
+
 
 def upsert_chunk(
     db: sqlite3.Connection,
@@ -364,7 +414,7 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
 
 
 # ══════════════════════════════════════════════════════════════
-# Session helpers | Helpers pour la mémoire spécifique à une session (historique, entités, faits extraits)
+# Session helpers
 # ══════════════════════════════════════════════════════════════
 
 def load_session_json(session_id: str) -> dict:
@@ -399,7 +449,7 @@ def update_session_memory(session_id: str, user_message: str, agent_response: st
 
 
 # ══════════════════════════════════════════════════════════════
-# Détection de modification du Markdown + cohérence DB | Detection of Markdown changes + DB consistency
+# Détection de modification du Markdown + cohérence DB
 # ══════════════════════════════════════════════════════════════
 
 def get_file_hash(path: Path) -> str:
@@ -467,7 +517,7 @@ def check_and_sync(md_path: Path = MARKDOWN_PATH) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════
-# TOOLS — Classe BaseTool (format CrewAI moderne) |  
+# TOOLS — Classe BaseTool (format CrewAI moderne)
 # ══════════════════════════════════════════════════════════════
 
 class RetrieveMemoryInput(BaseModel):
@@ -477,13 +527,16 @@ class RetrieveMemoryTool(BaseTool):
     name: str = "retrieve_memory"
     description: str = (
         "Recherche dans la mémoire long terme de l'agent via une recherche hybride "
-        "(keyword FTS5 + similarité vectorielle). Retourne les chunks les plus pertinents "
-        "formatés pour injection dans un prompt."
+        "(keyword FTS5 + similarité vectorielle). "
+        "Cherche à la fois dans la mémoire personnelle (faits mémorisés sur l'utilisateur) "
+        "ET dans les documents ingérés (PDF, etc.). "
+        "Retourne les chunks les plus pertinents formatés pour injection dans un prompt. "
+        "Les résultats indiquent leur source : 🧠 = mémoire personnelle, 📄 = document."
     )
     args_schema: Type[BaseModel] = RetrieveMemoryInput
 
     def _run(self, query: str) -> str:
-        chunks = retrieve(query)
+        chunks = retrieve_all(query)
         return format_chunks_for_prompt(chunks)
 
 
@@ -553,3 +606,31 @@ class SyncMemoryDbTool(BaseTool):
     def _run(self, reason: str = "post-write sync") -> str:
         sync_markdown_to_db()
         return f"✓ Synchronisation SQLite terminée ({reason})"
+
+
+class ListDocumentsInput(BaseModel):
+    dummy: str = Field(default="", description="Paramètre non utilisé — appelle sans argument.")
+
+class ListDocumentsTool(BaseTool):
+    name: str = "list_documents"
+    description: str = (
+        "Liste tous les documents ingérés dans la base de connaissances "
+        "(PDF, DOCX, TXT, Markdown, code source). "
+        "À utiliser quand l'utilisateur demande quels documents, livres ou fichiers "
+        "sont disponibles dans la documentation. "
+        "Retourne le titre, le nombre de pages et la date d'ingestion de chaque document."
+    )
+    args_schema: Type[BaseModel] = ListDocumentsInput
+
+    def _run(self, dummy: str = "") -> str:
+        from Mnemo.tools.ingest_tools import list_ingested_documents
+        docs = list_ingested_documents()
+        if not docs:
+            return "Aucun document ingéré pour le moment."
+        lines = ["Documents disponibles dans la base de connaissances :\n"]
+        for d in docs:
+            lines.append(
+                f"- {d['filename']}  "
+                f"({d['pages']} pages · {d['chunks']} chunks · ingéré le {d['ingested_at'][:10]})"
+            )
+        return "\n".join(lines)

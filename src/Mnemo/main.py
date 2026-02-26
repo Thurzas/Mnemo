@@ -3,13 +3,14 @@ import sys
 import json
 import uuid
 import warnings
+from pathlib import Path
 from datetime import datetime
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 from Mnemo.crew import ConversationCrew, ConsolidationCrew
 from Mnemo.tools.memory_tools import update_session_memory, load_session_json, SESSIONS_DIR, check_and_sync
-from Mnemo.tools.ingest_tools import ingest_pdf, list_ingested_documents
+from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 
 
 # ══════════════════════════════════════════════════════════════
@@ -79,7 +80,7 @@ def consolidate_orphan_sessions():
             print(f"   ✅ OK — {summary[:80]}...")
         except Exception as e:
             print(f"   ❌ Échec : {e}")
-            # On marque quand même comme fait pour éviter de boucler indéfiniment
+            # On marque quand même comme done pour éviter de boucler indéfiniment
             (SESSIONS_DIR / f"{session_id}.done").touch()
             print(f"   ↳ Session marquée comme traitée pour ne pas bloquer au prochain démarrage.")
 
@@ -197,14 +198,16 @@ def ingest(file_path: str) -> None:
     if not path.exists():
         print(f"❌ Fichier introuvable : {file_path}")
         return
-    if path.suffix.lower() != ".pdf":
+
+    ext = path.suffix.lower()
+    if ext not in (".pdf", ".docx", ".txt", ".md"):
         print(f"❌ Format non supporté : {path.suffix}")
-        print("   Formats supportés : .pdf")
+        print("   Formats supportés : .pdf, .docx, .txt, .md")
         return
 
     print(f"📄 Ingestion de {path.name}...")
     try:
-        result = ingest_pdf(path)
+        result = ingest_file(path)
     except ImportError as e:
         print(f"❌ Dépendance manquante : {e}")
         return

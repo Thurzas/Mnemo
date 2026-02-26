@@ -1457,6 +1457,8 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "ollama" },
+    { name = "pypdf" },
+    { name = "python-docx" },
     { name = "python-dotenv" },
 ]
 
@@ -1472,6 +1474,8 @@ requires-dist = [
     { name = "crewai", extras = ["tools"], specifier = ">=0.105.0,<1.0.0" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "ollama", specifier = ">=0.4.0" },
+    { name = "pypdf", specifier = ">=6.7.2" },
+    { name = "python-docx", specifier = ">=1.2.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
 

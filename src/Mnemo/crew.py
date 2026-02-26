@@ -1,14 +1,16 @@
-from crewai import Agent, Crew, Process, Task
+from crewai import Agent, Crew, Process, Task, LLM
 from crewai.project import CrewBase, agent, crew, task
-
+import os
 from Mnemo.tools.memory_tools import (
     RetrieveMemoryTool,
     GetSessionMemoryTool,
     UpdateMarkdownTool,
     SyncMemoryDbTool,
+    ListDocumentsTool,
 )
 
-
+MODEL = os.getenv("MODEL")
+API_BASE = os.getenv("API_BASE")
 # ══════════════════════════════════════════════════════════════
 # Conversation Crew — tourne à chaque message
 # ══════════════════════════════════════════════════════════════
@@ -26,6 +28,11 @@ class ConversationCrew:
             config=self.agents_config["evaluator"],
             verbose=False,
             allow_delegation=False,
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.0
+            )
         )
 
     @agent
@@ -34,7 +41,12 @@ class ConversationCrew:
             config=self.agents_config["memory_retriever"],
             verbose=False,
             allow_delegation=False,
-            tools=[RetrieveMemoryTool(), GetSessionMemoryTool()],
+            tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool()],
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.0
+            )
         )
 
     @agent
@@ -43,6 +55,11 @@ class ConversationCrew:
             config=self.agents_config["main_agent"],
             verbose=True,
             allow_delegation=False,
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.7
+            )
         )
 
     @task
@@ -92,6 +109,11 @@ class ConsolidationCrew:
             config=self.agents_config["session_consolidator"],
             verbose=False,
             allow_delegation=False,
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.1
+            )
         )
 
     @agent
@@ -101,6 +123,11 @@ class ConsolidationCrew:
             verbose=True,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.0
+            )            
         )
 
     @task
