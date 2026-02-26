@@ -23,84 +23,89 @@ from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 MAX_QUESTIONS = 5
 
 # Schéma de référence : section → liste de champs attendus
-# Chaque champ est un tuple (clé_recherche, question_si_absent)
-MEMORY_SCHEMA: dict[str, list[tuple[str, str, str, str]]] = {
-    # (clé_recherche, question, section_cible, subsection_cible)
+# Chaque champ est un tuple (aliases[], question, section_cible, subsection_cible)
+# aliases : liste de mots-clés alternatifs — si L'UN d'eux est présent dans la
+# section correspondante, le champ est considéré comme rempli.
+MEMORY_SCHEMA: dict[str, list[tuple[list[str], str, str, str]]] = {
     "identité utilisateur": [
-        ("prénom",      "Comment tu t'appelles ?",                                   "Identité Utilisateur", "Prénom"),
-        ("profession",  "Quelle est ta profession ou ton domaine d'activité ?",       "Identité Utilisateur", "Profession"),
-        ("localisation","Dans quelle ville ou pays tu te trouves ?",                  "Identité Utilisateur", "Localisation"),
-    ],
-    "projets": [
-        # Section optionnelle — on vérifie juste qu'elle n'est pas vide
+        (["prénom", "nom", "pseudo", "s'appelle", "matt", "name"],
+         "Comment tu t'appelles ?",
+         "Identité Utilisateur", "Profil de base"),
+        (["profession", "métier", "développeur", "ingénieur", "designer", "travail"],
+         "Quelle est ta profession ou ton domaine d'activité ?",
+         "Identité Utilisateur", "Profil de base"),
+        (["localisation", "ville", "pays", "france", "paris", "région", "fuseau"],
+         "Dans quelle ville ou pays tu te trouves ?",
+         "Identité Utilisateur", "Profil de base"),
     ],
     "préférences": [
-        ("style",       "Tu préfères des réponses courtes et directes, ou détaillées ?", "Préférences", "Style de réponse"),
-        ("langue",      "Tu préfères qu'on parle en français ou en anglais ?",            "Préférences", "Langue"),
+        (["style", "réponse", "courte", "détaillée", "verbeux", "concis"],
+         "Tu préfères des réponses courtes et directes, ou détaillées ?",
+         "Identité Utilisateur", "Préférences & style"),
     ],
     "identité agent": [
-        ("prénom",      "Comment tu veux appeler l'agent ? Il a un nom ?",            "Identité Agent", "Prénom"),
+        (["prénom", "nom", "s'appelle", "mitsune", "mnemo", "assistant"],
+         "Comment tu veux appeler l'agent ? Il a un nom ?",
+         "Identité Agent", "Rôle & personnalité définis"),
     ],
 }
+
+
+def _extract_section_content(memory_content: str, section_key: str) -> str:
+    """
+    Extrait le contenu d'une section spécifique dans memory.md.
+    Insensible à la casse et aux emojis.
+    Retourne le texte entre ce ## et le ## suivant.
+    """
+    import re
+    lines   = memory_content.splitlines()
+    content = []
+    inside  = False
+    for line in lines:
+        if line.startswith("## "):
+            norm = re.sub(r'^[\U00010000-\U0010ffff\u2600-\u26FF\u2700-\u27BF\s]+', '', line.lstrip("# ").strip()).strip().lower()
+            if section_key in norm or norm in section_key:
+                inside = True
+                continue
+            elif inside:
+                break
+        elif inside:
+            content.append(line.lower())
+    return "\n".join(content)
 
 
 def _detect_structural_gaps(memory_content: str) -> list[dict]:
     """
     Détecte les lacunes structurelles dans memory.md en comparant
     le contenu avec MEMORY_SCHEMA.
-    Retourne une liste de dicts compatibles avec le format des questions
-    du GapDetector LLM.
-    Pure Python — aucun LLM, résultat garanti.
+    - Cherche les aliases dans la section correspondante (pas dans tout le fichier)
+    - Insensible à la casse et aux emojis
+    - Pure Python — aucun LLM, résultat garanti.
     """
-    if not memory_content.strip():
-        # memory.md vide = toutes les sections manquantes
-        gaps = []
-        for section, fields in MEMORY_SCHEMA.items():
-            for (key, question, sec, subsec) in fields:
-                gaps.append({
-                    "id":         compute_hash(question),
-                    "question":   question,
-                    "section":    sec,
-                    "subsection": subsec,
-                    "priority":   1,
-                    "type":       "structural",
-                })
-        return gaps
-
-    content_lower = memory_content.lower()
-    gaps          = []
+    gaps = []
 
     for section_key, fields in MEMORY_SCHEMA.items():
-        # Vérifie si la section existe dans le markdown
-        section_present = section_key in content_lower
+        # Extrait le contenu de la section concernée
+        section_content = _extract_section_content(memory_content, section_key)
+        section_present = bool(section_content.strip())
 
-        if not fields:
-            # Section sans champs définis (ex: Projets) — on vérifie juste
-            # qu'elle a du contenu au-delà du titre
-            continue
+        for (aliases, question, sec, subsec) in fields:
+            q_id = compute_hash(question)
+            # Le champ est considéré rempli si AU MOINS UN alias est présent
+            # dans le contenu de la section (pas dans tout le fichier)
+            if section_present:
+                found = any(alias.lower() in section_content for alias in aliases)
+            else:
+                found = False
 
-        if not section_present:
-            # Section entière absente → toutes ses questions sont pertinentes
-            for (key, question, sec, subsec) in fields:
+            if not found:
+                priority = 1 if not section_present else 2
                 gaps.append({
-                    "id":         compute_hash(question),
+                    "id":         q_id,
                     "question":   question,
                     "section":    sec,
                     "subsection": subsec,
-                    "priority":   1,
-                    "type":       "structural",
-                })
-            continue
-
-        # Section présente → on cherche les champs manquants
-        for (key, question, sec, subsec) in fields:
-            if key not in content_lower:
-                gaps.append({
-                    "id":         compute_hash(question),
-                    "question":   question,
-                    "section":    sec,
-                    "subsection": subsec,
-                    "priority":   2,
+                    "priority":   priority,
                     "type":       "structural",
                 })
 

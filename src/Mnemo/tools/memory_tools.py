@@ -370,6 +370,20 @@ def sync_markdown_to_db(md_path: Path = MARKDOWN_PATH):
     update_file_state(md_path)
 
 
+def _normalize_section(title: str) -> str:
+    """
+    Normalise un titre de section pour la comparaison :
+    supprime les emojis, espaces et # en tête, met en minuscules.
+    Ex: "🧑 Identité Utilisateur" → "identité utilisateur"
+    """
+    import re
+    # Retire les # de début
+    title = title.lstrip("# ").strip()
+    # Retire les emojis et caractères non-alphanumérique en début de chaîne
+    title = re.sub(r'^[\U00010000-\U0010ffff\u2600-\u26FF\u2700-\u27BF\s]+', '', title)
+    return title.strip().lower()
+
+
 def update_markdown_section(section: str, subsection: str, content: str, md_path: Path = MARKDOWN_PATH, category: str = "connaissance"):
     """Upsert propre d'une sous-section dans le Markdown."""
     # Sanitize — le memory_writer peut recevoir du texte corrompu du modèle
@@ -379,6 +393,8 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
     text = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
     lines = text.splitlines()
 
+    section_norm = _normalize_section(section)
+
     in_target_section    = False
     in_target_subsection = False
     section_start        = -1
@@ -386,17 +402,20 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
     subsection_end       = len(lines)
 
     for i, line in enumerate(lines):
-        if line.startswith("## ") and line.lstrip("# ").strip() == section:
-            in_target_section = True
-            section_start = i
-        elif line.startswith("## ") and in_target_section:
-            in_target_section = False
-        if in_target_section and line.startswith("### ") and line.lstrip("# ").strip() == subsection:
-            in_target_subsection = True
-            subsection_start = i
-        elif in_target_subsection and (line.startswith("## ") or line.startswith("### ")):
-            subsection_end = i
-            break
+        if line.startswith("## "):
+            if _normalize_section(line) == section_norm:
+                in_target_section = True
+                section_start = i
+            elif in_target_section:
+                in_target_section = False
+        if in_target_section and line.startswith("### "):
+            sub_norm = line.lstrip("# ").strip().lower()
+            if sub_norm == subsection.strip().lower():
+                in_target_subsection = True
+                subsection_start = i
+            elif in_target_subsection:
+                subsection_end = i
+                break
 
     new_block = [f"### {subsection}", content, ""]
 
