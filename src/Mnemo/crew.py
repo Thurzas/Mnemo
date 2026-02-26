@@ -58,7 +58,7 @@ class ConversationCrew:
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
-                temperature=0.7
+                temperature=0.5
             )
         )
 
@@ -150,4 +150,76 @@ class ConsolidationCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=True,
+        )
+    
+# ══════════════════════════════════════════════════════════════
+# Curiosity Crew — détecte les lacunes et pose des questions
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class CuriosityCrew:
+    """
+    Crew de questionnement proactif.
+    Tourne après la consolidation si des lacunes sont détectées.
+    Peut aussi être déclenché inline si l'évaluateur signale needs_clarification.
+
+    Inputs gap_detection_task :
+        memory_content   : str  — contenu brut de memory.md
+        session_summary  : str  — résumé de la session écoulée
+        skipped_questions: str  — liste des questions déjà refusées
+
+    Inputs write_answers_task :
+        answers_json     : str  — JSON [{question, answer, section, subsection}]
+    """
+
+    agents_config = "config/curiosity_agents.yaml"
+    tasks_config  = "config/curiosity_tasks.yaml"
+
+    @agent
+    def gap_detector(self) -> Agent:
+        return Agent(
+            config=self.agents_config["gap_detector"],
+            verbose=False,
+            allow_delegation=False,
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.0
+            ) 
+        )
+
+    @agent
+    def questionnaire_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["questionnaire_agent"],
+            verbose=True,
+            allow_delegation=False,
+            tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.2
+            ) 
+    )
+
+    @task
+    def gap_detection_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["gap_detection_task"],
+        )
+
+    @task
+    def write_answers_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["write_answers_task"],
+            context=[self.gap_detection_task()],
+        )
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
         )

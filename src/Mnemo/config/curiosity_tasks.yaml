@@ -1,0 +1,67 @@
+gap_detection_task:
+  description: >
+    Voici le contenu actuel de memory.md :
+    {memory_content}
+
+    Voici le résumé de la session qui vient de se terminer :
+    {session_summary}
+
+    Voici les questions déjà refusées par l'utilisateur (ne pas reproposer) :
+    {skipped_questions}
+
+    Identifie jusqu'à 5 lacunes importantes dans la mémoire de l'agent.
+    Une lacune = une information qui serait utile à connaître mais qui est absente
+    ou trop vague dans memory.md.
+
+    Exemples de bonnes lacunes :
+    - Un projet est mentionné mais ses objectifs ne sont pas décrits
+    - L'utilisateur a des préférences implicites jamais exprimées explicitement
+    - Un contexte personnel ou professionnel est flou
+    - Des outils ou technologies sont mentionnés sans contexte d'usage
+
+    Exemples de mauvaises lacunes (à éviter) :
+    - Questions sur des sujets déjà bien couverts dans memory.md
+    - Questions triviales (âge, prénom si déjà connu)
+    - Questions déjà dans la liste des refusées
+
+    Retourne UNIQUEMENT un objet JSON valide :
+    {
+      "has_gaps": true,
+      "questions": [
+        {
+          "id": "hash_court_unique",
+          "question": "Question claire et directe à poser à l'utilisateur ?",
+          "section": "section_cible_dans_memory_md",
+          "subsection": "sous_section_cible",
+          "priority": 1
+        }
+      ]
+    }
+
+    Si aucune lacune pertinente n'est détectée, retourne :
+    { "has_gaps": false, "questions": [] }
+  expected_output: >
+    Un objet JSON valide avec has_gaps et la liste des questions (0 à 5).
+  agent: gap_detector
+
+write_answers_task:
+  description: >
+    L'utilisateur a répondu aux questions suivantes. Pour chaque réponse,
+    reformule-la en fait clair et bien structuré, puis écris-la dans memory.md
+    via l'outil update_markdown_section.
+
+    Questions et réponses collectées :
+    {answers_json}
+
+    Pour chaque entrée :
+    1. Reformule la réponse brute en fait précis et utile (1-3 phrases max)
+    2. Identifie la section et sous-section appropriées dans memory.md
+    3. Appelle update_markdown_section avec le contenu reformulé
+    4. Après avoir traité toutes les réponses, appelle sync_memory_db
+
+    Ne pas traiter les réponses vides ou les "passer".
+    Être concis — un fait par réponse, pas de paraphrase inutile.
+  expected_output: >
+    Confirmation que chaque réponse a été écrite dans memory.md et que
+    la synchronisation SQLite a été déclenchée.
+  agent: questionnaire_agent

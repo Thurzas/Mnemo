@@ -634,3 +634,49 @@ class ListDocumentsTool(BaseTool):
                 f"({d['pages']} pages · {d['chunks']} chunks · ingéré le {d['ingested_at'][:10]})"
             )
         return "\n".join(lines)
+
+
+class GetSkippedQuestionsInput(BaseModel):
+    dummy: str = Field(default="", description="Paramètre non utilisé.")
+
+class GetSkippedQuestionsTool(BaseTool):
+    name: str = "get_skipped_questions"
+    description: str = (
+        "Retourne la liste des questions que l'utilisateur a déjà refusé de répondre. "
+        "À utiliser avant de générer de nouvelles questions pour éviter de reproposer "
+        "les mêmes."
+    )
+    args_schema: Type[BaseModel] = GetSkippedQuestionsInput
+
+    def _run(self, dummy: str = "") -> str:
+        db   = get_db()
+        rows = db.execute(
+            "SELECT question FROM curiosity_skipped ORDER BY skipped_at DESC"
+        ).fetchall()
+        db.close()
+        if not rows:
+            return "[]"
+        return "\n".join(f"- {r[0]}" for r in rows)
+
+
+class MarkQuestionSkippedInput(BaseModel):
+    question_id: str = Field(..., description="ID de la question (hash) à marquer comme skippée.")
+    question:    str = Field(..., description="Texte complet de la question.")
+
+class MarkQuestionSkippedTool(BaseTool):
+    name: str = "mark_question_skipped"
+    description: str = (
+        "Marque une question comme refusée par l'utilisateur. "
+        "Cette question ne sera plus proposée dans les futures sessions."
+    )
+    args_schema: Type[BaseModel] = MarkQuestionSkippedInput
+
+    def _run(self, question_id: str, question: str) -> str:
+        db = get_db()
+        db.execute(
+            "INSERT OR REPLACE INTO curiosity_skipped (id, question) VALUES (?, ?)",
+            (question_id, question)
+        )
+        db.commit()
+        db.close()
+        return f"✓ Question marquée comme skippée : {question_id}"
