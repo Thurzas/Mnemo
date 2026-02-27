@@ -165,8 +165,18 @@ class ConsolidationCrew:
 
 @CrewBase
 class GapDetectionCrew:
-    """Crew de détection des lacunes contextuelles uniquement."""
-
+    """
+    Crew de questionnement proactif.
+    Tourne après la consolidation si des lacunes sont détectées.
+    Peut aussi être déclenché inline si l'évaluateur signale needs_clarification.
+    Inputs gap_detection_task :
+        memory_content   : str  — contenu brut de memory.md
+        session_summary  : str  — résumé de la session écoulée
+        skipped_questions: str  — liste des questions déjà refusées
+    Inputs write_answers_task :
+        answers_json     : str  — JSON [{question, answer, section, subsection}]
+    """
+    
     agents_config = "config/curiosity_agents.yaml"
     tasks_config  = "config/curiosity_tasks.yaml"
 
