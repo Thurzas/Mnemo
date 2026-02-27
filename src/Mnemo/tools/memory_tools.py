@@ -197,7 +197,7 @@ def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     avant la fusion — le champ 'source_type' permet de les distinguer dans le prompt.
     """
     # Import ici pour éviter la dépendance circulaire (ingest_tools importe memory_tools)
-    from waifuclawd.tools.ingest_tools import search_docs_keyword, search_docs_vector
+    from Mnemo.tools.calendar.tools.ingest_tools import search_docs_keyword, search_docs_vector
 
     db = get_db()
 
@@ -694,7 +694,7 @@ class ListDocumentsTool(BaseTool):
     args_schema: Type[BaseModel] = ListDocumentsInput
 
     def _run(self, dummy: str = "") -> str:
-        from waifuclawd.tools.ingest_tools import list_ingested_documents
+        from Mnemo.tools.calendar.tools.ingest_tools import list_ingested_documents
         docs = list_ingested_documents()
         if not docs:
             return "Aucun document ingéré pour le moment."
