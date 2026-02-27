@@ -12,6 +12,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pypdf>=6.7.2",
     "python-docx>=1.2.0",
+    "icalendar>=7.0.2",
 ]
 [tool.pytest.ini_options]
 markers = [
