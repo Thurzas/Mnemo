@@ -432,15 +432,17 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
     )
 
     if in_target_subsection and subsection_start != -1:
-        # Récupère le contenu existant (lignes entre ### et le suivant)
-        existing_lines   = lines[subsection_start + 1 : subsection_end]
-        existing_content = "\n".join(existing_lines).strip()
+        # Récupère les lignes existantes (entre ### et la prochaine section)
+        existing_lines = lines[subsection_start + 1 : subsection_end]
 
-        is_placeholder = not existing_content or any(
-            p in existing_content.lower() for p in PLACEHOLDERS
-        )
+        # Garde uniquement les lignes qui ont une vraie valeur (pas placeholder, pas vides seules)
+        real_lines = [
+            l for l in existing_lines
+            if l.strip() and not any(p in l.lower() for p in PLACEHOLDERS)
+        ]
 
-        merged    = content if is_placeholder else existing_content + "\n" + content
+        # Merge : lignes réelles conservées + nouveau contenu ajouté
+        merged    = "\n".join(real_lines + [content]) if real_lines else content
         new_block = [f"### {subsection}", merged, ""]
         lines[subsection_start:subsection_end] = new_block
 
