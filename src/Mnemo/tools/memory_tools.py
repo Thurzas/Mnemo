@@ -197,7 +197,7 @@ def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     avant la fusion — le champ 'source_type' permet de les distinguer dans le prompt.
     """
     # Import ici pour éviter la dépendance circulaire (ingest_tools importe memory_tools)
-    from Mnemo.tools.ingest_tools import search_docs_keyword, search_docs_vector
+    from waifuclawd.tools.ingest_tools import search_docs_keyword, search_docs_vector
 
     db = get_db()
 
@@ -441,8 +441,34 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
             if l.strip() and not any(p in l.lower() for p in PLACEHOLDERS)
         ]
 
-        # Merge : lignes réelles conservées + nouveau contenu ajouté
-        merged    = "\n".join(real_lines + [content]) if real_lines else content
+        # ── Upsert par label pour les lignes atomiques ──
+        # Si content est de la forme "- **Label** : valeur",
+        # on remplace la ligne existante avec le même label plutôt qu'appender.
+        import re as _re
+        label_match = _re.match(r"^-\s*\*\*(.+?)\*\*\s*:", content)
+        if label_match:
+            label_key = label_match.group(1).strip().lower()
+            replaced  = False
+            new_real  = []
+            for existing_line in real_lines:
+                ex_match = _re.match(r"^-\s*\*\*(.+?)\*\*\s*:", existing_line)
+                if ex_match and ex_match.group(1).strip().lower() == label_key:
+                    # Même label → remplace par la nouvelle valeur
+                    new_real.append(content)
+                    replaced = True
+                else:
+                    new_real.append(existing_line)
+            if not replaced:
+                new_real.append(content)
+            real_lines = new_real
+        else:
+            # Contenu narratif — déduplique les lignes exactes, appende si nouveau
+            content_stripped = content.strip()
+            if content_stripped not in "\n".join(real_lines):
+                real_lines = real_lines + [content]
+            # Sinon : contenu déjà présent → on n'écrit rien
+
+        merged    = "\n".join(real_lines) if real_lines else content
         new_block = [f"### {subsection}", merged, ""]
         lines[subsection_start:subsection_end] = new_block
 
@@ -668,7 +694,7 @@ class ListDocumentsTool(BaseTool):
     args_schema: Type[BaseModel] = ListDocumentsInput
 
     def _run(self, dummy: str = "") -> str:
-        from Mnemo.tools.ingest_tools import list_ingested_documents
+        from waifuclawd.tools.ingest_tools import list_ingested_documents
         docs = list_ingested_documents()
         if not docs:
             return "Aucun document ingéré pour le moment."
