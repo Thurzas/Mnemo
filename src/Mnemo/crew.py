@@ -1,16 +1,22 @@
 from crewai import Agent, Crew, Process, Task, LLM
 from crewai.project import CrewBase, agent, crew, task
 import os
+
 from Mnemo.tools.memory_tools import (
     RetrieveMemoryTool,
     GetSessionMemoryTool,
     UpdateMarkdownTool,
     SyncMemoryDbTool,
     ListDocumentsTool,
+    GetSkippedQuestionsTool,
+    MarkQuestionSkippedTool,
 )
+from Mnemo.tools.calendar_tools import GetCalendarTool
 
-MODEL = os.getenv("MODEL")
+MODEL    = os.getenv("MODEL")
 API_BASE = os.getenv("API_BASE")
+
+
 # ══════════════════════════════════════════════════════════════
 # Conversation Crew — tourne à chaque message
 # ══════════════════════════════════════════════════════════════
@@ -28,11 +34,6 @@ class ConversationCrew:
             config=self.agents_config["evaluator"],
             verbose=False,
             allow_delegation=False,
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-            )
         )
 
     @agent
@@ -41,12 +42,7 @@ class ConversationCrew:
             config=self.agents_config["memory_retriever"],
             verbose=False,
             allow_delegation=False,
-            tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool()],
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-            )
+            tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool()],
         )
 
     @agent
@@ -55,11 +51,6 @@ class ConversationCrew:
             config=self.agents_config["main_agent"],
             verbose=True,
             allow_delegation=False,
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.5
-            )
         )
 
     @task
@@ -109,11 +100,6 @@ class ConsolidationCrew:
             config=self.agents_config["session_consolidator"],
             verbose=False,
             allow_delegation=False,
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.1
-            )
         )
 
     @agent
@@ -123,11 +109,6 @@ class ConsolidationCrew:
             verbose=True,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-            )            
         )
 
     @task
@@ -151,26 +132,15 @@ class ConsolidationCrew:
             process=Process.sequential,
             verbose=True,
         )
-    
+
+
 # ══════════════════════════════════════════════════════════════
 # Curiosity Crew — détecte les lacunes et pose des questions
 # ══════════════════════════════════════════════════════════════
 
 @CrewBase
-class CuriosityCrew:
-    """
-    Crew de questionnement proactif.
-    Tourne après la consolidation si des lacunes sont détectées.
-    Peut aussi être déclenché inline si l'évaluateur signale needs_clarification.
-
-    Inputs gap_detection_task :
-        memory_content   : str  — contenu brut de memory.md
-        session_summary  : str  — résumé de la session écoulée
-        skipped_questions: str  — liste des questions déjà refusées
-
-    Inputs write_answers_task :
-        answers_json     : str  — JSON [{question, answer, section, subsection}]
-    """
+class GapDetectionCrew:
+    """Crew de détection des lacunes contextuelles uniquement."""
 
     agents_config = "config/curiosity_agents.yaml"
     tasks_config  = "config/curiosity_tasks.yaml"
@@ -181,38 +151,12 @@ class CuriosityCrew:
             config=self.agents_config["gap_detector"],
             verbose=False,
             allow_delegation=False,
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-            ) 
         )
-
-    @agent
-    def questionnaire_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config["questionnaire_agent"],
-            verbose=True,
-            allow_delegation=False,
-            tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.2
-            ) 
-    )
 
     @task
     def gap_detection_task(self) -> Task:
         return Task(
             config=self.tasks_config["gap_detection_task"],
-        )
-
-    @task
-    def write_answers_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["write_answers_task"],
-            context=[self.gap_detection_task()],
         )
 
     @crew
@@ -223,3 +167,39 @@ class CuriosityCrew:
             process=Process.sequential,
             verbose=False,
         )
+
+
+@CrewBase
+class WriteAnswersCrew:
+    """Crew d'écriture des réponses utilisateur dans memory.md."""
+
+    agents_config = "config/curiosity_agents.yaml"
+    tasks_config  = "config/curiosity_tasks.yaml"
+
+    @agent
+    def questionnaire_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["questionnaire_agent"],
+            verbose=True,
+            allow_delegation=False,
+            tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
+        )
+
+    @task
+    def write_answers_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["write_answers_task"],
+        )
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+
+# Alias pour compatibilité avec les imports existants dans main.py
+CuriosityCrew = GapDetectionCrew
