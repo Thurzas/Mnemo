@@ -476,7 +476,7 @@ class TestUpdateMarkdownSection:
         assert "aucun" not in section_content
 
     def test_multiple_writes_accumulate(self, tmp_md):
-        """Deux écriture successives dans une même sous-section s'accumulent."""
+        """Deux écritures successives avec labels DIFFÉRENTS s'accumulent."""
         tmp_md.write_text(TEMPLATE_PARTIAL, encoding="utf-8")
         update_markdown_section(
             section="Identité Utilisateur",
@@ -494,6 +494,83 @@ class TestUpdateMarkdownSection:
         assert "- **Localisation** : France" in result
         assert "- **Langue préférée** : Français" in result
         assert "- **Nom/Pseudo** : Matt" in result
+
+    def test_same_label_replaced_not_duplicated(self, tmp_md):
+        """Même label écrit deux fois → 1 seule occurrence, dernière valeur."""
+        tmp_md.write_text(TEMPLATE_PARTIAL, encoding="utf-8")
+        update_markdown_section(
+            section="Identité Utilisateur",
+            subsection="Profil de base",
+            content="- **Nom/Pseudo** : Thurzas",
+            md_path=tmp_md,
+        )
+        result = tmp_md.read_text(encoding="utf-8")
+        assert result.count("**Nom/Pseudo**") == 1
+        assert "Thurzas" in result
+        assert "Matt" not in result.split("Profil de base")[1].split("###")[0]
+
+    def test_same_label_three_writes_one_occurrence(self, tmp_md):
+        """3 écritures du même label → toujours 1 ligne, dernière valeur."""
+        tmp_md.write_text(TEMPLATE_PARTIAL, encoding="utf-8")
+        for val in ["direct et concis", "jovial et amical", "réponses courtes"]:
+            update_markdown_section(
+                section="Identité Utilisateur",
+                subsection="Préférences & style",
+                content=f"- **Style de communication** : {val}",
+                md_path=tmp_md,
+            )
+        result = tmp_md.read_text(encoding="utf-8")
+        assert result.count("**Style de communication**") == 1
+        assert "réponses courtes" in result
+        assert "direct et concis" not in result
+        assert "jovial et amical" not in result
+
+    def test_same_label_other_labels_untouched(self, tmp_md):
+        """Upsert d'un label ne doit pas altérer les autres labels de la sous-section."""
+        tmp_md.write_text(TEMPLATE_PARTIAL, encoding="utf-8")
+        update_markdown_section(
+            section="Identité Utilisateur",
+            subsection="Profil de base",
+            content="- **Métier** : Développeur IA",
+            md_path=tmp_md,
+        )
+        result = tmp_md.read_text(encoding="utf-8")
+        assert "- **Nom/Pseudo** : Matt" in result
+        assert "Développeur IA" in result
+        assert result.count("**Métier**") == 1
+
+    def test_narrative_exact_duplicate_not_appended(self, tmp_md):
+        """Section narrative : contenu identique écrit deux fois → 1 seule fois."""
+        tmp_md.write_text(dedent("""\
+            ## Connaissances persistantes
+            ### Décisions prises & leur raison
+            Choix de SQLite pour le déploiement local.
+        """), encoding="utf-8")
+        update_markdown_section(
+            section="Connaissances persistantes",
+            subsection="Décisions prises & leur raison",
+            content="Choix de SQLite pour le déploiement local.",
+            md_path=tmp_md,
+        )
+        result = tmp_md.read_text(encoding="utf-8")
+        assert result.count("Choix de SQLite") == 1
+
+    def test_narrative_new_content_appended(self, tmp_md):
+        """Section narrative : contenu différent → appende normalement."""
+        tmp_md.write_text(dedent("""\
+            ## Connaissances persistantes
+            ### Décisions prises & leur raison
+            Choix de SQLite pour le déploiement local.
+        """), encoding="utf-8")
+        update_markdown_section(
+            section="Connaissances persistantes",
+            subsection="Décisions prises & leur raison",
+            content="Choix d'Ollama pour les embeddings locaux.",
+            md_path=tmp_md,
+        )
+        result = tmp_md.read_text(encoding="utf-8")
+        assert "Choix de SQLite" in result
+        assert "Choix d'Ollama" in result
 
     def test_file_created_if_absent(self, tmp_md):
         """Fichier absent → créé automatiquement."""
