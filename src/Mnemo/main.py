@@ -137,6 +137,9 @@ def _detect_structural_gaps(memory_content: str) -> list[dict]:
             found = False
             if section_present:
                 for line in section_content.splitlines():
+                    # Ignore les headers ### — ce sont des titres, pas des valeurs
+                    if line.strip().startswith("#"):
+                        continue
                     for alias in aliases:
                         if alias.lower() in line and _line_is_real_value(line, alias):
                             found = True
@@ -266,7 +269,6 @@ def curiosity_session(session_summary: str) -> None:
                 "skipped_questions":  skipped_text,
                 "structural_gaps":    structural_summary,
                 "answers_json":       "[]",
-                "temporal_context":  get_temporal_context(),
             })
             raw = result.raw.strip() if result.raw else ""
             # Extrait le JSON même si le LLM a ajouté du texte autour
