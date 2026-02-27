@@ -34,6 +34,11 @@ class ConversationCrew:
             config=self.agents_config["evaluator"],
             verbose=False,
             allow_delegation=False,
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.0
+            )
         )
 
     @agent
@@ -43,6 +48,11 @@ class ConversationCrew:
             verbose=False,
             allow_delegation=False,
             tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool()],
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.0
+            )
         )
 
     @agent
@@ -51,6 +61,11 @@ class ConversationCrew:
             config=self.agents_config["main_agent"],
             verbose=True,
             allow_delegation=False,
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.5
+            )
         )
 
     @task
@@ -100,6 +115,11 @@ class ConsolidationCrew:
             config=self.agents_config["session_consolidator"],
             verbose=False,
             allow_delegation=False,
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.1
+            )
         )
 
     @agent
@@ -109,6 +129,11 @@ class ConsolidationCrew:
             verbose=True,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.0
+            )
         )
 
     @task
@@ -151,6 +176,11 @@ class GapDetectionCrew:
             config=self.agents_config["gap_detector"],
             verbose=False,
             allow_delegation=False,
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.0
+            )
         )
 
     @task
@@ -183,6 +213,11 @@ class WriteAnswersCrew:
             verbose=True,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
+            llm = LLM(
+                model=MODEL,  
+                base_url=API_BASE,
+                temperature=0.2
+            )
         )
 
     @task
