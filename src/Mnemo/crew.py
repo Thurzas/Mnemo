@@ -8,13 +8,17 @@ from Mnemo.tools.memory_tools import (
     UpdateMarkdownTool,
     SyncMemoryDbTool,
     ListDocumentsTool,
-    GetSkippedQuestionsTool,
-    MarkQuestionSkippedTool,
 )
 from Mnemo.tools.calendar_tools import GetCalendarTool
 
 MODEL    = os.getenv("MODEL")
 API_BASE = os.getenv("API_BASE")
+
+# ── LLM par rôle ────────────────────────────────────────────────
+# Ajuste les modèles selon ce que tu as dans Ollama.
+# Le principe : modèle léger pour les tâches structurées, plus lourd pour la réponse finale.
+def _llm(temperature: float = 0.0) -> LLM:
+    return LLM(model=MODEL, base_url=API_BASE, temperature=temperature)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -23,8 +27,6 @@ API_BASE = os.getenv("API_BASE")
 
 @CrewBase
 class ConversationCrew:
-    """Crew principale : évalue le message, récupère la mémoire, répond."""
-
     agents_config = "config/conversation_agents.yaml"
     tasks_config  = "config/conversation_tasks.yaml"
 
@@ -34,12 +36,13 @@ class ConversationCrew:
             config=self.agents_config["evaluator"],
             verbose=False,
             allow_delegation=False,
+            max_iter=2,          # Tâche simple : produit un JSON, pas besoin de boucler
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
                 temperature=0.0
-            )
         )
+    )
 
     @agent
     def memory_retriever(self) -> Agent:
@@ -48,45 +51,39 @@ class ConversationCrew:
             verbose=False,
             allow_delegation=False,
             tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool()],
+            max_iter=4,          # 4 tools max → 1 appel chacun suffit
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
                 temperature=0.0
-            )
+        )
         )
 
     @agent
     def main_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["main_agent"],
-            verbose=True,
+            verbose=False,       # verbose=True ralentit et pollue le terminal
             allow_delegation=False,
+            max_iter=3,          # Répond en 1-2 passes, pas besoin de plus
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
                 temperature=0.5
-            )
         )
+    )
 
     @task
     def evaluate_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["evaluate_task"],
-        )
+        return Task(config=self.tasks_config["evaluate_task"])
 
     @task
     def retrieve_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["retrieve_task"],
-            context=[self.evaluate_task()],
-        )
+        return Task(config=self.tasks_config["retrieve_task"], context=[self.evaluate_task()])
 
     @task
     def main_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["main_task"],
-            context=[self.retrieve_task()],
-        )
+        return Task(config=self.tasks_config["main_task"], context=[self.retrieve_task()])
 
     @crew
     def crew(self) -> Crew:
@@ -104,8 +101,6 @@ class ConversationCrew:
 
 @CrewBase
 class ConsolidationCrew:
-    """Crew de consolidation : extrait les faits et met à jour la mémoire long terme."""
-
     agents_config = "config/consolidation_agents.yaml"
     tasks_config  = "config/consolidation_tasks.yaml"
 
@@ -115,6 +110,7 @@ class ConsolidationCrew:
             config=self.agents_config["session_consolidator"],
             verbose=False,
             allow_delegation=False,
+            max_iter=2,          # Analyse + produit un JSON, 2 passes suffisent
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
@@ -126,9 +122,10 @@ class ConsolidationCrew:
     def memory_writer(self) -> Agent:
         return Agent(
             config=self.agents_config["memory_writer"],
-            verbose=True,
+            verbose=False,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
+            max_iter=6,          # N faits à écrire + 1 sync → N+1 appels tool
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
@@ -138,16 +135,11 @@ class ConsolidationCrew:
 
     @task
     def consolidate_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["consolidate_task"],
-        )
+        return Task(config=self.tasks_config["consolidate_task"])
 
     @task
     def write_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["write_task"],
-            context=[self.consolidate_task()],
-        )
+        return Task(config=self.tasks_config["write_task"], context=[self.consolidate_task()])
 
     @crew
     def crew(self) -> Crew:
@@ -155,28 +147,16 @@ class ConsolidationCrew:
             agents=self.agents,
             tasks=self.tasks,
             process=Process.sequential,
-            verbose=True,
+            verbose=False,       # verbose=True sur la consolidation ralentissait aussi
         )
 
 
 # ══════════════════════════════════════════════════════════════
-# Curiosity Crew — détecte les lacunes et pose des questions
+# Curiosity Crew — détecte les lacunes contextuelles
 # ══════════════════════════════════════════════════════════════
 
 @CrewBase
-class GapDetectionCrew:
-    """
-    Crew de questionnement proactif.
-    Tourne après la consolidation si des lacunes sont détectées.
-    Peut aussi être déclenché inline si l'évaluateur signale needs_clarification.
-    Inputs gap_detection_task :
-        memory_content   : str  — contenu brut de memory.md
-        session_summary  : str  — résumé de la session écoulée
-        skipped_questions: str  — liste des questions déjà refusées
-    Inputs write_answers_task :
-        answers_json     : str  — JSON [{question, answer, section, subsection}]
-    """
-    
+class CuriosityCrew:
     agents_config = "config/curiosity_agents.yaml"
     tasks_config  = "config/curiosity_tasks.yaml"
 
@@ -186,55 +166,36 @@ class GapDetectionCrew:
             config=self.agents_config["gap_detector"],
             verbose=False,
             allow_delegation=False,
+            max_iter=2,          # Analyse + produit un JSON, pas de tools
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
                 temperature=0.0
-            )
         )
-
-    @task
-    def gap_detection_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["gap_detection_task"],
-        )
-
-    @crew
-    def crew(self) -> Crew:
-        return Crew(
-            agents=self.agents,
-            tasks=self.tasks,
-            process=Process.sequential,
-            verbose=False,
-        )
-
-
-@CrewBase
-class WriteAnswersCrew:
-    """Crew d'écriture des réponses utilisateur dans memory.md."""
-
-    agents_config = "config/curiosity_agents.yaml"
-    tasks_config  = "config/curiosity_tasks.yaml"
+    )
 
     @agent
     def questionnaire_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["questionnaire_agent"],
-            verbose=True,
+            verbose=False,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
+            max_iter=6,
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
-                temperature=0.2
-            )
+                temperature=0.0
         )
+    )
+
+    @task
+    def gap_detection_task(self) -> Task:
+        return Task(config=self.tasks_config["gap_detection_task"])
 
     @task
     def write_answers_task(self) -> Task:
-        return Task(
-            config=self.tasks_config["write_answers_task"],
-        )
+        return Task(config=self.tasks_config["write_answers_task"], context=[self.gap_detection_task()])
 
     @crew
     def crew(self) -> Crew:
@@ -244,7 +205,3 @@ class WriteAnswersCrew:
             process=Process.sequential,
             verbose=False,
         )
-
-
-# Alias pour compatibilité avec les imports existants dans main.py
-CuriosityCrew = GapDetectionCrew

@@ -16,6 +16,10 @@ from Mnemo.tools.memory_tools import (
     update_markdown_section, sync_markdown_to_db,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
+from Mnemo.tools.calendar_tools import (
+    get_temporal_context, get_upcoming_events,
+    format_startup_banner, calendar_is_configured,
+)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -262,6 +266,7 @@ def curiosity_session(session_summary: str) -> None:
                 "skipped_questions":  skipped_text,
                 "structural_gaps":    structural_summary,
                 "answers_json":       "[]",
+                "temporal_context":  get_temporal_context(),
             })
             raw = result.raw.strip() if result.raw else ""
             # Extrait le JSON même si le LLM a ajouté du texte autour
@@ -341,6 +346,7 @@ def handle_message(user_message: str, session_id: str) -> str:
         "session_id":        session_id,
         "evaluation_result": "",
         "memory_context":    "",
+        "temporal_context":  get_temporal_context(),
     })
     response = result.raw
 
@@ -366,6 +372,7 @@ def handle_message(user_message: str, session_id: str) -> str:
                             "session_id":        session_id,
                             "evaluation_result": "",
                             "memory_context":    "",
+                            "temporal_context":  get_temporal_context(),
                         })
                         response = result2.raw
                         update_session_memory(session_id, user_message, response)
@@ -386,7 +393,8 @@ def end_session(session_id: str) -> str:
         return "Session vide, rien à consolider."
 
     result = ConsolidationCrew().crew().kickoff(inputs={
-        "session_json": json.dumps(session, ensure_ascii=False, indent=2),
+        "session_json":     json.dumps(session, ensure_ascii=False, indent=2),
+        "temporal_context": get_temporal_context(),
     })
 
     # Marque la session comme consolidée
@@ -446,7 +454,15 @@ def run():
 
     session_id = new_session_id()
     print(f"\n🧠 Agent démarré — session : {session_id}")
-    print("Tape 'exit' pour terminer proprement.\n")
+    print("Tape 'exit' pour terminer proprement.")
+
+    # Bannière calendrier — affiche les événements urgents si configuré
+    if calendar_is_configured():
+        events = get_upcoming_events(days=3)
+        banner = format_startup_banner(events)
+        if banner:
+            print(banner)
+    print()
 
     # Premier lancement — memory.md vierge → questionnaire d'initialisation
     memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
