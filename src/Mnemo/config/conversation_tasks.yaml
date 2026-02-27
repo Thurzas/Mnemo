@@ -1,5 +1,7 @@
 evaluate_task:
   description: >
+    Contexte temporel : {temporal_context}
+
     Analyse ce message utilisateur : {user_message}
 
     Retourne UNIQUEMENT un objet JSON valide, sans texte autour, avec cette structure :
@@ -8,12 +10,19 @@ evaluate_task:
       "entities": ["liste", "des", "entités", "nommées"],
       "topics": ["sujets", "principaux"],
       "needs_memory": true,
+      "needs_clarification": false,
+      "clarification_reason": null,
       "complexity": "simple | moderate | complex",
-      "memory_query": "phrase courte et optimisée pour le retrieval mémoire"
+      "memory_query": "phrase courte et optimisée pour le retrieval mémoire",
+      "needs_calendar": false
     }
 
     needs_memory doit être false uniquement pour les messages triviaux (bonjour, merci, etc.).
     memory_query doit être reformulée pour maximiser le rappel dans un index vectoriel.
+    needs_clarification doit être true si le message est ambigu au point qu'une question
+    de clarification permettrait une réponse nettement meilleure.
+    needs_calendar doit être true si le message concerne des dates, deadlines, événements,
+    planning, "quand est-ce que", "ai-je le temps", "c'est quand", etc.
   expected_output: >
     Un objet JSON valide et uniquement le JSON, sans markdown, sans explication.
   agent: evaluator
@@ -25,13 +34,15 @@ retrieve_task:
 
     1. Si le champ needs_memory est true, utilise l'outil retrieve_memory
        avec le champ memory_query comme query.
-    2. Si l'utilisateur pose une question sur les documents disponibles
-       (quels livres, quels fichiers, quelle documentation), utilise l'outil
-       list_documents pour obtenir le catalogue complet des documents ingérés.
-    3. Utilise toujours get_session_memory avec le session_id fourni.
-    4. Retourne UNIQUEMENT un JSON avec cette structure :
+    2. Si needs_calendar est true, utilise l'outil get_calendar_events
+       pour récupérer les événements à venir pertinents.
+    3. Si l'utilisateur pose une question sur les documents disponibles,
+       utilise l'outil list_documents.
+    4. Utilise toujours get_session_memory avec le session_id fourni.
+    5. Retourne UNIQUEMENT un JSON avec cette structure :
     {
       "long_term_context": "chunks formatés ou null si needs_memory était false",
+      "calendar_context": "événements formatés ou null si needs_calendar était false",
       "session_context": { ...contenu JSON de la session... },
       "context_summary": "résumé en 2 phrases de ce qui est pertinent pour répondre"
     }
@@ -41,12 +52,15 @@ retrieve_task:
 
 main_task:
   description: >
+    Contexte temporel : {temporal_context}
+
     Message de l'utilisateur : {user_message}
 
     Contexte mémoire disponible :
     {memory_context}
 
     Réponds au message de façon naturelle et personnalisée.
+    Utilise le contexte temporel pour les questions liées au temps, aux dates ou aux deadlines.
     Utilise le contexte mémoire si pertinent, sans le mentionner explicitement
     sauf si l'utilisateur pose une question sur ta mémoire.
     Ne préfixe pas ta réponse avec des labels comme "Réponse :" ou "Assistant :".

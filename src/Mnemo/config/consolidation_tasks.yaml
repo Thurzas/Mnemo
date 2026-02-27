@@ -1,5 +1,7 @@
 consolidate_task:
   description: >
+    Contexte temporel : {temporal_context}
+
     Voici le JSON complet de la session terminée :
     {session_json}
 
