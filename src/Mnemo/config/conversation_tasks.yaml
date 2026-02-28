@@ -112,6 +112,15 @@ main_task:
 
     Ne pas inventer d'événements ou d'activités non présents dans le contexte.
     Ne pas répondre avec des événements d'une date différente de celle demandée.
+
+    CONSCIENCE DES DEADLINES :
+    Si le contexte temporel contient une section "Deadlines et evenements proches",
+    et que la réponse porte sur un sujet lié (planning, organisation, travail à faire),
+    mentionner naturellement les événements pertinents — sans les lister de façon mécanique.
+    Exemple : si l'utilisateur parle d'un projet et qu'une deadline tombe demain,
+    le signaler en fin de réponse de façon brève et naturelle.
+    Ne pas mentionner les deadlines si la question est sans rapport (météo, conversation, etc.).
+
     Ne préfixe pas ta réponse avec des labels comme "Réponse :" ou "Assistant :".
   expected_output: >
     La réponse finale destinée à l'utilisateur, en texte naturel.
