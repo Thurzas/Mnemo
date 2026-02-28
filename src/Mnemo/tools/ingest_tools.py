@@ -664,6 +664,10 @@ def search_docs_keyword(db: sqlite3.Connection, query: str, top_k: int = 10) -> 
     """Recherche FTS5 dans les doc_chunks."""
     if not query or not query.strip():
         return []
+    from Mnemo.tools.memory_tools import _sanitize_fts_query
+    fts_query = _sanitize_fts_query(query)
+    if not fts_query:
+        return []
     rows = db.execute("""
         SELECT dc.id, dc.content, dc.page, dc.chunk_index,
                d.filename, bm25(doc_chunks_fts) as score,
@@ -674,7 +678,7 @@ def search_docs_keyword(db: sqlite3.Connection, query: str, top_k: int = 10) -> 
         WHERE doc_chunks_fts MATCH ?
         ORDER BY score
         LIMIT ?
-    """, (query.strip(), top_k)).fetchall()
+    """, (fts_query, top_k)).fetchall()
     return [{
         "id":               r[0],
         "content":          r[1],

@@ -68,6 +68,17 @@ consolidate_task:
 
     RÈGLE CRITIQUE : ne jamais écrire ## ou ### dans les valeurs de target_section ou target_subsection.
 
+    RÈGLES ANTI-DUPLICATION — à respecter impérativement :
+    - Si un fait est déjà présent dans la session (ex: SQLite déjà mentionné), ne pas le réémettre.
+    - Pour les sections atomiques (Profil de base, Préférences & style, etc.) : n'émettre un fait
+      que si la valeur a réellement changé ou si le label est absent. Ne jamais réécrire
+      "- **Nom/Pseudo** : Matt" si Matt est déjà dans la session courante.
+    - Pour les sections narratives (Projets, Décisions, Historique) : ne pas reproduire
+      mot pour mot un contenu qui existe déjà. Enrichir ou compléter uniquement.
+    - En cas de doute sur si une information est nouvelle : ne pas l'émettre.
+    - Inventer des noms, pseudos ou identités non mentionnés dans la session est INTERDIT.
+      Utiliser uniquement les valeurs explicitement données par l'utilisateur.
+
     Retourne UNIQUEMENT un JSON valide avec cette structure :
     {
       "session_summary": "résumé de la session en 3 phrases maximum",

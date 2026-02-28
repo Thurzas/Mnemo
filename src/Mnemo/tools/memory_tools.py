@@ -102,9 +102,33 @@ def importance_score(category: str, weight: float | None = None) -> float:
 # Retrieval hybride
 # ══════════════════════════════════════════════════════════════
 
+def _sanitize_fts_query(query: str) -> str:
+    """
+    Nettoie une query pour FTS5 SQLite.
+    FTS5 interprète certains caractères comme opérateurs ou syntaxe :
+      ?  → paramètre de binding (OperationalError)
+      '  → string SQL (syntax error near "'")
+      "  → colonne ou phrase (peut planter si mal balancé)
+      *  → wildcard (acceptable mais peut surprendre)
+      :  → filtre de colonne
+      ( ) → groupement
+      -  → exclusion
+    Stratégie : retire la ponctuation, garde les mots et chiffres.
+    """
+    import re
+    # Garde uniquement lettres, chiffres, espaces et tirets entre mots
+    cleaned = re.sub(r"[^\w\s\-]", " ", query, flags=re.UNICODE)
+    # Collapse les espaces multiples
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 def search_keyword(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH) -> list[dict]:
     # FTS5 plante sur une query vide ou composée uniquement d'espaces
     if not query or not query.strip():
+        return []
+    fts_query = _sanitize_fts_query(query)
+    if not fts_query:
         return []
     rows = db.execute("""
         SELECT c.id, c.section, c.subsection, c.content,
@@ -115,7 +139,7 @@ def search_keyword(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH
         WHERE chunks_fts MATCH ?
         ORDER BY score
         LIMIT ?
-    """, (query.strip(), top_k)).fetchall()
+    """, (fts_query, top_k)).fetchall()
     return [{
         "id": r[0], "section": r[1], "subsection": r[2], "content": r[3],
         "score_fts": abs(r[4]),
@@ -441,8 +465,34 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
             if l.strip() and not any(p in l.lower() for p in PLACEHOLDERS)
         ]
 
-        # Merge : lignes réelles conservées + nouveau contenu ajouté
-        merged    = "\n".join(real_lines + [content]) if real_lines else content
+        # ── Upsert par label pour les lignes atomiques ──
+        # Si content est de la forme "- **Label** : valeur",
+        # on remplace la ligne existante avec le même label plutôt qu'appender.
+        import re as _re
+        label_match = _re.match(r"^-\s*\*\*(.+?)\*\*\s*:", content)
+        if label_match:
+            label_key = label_match.group(1).strip().lower()
+            replaced  = False
+            new_real  = []
+            for existing_line in real_lines:
+                ex_match = _re.match(r"^-\s*\*\*(.+?)\*\*\s*:", existing_line)
+                if ex_match and ex_match.group(1).strip().lower() == label_key:
+                    # Même label → remplace par la nouvelle valeur
+                    new_real.append(content)
+                    replaced = True
+                else:
+                    new_real.append(existing_line)
+            if not replaced:
+                new_real.append(content)
+            real_lines = new_real
+        else:
+            # Contenu narratif — déduplique les lignes exactes, appende si nouveau
+            content_stripped = content.strip()
+            if content_stripped not in "\n".join(real_lines):
+                real_lines = real_lines + [content]
+            # Sinon : contenu déjà présent → on n'écrit rien
+
+        merged    = "\n".join(real_lines) if real_lines else content
         new_block = [f"### {subsection}", merged, ""]
         lines[subsection_start:subsection_end] = new_block
 
