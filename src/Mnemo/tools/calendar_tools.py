@@ -133,20 +133,38 @@ def _clean_text(text: str) -> str:
     return text.strip()
 
 
-def get_upcoming_events(days: int = LOOKAHEAD_DAYS) -> list[dict]:
+def get_events_for_date(target_date: date) -> list[dict]:
     """
-    Retourne les événements du calendrier dans les `days` prochains jours.
+    Retourne tous les événements d'un jour précis (passé ou futur).
+    Point d'entrée principal pour les questions temporelles ("que s'est-il passé mardi ?").
+    """
+    return get_upcoming_events(days=0, from_date=target_date, to_date=target_date)
+
+
+def get_upcoming_events(
+    days: int = LOOKAHEAD_DAYS,
+    from_date: Optional[date] = None,
+    to_date:   Optional[date] = None,
+) -> list[dict]:
+    """
+    Retourne les événements du calendrier dans une fenêtre de dates.
+
+    Modes d'utilisation :
+      get_upcoming_events()                        → today .. today+14j
+      get_upcoming_events(days=7)                  → today .. today+7j
+      get_upcoming_events(from_date=d, to_date=d)  → jour exact (passé ou futur)
+
     Chaque événement est un dict :
     {
         "title"      : str,
         "date"       : date,
-        "datetime"   : datetime | None,   # None si événement jour entier
+        "datetime"   : datetime | None,
         "location"   : str | None,
         "description": str | None,
-        "days_until" : int,               # 0 = aujourd'hui, 1 = demain, etc.
+        "days_until" : int,          # négatif si passé
         "is_today"   : bool,
         "is_tomorrow": bool,
-        "label"      : str,               # "Aujourd'hui", "Demain", "Dans 3 jours", etc.
+        "label"      : str,
     }
     Trié par date croissante.
     """
@@ -154,27 +172,26 @@ def get_upcoming_events(days: int = LOOKAHEAD_DAYS) -> list[dict]:
     if cal is None:
         return []
 
-    today     = date.today()
-    cutoff    = today + timedelta(days=days)
-    events    = []
+    today  = date.today()
+    start  = from_date if from_date is not None else today
+    end    = to_date   if to_date   is not None else (today + timedelta(days=days))
+    events = []
 
     for component in cal.walk():
         if component.name != "VEVENT":
             continue
 
-        dtstart  = component.get("DTSTART")
+        dtstart = component.get("DTSTART")
         if dtstart is None:
             continue
-        dt_val   = dtstart.dt
-        ev_date  = _to_date(dt_val)
+        dt_val  = dtstart.dt
+        ev_date = _to_date(dt_val)
         if ev_date is None:
             continue
 
-        # Filtre : événements entre aujourd'hui et la fenêtre
-        if not (today <= ev_date <= cutoff):
+        if not (start <= ev_date <= end):
             continue
 
-        # Événement jour entier vs événement horaire
         all_day     = isinstance(dt_val, date) and not isinstance(dt_val, datetime)
         ev_datetime = None if all_day else _to_datetime(dt_val)
 
@@ -187,8 +204,12 @@ def get_upcoming_events(days: int = LOOKAHEAD_DAYS) -> list[dict]:
             label = "Aujourd'hui"
         elif days_until == 1:
             label = "Demain"
-        else:
+        elif days_until > 0:
             label = f"Dans {days_until} jours"
+        elif days_until == -1:
+            label = "Hier"
+        else:
+            label = f"Il y a {abs(days_until)} jours"
 
         events.append({
             "title"      : summary,
@@ -252,30 +273,56 @@ def format_startup_banner(events: list[dict]) -> str:
 # Helpers date/heure pour injection systématique dans les prompts
 # ══════════════════════════════════════════════════════════════════
 
+def _fmt_date(dt) -> str:
+    """Formate une datetime en français : 'vendredi 28 février 2026, 09:14'."""
+    jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
+    mois  = ["janvier","février","mars","avril","mai","juin",
+             "juillet","août","septembre","octobre","novembre","décembre"]
+    return f"{jours[dt.weekday()]} {dt.day} {mois[dt.month-1]} {dt.year}, {dt.strftime('%H:%M')}"
+
+
 def get_current_datetime_str() -> str:
     """
     Retourne la date et heure actuelles formatées pour injection dans les prompts.
     Format : "vendredi 28 février 2026, 09:14"
     """
-    now = datetime.now()
-    # Jours et mois en français
-    jours   = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
-    mois    = ["janvier","février","mars","avril","mai","juin",
-               "juillet","août","septembre","octobre","novembre","décembre"]
-    jour_semaine = jours[now.weekday()]
-    return f"{jour_semaine} {now.day} {mois[now.month-1]} {now.year}, {now.strftime('%H:%M')}"
+    return _fmt_date(datetime.now())
+
+
+def get_yesterday_date_str() -> str:
+    """
+    Retourne la date d'hier au format ISO et en français.
+    Exemple : "jeudi 26 février 2026 (2026-02-26)"
+    Utilisé pour que l'agent sache quelle date chercher dans l'historique des sessions.
+    """
+    yesterday = datetime.now() - timedelta(days=1)
+    jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
+    mois  = ["janvier","février","mars","avril","mai","juin",
+             "juillet","août","septembre","octobre","novembre","décembre"]
+    iso   = yesterday.strftime("%Y-%m-%d")
+    human = f"{jours[yesterday.weekday()]} {yesterday.day} {mois[yesterday.month-1]} {yesterday.year}"
+    return f"{human} ({iso})"
 
 
 def get_temporal_context() -> str:
     """
-    Construit le bloc temporel complet à injecter dans les prompts :
-    date + heure + événements à venir (si calendrier disponible).
+    Construit le bloc temporel complet à injecter dans les prompts.
+
+    Structure claire :
+      - Date et heure actuelles
+      - Hier (pour résoudre les requêtes "qu'est-ce que j'ai fait hier")
+      - Événements calendrier : AUJOURD'HUI ET FUTUR UNIQUEMENT
     """
-    lines = [f"Date et heure actuelles : {get_current_datetime_str()}"]
+    lines = [
+        f"Date et heure actuelles : {get_current_datetime_str()}",
+        f"Hier : {get_yesterday_date_str()}",
+    ]
 
     events = get_upcoming_events(days=LOOKAHEAD_DAYS)
     if events:
-        lines.append(f"\nÉvénements à venir ({LOOKAHEAD_DAYS} prochains jours) :")
+        lines.append(
+            f"\nÉvénements calendrier — aujourd'hui et {LOOKAHEAD_DAYS} prochains jours :"
+        )
         lines.append(format_events_for_prompt(events))
     else:
         lines.append("Aucun événement calendrier disponible.")
@@ -302,18 +349,37 @@ try:
             default=14,
             description="Nombre de jours à regarder en avant (défaut : 14)."
         )
+        reference_date: Optional[str] = Field(
+            default=None,
+            description=(
+                "Date ISO (YYYY-MM-DD) pour consulter un jour précis, passé ou futur. "
+                "Ex: '2026-02-24' pour voir le programme du mardi. "
+                "Si fournie, le paramètre days est ignoré."
+            )
+        )
 
     class GetCalendarTool(BaseTool):
         name: str = "get_calendar_events"
         description: str = (
-            "Récupère les événements du calendrier personnel dans les N prochains jours. "
-            "À utiliser quand l'utilisateur mentionne des deadlines, rendez-vous, "
-            "événements à venir, ou demande 'qu'est-ce que j'ai de prévu'. "
-            "Retourne une liste formatée des événements avec leur date et heure."
+            "Récupère les événements du calendrier personnel. "
+            "Utiliser reference_date (format YYYY-MM-DD) pour un jour précis passé ou futur "
+            "('quel était mon programme mardi ?', 'qu'est-ce que j'avais hier ?', etc.). "
+            "Utiliser days pour une fenêtre glissante depuis aujourd'hui. "
+            "Source principale pour toutes les questions de planning ou d'agenda."
         )
         args_schema: Type[BaseModel] = GetCalendarInput
 
-        def _run(self, days: int = 14) -> str:
+        def _run(self, days: int = 14, reference_date: Optional[str] = None) -> str:
+            if reference_date:
+                try:
+                    from datetime import date as _date
+                    target = _date.fromisoformat(reference_date)
+                    events = get_events_for_date(target)
+                    if not events:
+                        return f"Aucun événement trouvé pour le {reference_date}."
+                    return format_events_for_prompt(events)
+                except ValueError:
+                    return f"Date invalide : {reference_date!r} (format attendu : YYYY-MM-DD)"
             events = get_upcoming_events(days=days)
             if not events:
                 if not calendar_is_configured():

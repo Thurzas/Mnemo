@@ -36,7 +36,6 @@ class ConversationCrew:
             config=self.agents_config["evaluator"],
             verbose=False,
             allow_delegation=False,
-            max_iter=2,          # Tâche simple : produit un JSON, pas besoin de boucler
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
@@ -51,7 +50,6 @@ class ConversationCrew:
             verbose=False,
             allow_delegation=False,
             tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool()],
-            max_iter=4,          # 4 tools max → 1 appel chacun suffit
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
@@ -65,7 +63,6 @@ class ConversationCrew:
             config=self.agents_config["main_agent"],
             verbose=False,       # verbose=True ralentit et pollue le terminal
             allow_delegation=False,
-            max_iter=3,          # Répond en 1-2 passes, pas besoin de plus
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
@@ -110,7 +107,6 @@ class ConsolidationCrew:
             config=self.agents_config["session_consolidator"],
             verbose=False,
             allow_delegation=False,
-            max_iter=2,          # Analyse + produit un JSON, 2 passes suffisent
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
@@ -125,7 +121,6 @@ class ConsolidationCrew:
             verbose=False,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
-            max_iter=6,          # N faits à écrire + 1 sync → N+1 appels tool
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,
@@ -181,7 +176,6 @@ class CuriosityCrew:
             verbose=False,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
-            max_iter=6,
             llm = LLM(
                 model=MODEL,  
                 base_url=API_BASE,

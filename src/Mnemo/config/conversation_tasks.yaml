@@ -14,15 +14,36 @@ evaluate_task:
       "clarification_reason": null,
       "complexity": "simple | moderate | complex",
       "memory_query": "phrase courte et optimisée pour le retrieval mémoire",
-      "needs_calendar": false
+      "needs_calendar": false,
+      "temporal_reference": "past | present | future | none",
+      "reference_date": null
     }
 
-    needs_memory doit être false uniquement pour les messages triviaux (bonjour, merci, etc.).
-    memory_query doit être reformulée pour maximiser le rappel dans un index vectoriel.
-    needs_clarification doit être true si le message est ambigu au point qu'une question
-    de clarification permettrait une réponse nettement meilleure.
-    needs_calendar doit être true si le message concerne des dates, deadlines, événements,
-    planning, "quand est-ce que", "ai-je le temps", "c'est quand", etc.
+    needs_memory : false uniquement pour les messages triviaux (bonjour, merci, etc.).
+    memory_query : reformulée pour maximiser le rappel dans un index vectoriel.
+    needs_clarification : true si une question de clarification améliorerait nettement la réponse.
+    needs_calendar : true si la question porte sur un agenda ou un planning,
+      qu'il soit passé, présent ou futur.
+      ("qu'est-ce que j'avais prévu mardi", "quel était mon programme hier",
+       "c'est quand", "qu'est-ce que j'ai de prévu", "ai-je le temps").
+      needs_memory reste true uniquement si la question porte sur des faits personnels,
+      des décisions, des connaissances — pas sur un planning ou un agenda.
+
+    temporal_reference : nature temporelle du message :
+      - "past"    : question sur ce qui s'est passé avant maintenant
+                    ("hier", "la semaine dernière", "lundi dernier", "qu'ai-je fait")
+      - "present" : question sur l'instant présent ou le jour courant
+      - "future"  : question sur ce qui est prévu ou à venir
+      - "none"    : pas de dimension temporelle particulière
+
+    reference_date : si temporal_reference est "past" ou "future", calcule la date ISO concernée
+      en utilisant la date du contexte temporel comme point d'ancrage.
+      Exemples (si aujourd'hui est 2026-02-27) :
+        "hier"              → "2026-02-26"
+        "lundi dernier"     → "2026-02-23"
+        "la semaine dernière" → "2026-02-16/2026-02-22"
+        "demain"            → "2026-02-28"
+      Si la date ne peut pas être déterminée, mettre null.
   expected_output: >
     Un objet JSON valide et uniquement le JSON, sans markdown, sans explication.
   agent: evaluator
@@ -32,18 +53,30 @@ retrieve_task:
     À partir de cette analyse : {evaluation_result}
     Session courante ID : {session_id}
 
-    1. Si le champ needs_memory est true, utilise l'outil retrieve_memory
-       avec le champ memory_query comme query.
-    2. Si needs_calendar est true, utilise l'outil get_calendar_events
-       pour récupérer les événements à venir pertinents.
-    3. Si l'utilisateur pose une question sur les documents disponibles,
-       utilise l'outil list_documents.
-    4. Utilise toujours get_session_memory avec le session_id fourni.
+    1. Utilise TOUJOURS get_session_memory avec le session_id fourni.
+
+    2. Si needs_memory est true, utilise retrieve_memory avec memory_query.
+       Si temporal_reference est "past" et reference_date est renseignée,
+       reformule la query pour cibler cette date :
+       ex: "session 2026-02-26" ou "résumé journée 2026-02-26".
+
+    3. Si needs_calendar est true, utilise get_calendar_events.
+       C'est LA source principale pour toutes les questions sur un planning ou agenda,
+       passé ou futur. L'outil retourne les événements de la période demandée.
+       Si temporal_reference est "past" et reference_date est renseignée,
+       passe days=0 et laisse le contexte temporel guider — le calendrier
+       contient aussi les événements passés.
+
+    4. Si l'utilisateur pose une question sur les documents disponibles,
+       utilise list_documents.
+
     5. Retourne UNIQUEMENT un JSON avec cette structure :
     {
-      "long_term_context": "chunks formatés ou null si needs_memory était false",
-      "calendar_context": "événements formatés ou null si needs_calendar était false",
+      "long_term_context": "chunks formatés ou null",
+      "calendar_context": "événements formatés ou null",
       "session_context": { ...contenu JSON de la session... },
+      "temporal_reference": "past | present | future | none",
+      "reference_date": "date ISO concernée ou null",
       "context_summary": "résumé en 2 phrases de ce qui est pertinent pour répondre"
     }
   expected_output: >
@@ -60,9 +93,25 @@ main_task:
     {memory_context}
 
     Réponds au message de façon naturelle et personnalisée.
-    Utilise le contexte temporel pour les questions liées au temps, aux dates ou aux deadlines.
-    Utilise le contexte mémoire si pertinent, sans le mentionner explicitement
-    sauf si l'utilisateur pose une question sur ta mémoire.
+
+    RÈGLES TEMPORELLES — à respecter absolument :
+
+    Pour les questions sur le passé ("hier", "la semaine dernière", etc.) :
+    → Chercher dans long_term_context les résumés de sessions de la date concernée.
+    → Le calendrier peut aussi contenir des événements passés utiles — les utiliser
+      si leur date correspond à la période demandée.
+    → La date d'hier est indiquée dans le contexte temporel ("Hier : ...").
+    → NE PAS utiliser des événements d'une autre date pour répondre.
+      Si les événements du contexte sont datés d'aujourd'hui et que la question
+      porte sur hier, ils ne sont pas la réponse — chercher dans les sessions.
+    → Si aucune source (calendrier ou session) ne contient d'info sur la date
+      demandée, dire honnêtement qu'on n'a pas l'information.
+
+    Pour les questions sur le présent ou le futur :
+    → Utiliser le calendrier et la date actuelle du contexte temporel.
+
+    Ne pas inventer d'événements ou d'activités non présents dans le contexte.
+    Ne pas répondre avec des événements d'une date différente de celle demandée.
     Ne préfixe pas ta réponse avec des labels comme "Réponse :" ou "Assistant :".
   expected_output: >
     La réponse finale destinée à l'utilisateur, en texte naturel.

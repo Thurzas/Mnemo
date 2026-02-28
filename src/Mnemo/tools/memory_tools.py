@@ -102,9 +102,33 @@ def importance_score(category: str, weight: float | None = None) -> float:
 # Retrieval hybride
 # ══════════════════════════════════════════════════════════════
 
+def _sanitize_fts_query(query: str) -> str:
+    """
+    Nettoie une query pour FTS5 SQLite.
+    FTS5 interprète certains caractères comme opérateurs ou syntaxe :
+      ?  → paramètre de binding (OperationalError)
+      '  → string SQL (syntax error near "'")
+      "  → colonne ou phrase (peut planter si mal balancé)
+      *  → wildcard (acceptable mais peut surprendre)
+      :  → filtre de colonne
+      ( ) → groupement
+      -  → exclusion
+    Stratégie : retire la ponctuation, garde les mots et chiffres.
+    """
+    import re
+    # Garde uniquement lettres, chiffres, espaces et tirets entre mots
+    cleaned = re.sub(r"[^\w\s\-]", " ", query, flags=re.UNICODE)
+    # Collapse les espaces multiples
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 def search_keyword(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH) -> list[dict]:
     # FTS5 plante sur une query vide ou composée uniquement d'espaces
     if not query or not query.strip():
+        return []
+    fts_query = _sanitize_fts_query(query)
+    if not fts_query:
         return []
     rows = db.execute("""
         SELECT c.id, c.section, c.subsection, c.content,
@@ -115,7 +139,7 @@ def search_keyword(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH
         WHERE chunks_fts MATCH ?
         ORDER BY score
         LIMIT ?
-    """, (query.strip(), top_k)).fetchall()
+    """, (fts_query, top_k)).fetchall()
     return [{
         "id": r[0], "section": r[1], "subsection": r[2], "content": r[3],
         "score_fts": abs(r[4]),
@@ -197,7 +221,7 @@ def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     avant la fusion — le champ 'source_type' permet de les distinguer dans le prompt.
     """
     # Import ici pour éviter la dépendance circulaire (ingest_tools importe memory_tools)
-    from Mnemo.tools.calendar.tools.ingest_tools import search_docs_keyword, search_docs_vector
+    from Mnemo.tools.ingest_tools import search_docs_keyword, search_docs_vector
 
     db = get_db()
 
@@ -694,7 +718,7 @@ class ListDocumentsTool(BaseTool):
     args_schema: Type[BaseModel] = ListDocumentsInput
 
     def _run(self, dummy: str = "") -> str:
-        from Mnemo.tools.calendar.tools.ingest_tools import list_ingested_documents
+        from Mnemo.tools.ingest_tools import list_ingested_documents
         docs = list_ingested_documents()
         if not docs:
             return "Aucun document ingéré pour le moment."
