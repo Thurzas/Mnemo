@@ -269,7 +269,6 @@ def curiosity_session(session_summary: str) -> None:
                 "skipped_questions":  skipped_text,
                 "structural_gaps":    structural_summary,
                 "answers_json":       "[]",
-                "temporal_context": get_temporal_context(),
             })
             raw = result.raw.strip() if result.raw else ""
             # Extrait le JSON même si le LLM a ajouté du texte autour
