@@ -596,7 +596,7 @@ def ingest(file_path: str) -> None:
     """
     Ingère un fichier PDF dans la base de connaissances.
     Appelé via : crewai run -- ingest chemin/vers/fichier.pdf
-    Ou directement : python -m Mnemo.main ingest fichier.pdf
+    Ou directement : python -m waifuclawd.main ingest fichier.pdf
     """
     path = Path(file_path)
     if not path.exists():
@@ -636,7 +636,7 @@ def debug_curiosity() -> None:
     """
     Déclenche le questionnement directement sans passer par une session complète.
     Utile pour tester CuriosityCrew en isolation.
-    Usage : python -m Mnemo.main curiosity
+    Usage : python -m waifuclawd.main curiosity
     """
     print("🧪 Mode debug — déclenchement direct du questionnaire\n")
 
@@ -685,15 +685,19 @@ if __name__ == "__main__":
             test()
         elif sys.argv[1] == "ingest":
             if len(sys.argv) < 3:
-                print("Usage : python -m Mnemo.main ingest <fichier.pdf>")
+                print("Usage : python -m waifuclawd.main ingest <fichier.pdf>")
             else:
                 ingest(sys.argv[2])
         elif sys.argv[1] == "docs":
             list_docs()
         elif sys.argv[1] == "curiosity":
             debug_curiosity()
+        elif sys.argv[1] == "init_db":
+            from Mnemo.init_db import init_db, migrate_db
+            init_db()
+            migrate_db()
         else:
             print(f"Commande inconnue : {sys.argv[1]}")
-            print("Commandes disponibles : run, train, replay, test, ingest, docs, curiosity")
+            print("Commandes disponibles : run, train, replay, test, ingest, docs, curiosity, init_db")
     else:
         run()
