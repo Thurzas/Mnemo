@@ -24,7 +24,7 @@ The core of the project. Everything else builds on top of it.
 
 ---
 
-## 🔧 Phase 1 — Stabilization *(in progress)*
+## ✅ Phase 1 — Stabilization *(in progress)*
 
 Make the system reliable over time before adding new features.
 
@@ -48,7 +48,7 @@ Make the system reliable over time before adding new features.
 
 ---
 
-## 👁️ Phase 2 — Perception *(upcoming)*
+## 🔧 Phase 2 — Perception *(upcoming)*
 
 Give Mnemo the ability to perceive its environment beyond typed text.
 
@@ -57,9 +57,9 @@ Give Mnemo the ability to perceive its environment beyond typed text.
   - [x] DOCX, TXT, Markdown
   - [x] Source code (with language detection)
 - [ ] **Temporal awareness**
-  - [ ] Automatic injection of current date/time into each session
-  - [ ] Connection to a local ICS calendar (read-only at first)
-  - [ ] Awareness of upcoming deadlines and events
+  - [x] Automatic injection of current date/time into each session
+  - [x] Connection to a local ICS calendar (read-only at first)
+  - [x] Awareness of upcoming deadlines and events
 - [ ] **Occasional web access** *(security verified)*
   - [ ] Self-hosted SearXNG integration via Docker (zero tracking)
   - [ ] DuckDuckGo API fallback if SearXNG is unavailable
@@ -79,6 +79,7 @@ Move from an agent that responds to an agent that acts — and give it a window 
 - [ ] **Local web dashboard**
   - [ ] Lightweight `localhost` interface (FastAPI + minimal frontend)
   - [ ] Visualization of `memory.md` and sessions
+  - [ ] Agenda with CRUD backend.
   - [ ] Send messages from the browser (CLI alternative)
   - [ ] *Why web over system tray: better WSL2 portability,  
     naturally prepares the Phase 4 API*

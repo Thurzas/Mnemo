@@ -318,15 +318,62 @@ def get_temporal_context() -> str:
         f"Hier : {get_yesterday_date_str()}",
     ]
 
+    # Deadlines urgentes (<=3j) — section dédiée, visible en premier
+    deadline_block = get_deadline_context()
+    if deadline_block:
+        lines.append("")
+        lines.append(deadline_block)
+
+    # Agenda complet dans la fenetre lookahead
     events = get_upcoming_events(days=LOOKAHEAD_DAYS)
     if events:
-        lines.append(
-            f"\nÉvénements calendrier — aujourd'hui et {LOOKAHEAD_DAYS} prochains jours :"
-        )
+        lines.append("")
+        lines.append(f"Agenda complet - aujourd'hui et {LOOKAHEAD_DAYS} prochains jours :")
         lines.append(format_events_for_prompt(events))
-    else:
-        lines.append("Aucun événement calendrier disponible.")
+    elif not deadline_block:
+        lines.append("Aucun evenement calendrier disponible.")
 
+    return "\n".join(lines)
+
+
+def get_deadline_context() -> str:
+    """
+    Retourne un bloc texte structuré par niveau d'urgence, pour injection dans les prompts.
+
+    Niveaux :
+      AUJOURD'HUI  — days_until == 0
+      DEMAIN       — days_until == 1
+      DANS 2-3J    — days_until in [2, 3]
+
+    Retourne "" si aucun événement urgent ou calendrier non configuré.
+    """
+    events = get_upcoming_events(days=3)
+    urgent = [e for e in events if e["days_until"] <= 3]
+    if not urgent:
+        return ""
+
+    today_items, tomorrow_items, soon_items = [], [], []
+    for ev in urgent:
+        time_str = f" a {ev['datetime'].strftime('%H:%M')}" if ev["datetime"] else ""
+        loc_str  = f" ({ev['location']})" if ev["location"] else ""
+        line     = f"- {ev['title']}{time_str}{loc_str}"
+        if ev["is_today"]:
+            today_items.append(line)
+        elif ev["is_tomorrow"]:
+            tomorrow_items.append(line)
+        else:
+            soon_items.append(line)
+
+    lines = ["Deadlines et evenements proches :"]
+    if today_items:
+        lines.append("  AUJOURD'HUI")
+        lines.extend(f"    {item}" for item in today_items)
+    if tomorrow_items:
+        lines.append("  DEMAIN")
+        lines.extend(f"    {item}" for item in tomorrow_items)
+    if soon_items:
+        lines.append("  DANS 2-3 JOURS")
+        lines.extend(f"    {item}" for item in soon_items)
     return "\n".join(lines)
 
 

@@ -24,10 +24,10 @@ from unittest.mock import patch, MagicMock, mock_open
 # ── Import du module à tester ────────────────────────────────────
 from Mnemo.tools import calendar_tools as ct
 
-# Raccourcis
-_to_date               = ct._to_date
-_to_datetime           = ct._to_datetime
-_clean_text            = ct._clean_text
+# Raccourcis — tous préfixés ct. explicitement
+_to_date                 = ct._to_date
+_to_datetime             = ct._to_datetime
+_clean_text              = ct._clean_text
 get_current_datetime_str = ct.get_current_datetime_str
 format_events_for_prompt = ct.format_events_for_prompt
 format_startup_banner    = ct.format_startup_banner
@@ -415,7 +415,7 @@ class TestGetTemporalContext:
     def test_without_calendar_says_no_events(self):
         with patch.object(ct, "get_upcoming_events", return_value=[]):
             result = get_temporal_context()
-        assert "Aucun événement calendrier disponible" in result
+        assert "Aucun evenement calendrier disponible" in result
 
     def test_with_events_lists_them(self):
         fake_events = [_make_event(0, "Démo"), _make_event(1, "Réunion")]
@@ -423,7 +423,7 @@ class TestGetTemporalContext:
             result = get_temporal_context()
         assert "Démo" in result
         assert "Réunion" in result
-        assert "Événements à venir" in result
+        assert "Agenda complet" in result
 
     def test_with_events_shows_lookahead_days(self):
         fake_events = [_make_event(0, "Event")]
@@ -832,3 +832,198 @@ class TestICSIntegration:
         raw = ct._fetch_ics_raw()
         assert raw is not None
         assert b"VCALENDAR" in raw
+
+
+# ══════════════════════════════════════════════════════════════════
+# get_deadline_context
+# ══════════════════════════════════════════════════════════════════
+
+class TestGetDeadlineContext:
+
+    def _ev(self, days_offset, title, hour=None, location=None):
+        today   = date.today()
+        ev_date = today + timedelta(days=days_offset)
+        ev_dt   = datetime(ev_date.year, ev_date.month, ev_date.day, hour, 0) \
+                  if hour is not None else None
+        if days_offset == 0:   label = "Aujourd'hui"
+        elif days_offset == 1: label = "Demain"
+        else:                  label = f"Dans {days_offset} jours"
+        return {
+            "title": title, "date": ev_date, "datetime": ev_dt,
+            "location": location, "description": None,
+            "days_until": days_offset,
+            "is_today": days_offset == 0,
+            "is_tomorrow": days_offset == 1,
+            "label": label,
+        }
+
+    def test_empty_when_no_events(self):
+        with patch.object(ct, "get_upcoming_events", return_value=[]):
+            assert ct.get_deadline_context() == ""
+
+    def test_empty_when_all_events_beyond_3_days(self):
+        events = [self._ev(4, "Lointain"), self._ev(7, "Encore plus loin")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            assert ct.get_deadline_context() == ""
+
+    def test_today_section_present(self):
+        events = [self._ev(0, "Standup")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "AUJOURD'HUI" in result
+        assert "Standup" in result
+
+    def test_tomorrow_section_present(self):
+        events = [self._ev(1, "Réunion")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "DEMAIN" in result
+        assert "Réunion" in result
+
+    def test_soon_section_present(self):
+        events = [self._ev(2, "Sprint"), self._ev(3, "Demo")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "DANS 2-3 JOURS" in result
+        assert "Sprint" in result
+        assert "Demo" in result
+
+    def test_three_levels_all_present(self):
+        events = [
+            self._ev(0, "Aujourd'hui"),
+            self._ev(1, "Demain"),
+            self._ev(3, "Bientot"),
+        ]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "AUJOURD'HUI" in result
+        assert "DEMAIN" in result
+        assert "DANS 2-3 JOURS" in result
+
+    def test_only_sections_with_events_shown(self):
+        """Si aucun événement demain, la section DEMAIN ne doit pas apparaître."""
+        events = [self._ev(0, "Standup"), self._ev(3, "Deadline")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "AUJOURD'HUI" in result
+        assert "DANS 2-3 JOURS" in result
+        assert "DEMAIN" not in result
+
+    def test_time_shown_when_present(self):
+        events = [self._ev(0, "Cours", hour=14)]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "14:00" in result
+
+    def test_no_time_for_all_day_event(self):
+        events = [self._ev(0, "Journée off", hour=None)]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        import re
+        assert not re.search(r"\b\d{2}:\d{2}\b", result)
+
+    def test_location_shown_when_present(self):
+        events = [self._ev(1, "Réunion", hour=10, location="Discord")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "Discord" in result
+
+    def test_no_location_shown_when_absent(self):
+        events = [self._ev(0, "Solo")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "()" not in result
+
+    def test_multiple_events_same_day_all_listed(self):
+        events = [
+            self._ev(0, "Standup",    hour=9),
+            self._ev(0, "Permis",     hour=11),
+            self._ev(0, "Cours WCS",  hour=14),
+        ]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_deadline_context()
+        assert "Standup" in result
+        assert "Permis" in result
+        assert "Cours WCS" in result
+        assert result.count("AUJOURD'HUI") == 1   # un seul header
+
+    def test_event_at_exactly_3_days_included(self):
+        """J+3 est la limite — doit être inclus."""
+        events = [self._ev(3, "Limite")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            assert "Limite" in ct.get_deadline_context()
+
+    def test_event_at_4_days_excluded(self):
+        """J+4 est hors fenêtre — ne doit pas apparaître."""
+        events = [self._ev(4, "Trop loin")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            assert ct.get_deadline_context() == ""
+
+    def test_returns_string(self):
+        with patch.object(ct, "get_upcoming_events", return_value=[]):
+            assert isinstance(ct.get_deadline_context(), str)
+
+
+# ══════════════════════════════════════════════════════════════════
+# get_temporal_context — avec deadlines
+# ══════════════════════════════════════════════════════════════════
+
+class TestGetTemporalContextWithDeadlines:
+
+    def _ev(self, days_offset, title):
+        today   = date.today()
+        ev_date = today + timedelta(days=days_offset)
+        label   = "Aujourd'hui" if days_offset == 0 else \
+                  "Demain"      if days_offset == 1 else \
+                  f"Dans {days_offset} jours"
+        return {
+            "title": title, "date": ev_date, "datetime": None,
+            "location": None, "description": None,
+            "days_until": days_offset,
+            "is_today": days_offset == 0, "is_tomorrow": days_offset == 1,
+            "label": label,
+        }
+
+    def test_deadline_block_appears_before_agenda(self):
+        """Le bloc deadline doit précéder l'agenda complet."""
+        events = [self._ev(0, "Urgent"), self._ev(7, "Lointain")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_temporal_context()
+        idx_deadline = result.index("Deadlines")
+        idx_agenda   = result.index("Agenda complet")
+        assert idx_deadline < idx_agenda
+
+    def test_no_deadline_block_when_no_urgent(self):
+        """Sans événement urgent, pas de section Deadlines dans le contexte."""
+        events = [self._ev(5, "Pas urgent"), self._ev(10, "Encore moins")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_temporal_context()
+        assert "Deadlines" not in result
+        assert "Agenda complet" in result
+
+    def test_agenda_complet_label_present(self):
+        """Le nouveau label 'Agenda complet' remplace l'ancien."""
+        events = [self._ev(2, "Event")]
+        with patch.object(ct, "get_upcoming_events", return_value=events):
+            result = ct.get_temporal_context()
+        assert "Agenda complet" in result
+
+    def test_no_agenda_when_no_events_no_deadlines(self):
+        """Sans aucun événement, ni deadline ni agenda dans le contexte."""
+        with patch.object(ct, "get_upcoming_events", return_value=[]):
+            result = ct.get_temporal_context()
+        assert "Deadlines" not in result
+        assert "Agenda complet" not in result
+        assert "Aucun evenement" in result or "Aucun événement" in result or \
+               "calendrier" in result.lower()
+
+    def test_hier_always_present(self):
+        """La ligne 'Hier :' doit toujours être présente dans le contexte."""
+        with patch.object(ct, "get_upcoming_events", return_value=[]):
+            result = ct.get_temporal_context()
+        assert "Hier :" in result
+
+    def test_date_always_present(self):
+        with patch.object(ct, "get_upcoming_events", return_value=[]):
+            result = ct.get_temporal_context()
+        assert "Date et heure actuelles" in result

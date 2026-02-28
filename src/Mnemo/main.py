@@ -18,7 +18,7 @@ from Mnemo.tools.memory_tools import (
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
     get_temporal_context, get_upcoming_events,
-    format_startup_banner, calendar_is_configured,
+    get_deadline_context, format_startup_banner, calendar_is_configured,
 )
 
 
@@ -465,6 +465,28 @@ def run():
         banner = format_startup_banner(events)
         if banner:
             print(banner)
+
+        # Message d'ouverture proactif si deadlines urgentes
+        deadline_block = get_deadline_context()
+        if deadline_block:
+            urgent_today    = [e for e in events if e["is_today"]]
+            urgent_tomorrow = [e for e in events if e["is_tomorrow"]]
+            urgent_soon     = [e for e in events if not e["is_today"] and not e["is_tomorrow"] and e["days_until"] <= 3]
+
+            parts = []
+            if urgent_today:
+                titles = ", ".join(e["title"] for e in urgent_today)
+                parts.append(f"aujourd'hui : {titles}")
+            if urgent_tomorrow:
+                titles = ", ".join(e["title"] for e in urgent_tomorrow)
+                parts.append(f"demain : {titles}")
+            if urgent_soon:
+                titles = ", ".join(f"{e['title']} ({e['label'].lower()})" for e in urgent_soon)
+                parts.append(titles)
+
+            if parts:
+                print(f"\n💬 Mnemo : Au fait, tu as {' | '.join(parts)}.")
+                print("   Tu veux qu'on en parle ou on avance sur autre chose ?")
     print()
 
     # Premier lancement — memory.md vierge → questionnaire d'initialisation
