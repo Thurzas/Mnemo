@@ -27,7 +27,12 @@ def _llm(temperature: float = 0.0) -> LLM:
 # ══════════════════════════════════════════════════════════════
 
 @CrewBase
-class ConversationCrew:
+class EvaluationCrew:
+    """
+    Crew léger — tâche unique : évalue le message et produit le JSON d'évaluation.
+    Séparé de ConversationCrew pour permettre l'interception entre evaluate et retrieve
+    (confirmation web, needs_clarification, etc.).
+    """
     agents_config = "config/conversation_agents.yaml"
     tasks_config  = "config/conversation_tasks.yaml"
 
@@ -37,13 +42,32 @@ class ConversationCrew:
             config=self.agents_config["evaluator"],
             verbose=False,
             allow_delegation=False,
-            max_iter=2,          # Tâche simple : produit un JSON, pas besoin de boucler
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-           )
+            max_iter=2,
+            llm=_llm(0.0),
         )
+
+    @task
+    def evaluate_task(self) -> Task:
+        return Task(config=self.tasks_config["evaluate_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+
+@CrewBase
+class ConversationCrew:
+    """
+    Crew principal — retrieve + main.
+    Reçoit evaluation_result déjà validé (après confirmation web si besoin).
+    """
+    agents_config = "config/conversation_agents.yaml"
+    tasks_config  = "config/conversation_tasks.yaml"
 
     @agent
     def memory_retriever(self) -> Agent:
@@ -52,35 +76,23 @@ class ConversationCrew:
             verbose=False,
             allow_delegation=False,
             tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool(), WebSearchTool()],
-            max_iter=5,          # +1 pour le web_search éventuel
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-           ),
+            max_iter=5,
+            llm=_llm(0.0),
         )
 
     @agent
     def main_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["main_agent"],
-            verbose=False,       # verbose=True ralentit et pollue le terminal
+            verbose=False,
             allow_delegation=False,
-            max_iter=3,          # Répond en 1-2 passes, pas besoin de plus
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.5
-           ),
+            max_iter=3,
+            llm=_llm(0.5),
         )
 
     @task
-    def evaluate_task(self) -> Task:
-        return Task(config=self.tasks_config["evaluate_task"])
-
-    @task
     def retrieve_task(self) -> Task:
-        return Task(config=self.tasks_config["retrieve_task"], context=[self.evaluate_task()])
+        return Task(config=self.tasks_config["retrieve_task"])
 
     @task
     def main_task(self) -> Task:
@@ -112,11 +124,7 @@ class ConsolidationCrew:
             verbose=False,
             allow_delegation=False,
             max_iter=2,          # Analyse + produit un JSON, 2 passes suffisent
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.1
-           ),
+            llm=_llm(0.1),
         )
 
     @agent
@@ -127,11 +135,7 @@ class ConsolidationCrew:
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
             max_iter=6,          # N faits à écrire + 1 sync → N+1 appels tool
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-           ),
+            llm=_llm(0.0),
         )
 
     @task
@@ -168,11 +172,7 @@ class CuriosityCrew:
             verbose=False,
             allow_delegation=False,
             max_iter=2,          # Analyse + produit un JSON, pas de tools
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-           ),
+            llm=_llm(0.0),
         )
 
     @agent
@@ -183,11 +183,7 @@ class CuriosityCrew:
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
             max_iter=6,
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-           ),
+            llm=_llm(0.0),
         )
 
     @task
