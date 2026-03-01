@@ -35,10 +35,14 @@ WEB_QUERY_LOG    = os.getenv("WEB_QUERY_LOG", "web_queries.log")  # relatif à /
 
 # ── Import DDG — silencieux si absent ────────────────────────────────────────
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS           # ddgs >= 1.0 (renommé depuis duckduckgo_search)
     _DDG_AVAILABLE = True
 except ImportError:
-    _DDG_AVAILABLE = False
+    try:
+        from duckduckgo_search import DDGS   # fallback ancienne version
+        _DDG_AVAILABLE = True
+    except ImportError:
+        _DDG_AVAILABLE = False
 
 # ── Logger d'audit ───────────────────────────────────────────────────────────
 _audit_logger = logging.getLogger("mnemo.web_audit")

@@ -41,10 +41,16 @@ evaluate_task:
       TOUJOURS false pour les conversations, mises à jour de faits personnels.
 
     web_query : si needs_web est true, reformule la question en requête de recherche
-      concise (3-8 mots), factuelle, sans données personnelles.
+      courte (2-5 mots), factuelle, sans données personnelles.
+      IMPORTANT : utilise des termes techniques universels, pas des mots français courants
+      qui pourraient être mal interprétés par un moteur de recherche anglophone.
+      Préfère les termes anglais ou les noms propres pour les sujets techniques.
       Exemples :
-        "c'est quoi la dernière version de Python ?" → "dernière version Python 2026"
-        "cherche la doc FastAPI routing"              → "FastAPI routing documentation"
+        "c'est quoi la dernière version de Python ?"          → "Python latest version 2026"
+        "cherche la doc FastAPI routing"                       → "FastAPI routing documentation"
+        "résume moi la page wikipedia sur le tri rapide"       → "quicksort algorithm wikipedia"
+        "explique moi le théorème de Bayes"                    → "Bayes theorem"
+        "dernières news sur l'intelligence artificielle"       → "AI news 2026"
       null si needs_web est false.
 
     temporal_reference : nature temporelle du message :
