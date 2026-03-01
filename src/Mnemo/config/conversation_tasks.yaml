@@ -15,6 +15,8 @@ evaluate_task:
       "complexity": "simple | moderate | complex",
       "memory_query": "phrase courte et optimisée pour le retrieval mémoire",
       "needs_calendar": false,
+      "needs_web": false,
+      "web_query": null,
       "temporal_reference": "past | present | future | none",
       "reference_date": null
     }
@@ -28,6 +30,22 @@ evaluate_task:
        "c'est quand", "qu'est-ce que j'ai de prévu", "ai-je le temps").
       needs_memory reste true uniquement si la question porte sur des faits personnels,
       des décisions, des connaissances — pas sur un planning ou un agenda.
+
+    needs_web : true dans deux cas uniquement :
+      (1) L'utilisateur demande EXPLICITEMENT une recherche web
+          (mots-clés : "cherche", "recherche", "googler", "trouve sur internet",
+           "dernières news", "actualité", "c'est quoi", "quelle est la dernière version").
+      (2) La question nécessite une information récente ou externe que la mémoire
+          ne peut pas fournir : actualité, prix du jour, météo, documentation externe.
+      TOUJOURS false si la mémoire personnelle ou le calendrier peuvent répondre.
+      TOUJOURS false pour les conversations, mises à jour de faits personnels.
+
+    web_query : si needs_web est true, reformule la question en requête de recherche
+      concise (3-8 mots), factuelle, sans données personnelles.
+      Exemples :
+        "c'est quoi la dernière version de Python ?" → "dernière version Python 2026"
+        "cherche la doc FastAPI routing"              → "FastAPI routing documentation"
+      null si needs_web est false.
 
     temporal_reference : nature temporelle du message :
       - "past"    : question sur ce qui s'est passé avant maintenant
@@ -67,13 +85,18 @@ retrieve_task:
        passe days=0 et laisse le contexte temporel guider — le calendrier
        contient aussi les événements passés.
 
-    4. Si l'utilisateur pose une question sur les documents disponibles,
+    4. Si needs_web est true, utilise web_search avec web_query.
+       Le web est utilisé EN COMPLÉMENT de la mémoire, jamais à sa place.
+       Ne jamais inclure de données personnelles dans la web_query.
+
+    5. Si l'utilisateur pose une question sur les documents disponibles,
        utilise list_documents.
 
-    5. Retourne UNIQUEMENT un JSON avec cette structure :
+    6. Retourne UNIQUEMENT un JSON avec cette structure :
     {
       "long_term_context": "chunks formatés ou null",
       "calendar_context": "événements formatés ou null",
+      "web_context": "résultats web formatés ou null",
       "session_context": { ...contenu JSON de la session... },
       "temporal_reference": "past | present | future | none",
       "reference_date": "date ISO concernée ou null",
