@@ -21,7 +21,7 @@
 ### 1. Clone & configure
 
 ```bash
-git clone https://github.com/ton-user/mnemo.git
+git clone https://github.com/thurzas/mnemo.git
 cd mnemo
 chmod +x install.sh
 ```
