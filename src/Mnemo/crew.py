@@ -23,7 +23,7 @@ def _llm(temperature: float = 0.0) -> LLM:
 
 
 # ══════════════════════════════════════════════════════════════
-# Conversation Crew — tourne à chaque message
+# Evaluation Crew — tourne à chaque message
 # ══════════════════════════════════════════════════════════════
 
 @CrewBase
@@ -59,6 +59,9 @@ class EvaluationCrew:
             verbose=False,
         )
 
+# ══════════════════════════════════════════════════════════════
+# Conversation Crew — tourne à chaque message
+# ══════════════════════════════════════════════════════════════
 
 @CrewBase
 class ConversationCrew:
