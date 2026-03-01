@@ -34,7 +34,7 @@ class EvaluationCrew:
     (confirmation web, needs_clarification, etc.).
     """
     agents_config = "config/conversation_agents.yaml"
-    tasks_config  = "config/conversation_tasks.yaml"
+    tasks_config  = "config/evaluation_tasks.yaml"
 
     @agent
     def evaluator(self) -> Agent:
