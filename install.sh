@@ -126,6 +126,8 @@ Aucun projet enregistré pour l'instant.
 ### Décisions prises & leur raison
 Aucune décision enregistrée pour l'instant.
 ## Historique des sessions
+## Sources web
+_Les faits issus du web sont potentiellement obsolètes. Vérifier la date d'acquisition._
 ## À ne jamais oublier
 MEMORY_TEMPLATE
     ok "memory.md initialisé"
