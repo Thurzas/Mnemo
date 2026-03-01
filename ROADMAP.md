@@ -60,11 +60,11 @@ Give Mnemo the ability to perceive its environment beyond typed text.
   - [x] Automatic injection of current date/time into each session
   - [x] Connection to a local ICS calendar (read-only at first)
   - [x] Awareness of upcoming deadlines and events
-- [ ] **Occasional web access** *(security verified)*
-  - [ ] Self-hosted SearXNG integration via Docker (zero tracking)
-  - [ ] DuckDuckGo API fallback if SearXNG is unavailable
-  - [ ] `web_search` tool available only upon explicit request
-  - [ ] Security audit of network dependencies before activation
+- [x] **Occasional web access** *(security verified)*
+  - [x] Self-hosted SearXNG integration via Docker (zero tracking)
+  - [x] DuckDuckGo API fallback if SearXNG is unavailable
+  - [x] `web_search` tool available only upon explicit request
+  - [x] Security audit of network dependencies before activation
 
 ---
 

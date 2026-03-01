@@ -9,7 +9,7 @@ from datetime import datetime
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 # ─────────────────────────────────────────────────────────────
 
-from Mnemo.crew import ConversationCrew, ConsolidationCrew, CuriosityCrew
+from Mnemo.crew import ConversationCrew, ConsolidationCrew, CuriosityCrew, EvaluationCrew
 from Mnemo.tools.memory_tools import (
     update_session_memory, load_session_json, SESSIONS_DIR,
     check_and_sync, MARKDOWN_PATH, get_db, compute_hash,
@@ -269,7 +269,6 @@ def curiosity_session(session_summary: str) -> None:
                 "skipped_questions":  skipped_text,
                 "structural_gaps":    structural_summary,
                 "answers_json":       "[]",
-                "temporal_context": get_temporal_context(),
             })
             raw = result.raw.strip() if result.raw else ""
             # Extrait le JSON même si le LLM a ajouté du texte autour
@@ -338,52 +337,98 @@ def new_session_id() -> str:
     return f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
 
+def _confirm_web_search(web_query: str, backend: str) -> bool:
+    """
+    Affiche la requête web que l'agent veut envoyer et demande confirmation.
+    Retourne True si l'utilisateur confirme, False sinon.
+    La query est figée — le LLM ne peut plus la modifier après cette étape.
+    """
+    print(f"\n  🌐 L'agent veut effectuer une recherche web.")
+    print(f"     Requête  : {web_query!r}")
+    print(f"     Backend  : {backend}")
+    print(f"     ⚠️  Ces données seront envoyées hors de ta machine.")
+    try:
+        answer = input("     Confirmer l'envoi ? (O/n) > ").strip().lower()
+        return answer in ("", "o", "oui", "y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
 def handle_message(user_message: str, session_id: str) -> str:
     """
-    Traite un message utilisateur et retourne la réponse de l'agent.
-    Si l'évaluateur signale needs_clarification, pose d'abord une question
-    de clarification inline avant de répondre.
+    Traite un message utilisateur en deux temps :
+      1. EvaluationCrew  — analyse le message, produit le JSON d'évaluation
+      2. Interception    — confirmation web si needs_web=true, clarification si besoin
+      3. ConversationCrew — retrieve + réponse finale avec inputs validés
+    Le LLM ne peut ni modifier la web_query ni la rejouer après confirmation.
     """
+    temporal_ctx = get_temporal_context()
+
+    # ── Étape 1 : évaluation ────────────────────────────────────────
+    eval_result = EvaluationCrew().crew().kickoff(inputs={
+        "user_message":     user_message,
+        "temporal_context": temporal_ctx,
+    })
+    eval_raw = eval_result.raw.strip()
+
+    # Parse le JSON d'évaluation — best-effort
+    eval_json = {}
+    try:
+        clean = eval_raw if eval_raw.startswith("{") else \
+                eval_raw[eval_raw.index("{"):eval_raw.rindex("}")+1]
+        eval_json = json.loads(clean)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # ── Interception needs_clarification ───────────────────────────
+    if eval_json.get("needs_clarification") and eval_json.get("clarification_reason"):
+        reason = eval_json["clarification_reason"]
+        print(f"\n  🤔 Mnemo a besoin d'une précision : {reason}")
+        try:
+            clarif = input("    Toi > ").strip()
+            if clarif:
+                user_message = f"{user_message}\n[Précision : {clarif}]"
+                # Ré-évalue avec le message enrichi
+                eval_result = EvaluationCrew().crew().kickoff(inputs={
+                    "user_message":     user_message,
+                    "temporal_context": temporal_ctx,
+                })
+                eval_raw = eval_result.raw.strip()
+                try:
+                    clean = eval_raw if eval_raw.startswith("{") else \
+                            eval_raw[eval_raw.index("{"):eval_raw.rindex("}")+1]
+                    eval_json = json.loads(clean)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        except (EOFError, KeyboardInterrupt):
+            pass
+
+    # ── Interception needs_web ──────────────────────────────────────
+    # La query est figée ici — le LLM ne peut plus la modifier
+    if eval_json.get("needs_web") and eval_json.get("web_query"):
+        web_query = eval_json["web_query"]
+        # Détermine le backend pour l'affichage
+        from Mnemo.tools.web_tools import SEARXNG_URL, _DDG_AVAILABLE
+        backend = "SearXNG" if SEARXNG_URL else \
+                  "DuckDuckGo" if _DDG_AVAILABLE else "aucun backend configuré"
+
+        confirmed = _confirm_web_search(web_query, backend)
+        if not confirmed:
+            # Annule la recherche web — le LLM répondra sans contexte web
+            eval_json["needs_web"]  = False
+            eval_json["web_query"]  = None
+            eval_raw = json.dumps(eval_json, ensure_ascii=False)
+            print("     Recherche web annulée — réponse depuis la mémoire uniquement.\n")
+
+    # ── Étape 2 : retrieve + réponse ───────────────────────────────
     result = ConversationCrew().crew().kickoff(inputs={
         "user_message":      user_message,
         "session_id":        session_id,
-        "evaluation_result": "",
+        "evaluation_result": eval_raw,
         "memory_context":    "",
-        "temporal_context":  get_temporal_context(),
+        "temporal_context":  temporal_ctx,
     })
     response = result.raw
-
-    # Détection inline de needs_clarification
-    # Le crew retourne parfois le JSON d'évaluation dans le contexte —
-    # on tente de l'extraire pour décider si on doit poser une question
-    try:
-        # L'évaluateur expose needs_clarification dans son output JSON
-        # CrewAI stocke les outputs intermédiaires dans result.tasks_output
-        if hasattr(result, "tasks_output") and result.tasks_output:
-            eval_raw = result.tasks_output[0].raw if result.tasks_output else ""
-            eval_json = json.loads(eval_raw) if eval_raw.strip().startswith("{") else {}
-            if eval_json.get("needs_clarification") and eval_json.get("clarification_reason"):
-                reason = eval_json["clarification_reason"]
-                print(f"\n  🤔 Mnemo a besoin d'une précision : {reason}")
-                try:
-                    clarif = input("    Toi > ").strip()
-                    if clarif:
-                        # Relance avec le message enrichi
-                        enriched = f"{user_message}\n[Précision : {clarif}]"
-                        result2  = ConversationCrew().crew().kickoff(inputs={
-                            "user_message":      enriched,
-                            "session_id":        session_id,
-                            "evaluation_result": "",
-                            "memory_context":    "",
-                            "temporal_context":  get_temporal_context(),
-                        })
-                        response = result2.raw
-                        update_session_memory(session_id, user_message, response)
-                        return response
-                except (EOFError, KeyboardInterrupt):
-                    pass  # On continue avec la réponse originale
-    except (json.JSONDecodeError, AttributeError, IndexError):
-        pass  # Silencieux — le needs_clarification est best-effort
 
     update_session_memory(session_id, user_message, response)
     return response
@@ -692,8 +737,12 @@ if __name__ == "__main__":
             list_docs()
         elif sys.argv[1] == "curiosity":
             debug_curiosity()
+        elif sys.argv[1] == "init_db":
+            from Mnemo.init_db import init_db, migrate_db
+            init_db()
+            migrate_db()
         else:
             print(f"Commande inconnue : {sys.argv[1]}")
-            print("Commandes disponibles : run, train, replay, test, ingest, docs, curiosity")
+            print("Commandes disponibles : run, train, replay, test, ingest, docs, curiosity, init_db")
     else:
         run()

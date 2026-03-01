@@ -10,6 +10,7 @@ from Mnemo.tools.memory_tools import (
     ListDocumentsTool,
 )
 from Mnemo.tools.calendar_tools import GetCalendarTool
+from Mnemo.tools.web_tools import WebSearchTool
 
 MODEL    = os.getenv("MODEL")
 API_BASE = os.getenv("API_BASE")
@@ -26,9 +27,14 @@ def _llm(temperature: float = 0.0) -> LLM:
 # ══════════════════════════════════════════════════════════════
 
 @CrewBase
-class ConversationCrew:
+class EvaluationCrew:
+    """
+    Crew léger — tâche unique : évalue le message et produit le JSON d'évaluation.
+    Séparé de ConversationCrew pour permettre l'interception entre evaluate et retrieve
+    (confirmation web, needs_clarification, etc.).
+    """
     agents_config = "config/conversation_agents.yaml"
-    tasks_config  = "config/conversation_tasks.yaml"
+    tasks_config  = "config/evaluation_tasks.yaml"
 
     @agent
     def evaluator(self) -> Agent:
@@ -36,12 +42,32 @@ class ConversationCrew:
             config=self.agents_config["evaluator"],
             verbose=False,
             allow_delegation=False,
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
+            max_iter=2,
+            llm=_llm(0.0),
         )
-    )
+
+    @task
+    def evaluate_task(self) -> Task:
+        return Task(config=self.tasks_config["evaluate_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+
+@CrewBase
+class ConversationCrew:
+    """
+    Crew principal — retrieve + main.
+    Reçoit evaluation_result déjà validé (après confirmation web si besoin).
+    """
+    agents_config = "config/conversation_agents.yaml"
+    tasks_config  = "config/conversation_tasks.yaml"
 
     @agent
     def memory_retriever(self) -> Agent:
@@ -49,34 +75,24 @@ class ConversationCrew:
             config=self.agents_config["memory_retriever"],
             verbose=False,
             allow_delegation=False,
-            tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool()],
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-        )
+            tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool(), WebSearchTool()],
+            max_iter=8,   # session + mémoire + calendrier + web = jusqu'à 4 appels, marge incluse
+            llm=_llm(0.0),
         )
 
     @agent
     def main_agent(self) -> Agent:
         return Agent(
             config=self.agents_config["main_agent"],
-            verbose=False,       # verbose=True ralentit et pollue le terminal
+            verbose=False,
             allow_delegation=False,
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.5
+            max_iter=3,
+            llm=_llm(0.5),
         )
-    )
-
-    @task
-    def evaluate_task(self) -> Task:
-        return Task(config=self.tasks_config["evaluate_task"])
 
     @task
     def retrieve_task(self) -> Task:
-        return Task(config=self.tasks_config["retrieve_task"], context=[self.evaluate_task()])
+        return Task(config=self.tasks_config["retrieve_task"])
 
     @task
     def main_task(self) -> Task:
@@ -107,11 +123,8 @@ class ConsolidationCrew:
             config=self.agents_config["session_consolidator"],
             verbose=False,
             allow_delegation=False,
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.1
-            )
+            max_iter=2,          # Analyse + produit un JSON, 2 passes suffisent
+            llm=_llm(0.1),
         )
 
     @agent
@@ -121,11 +134,8 @@ class ConsolidationCrew:
             verbose=False,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
-            )
+            max_iter=6,          # N faits à écrire + 1 sync → N+1 appels tool
+            llm=_llm(0.0),
         )
 
     @task
@@ -162,12 +172,8 @@ class CuriosityCrew:
             verbose=False,
             allow_delegation=False,
             max_iter=2,          # Analyse + produit un JSON, pas de tools
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
+            llm=_llm(0.0),
         )
-    )
 
     @agent
     def questionnaire_agent(self) -> Agent:
@@ -176,12 +182,9 @@ class CuriosityCrew:
             verbose=False,
             allow_delegation=False,
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
-            llm = LLM(
-                model=MODEL,  
-                base_url=API_BASE,
-                temperature=0.0
+            max_iter=6,
+            llm=_llm(0.0),
         )
-    )
 
     @task
     def gap_detection_task(self) -> Task:
