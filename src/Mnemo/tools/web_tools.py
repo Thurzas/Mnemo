@@ -35,14 +35,10 @@ WEB_QUERY_LOG    = os.getenv("WEB_QUERY_LOG", "web_queries.log")  # relatif à /
 
 # ── Import DDG — silencieux si absent ────────────────────────────────────────
 try:
-    from ddgs import DDGS           # ddgs >= 1.0 (renommé depuis duckduckgo_search)
+    from ddgs import DDGS
     _DDG_AVAILABLE = True
 except ImportError:
-    try:
-        from duckduckgo_search import DDGS   # fallback ancienne version
-        _DDG_AVAILABLE = True
-    except ImportError:
-        _DDG_AVAILABLE = False
+    _DDG_AVAILABLE = False
 
 # ── Logger d'audit ───────────────────────────────────────────────────────────
 _audit_logger = logging.getLogger("mnemo.web_audit")
@@ -81,7 +77,7 @@ _PRIVATE_URL_PATTERNS = re.compile(
 _PII_PATTERNS = [
     re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),  # email
     re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"),                # IP
-    re.compile(r"\b(?:\+33|0033|0)[1-9](?:[\s.-]?\d{2}){4}\b"),           # téléphone FR
+    re.compile(r"(?<!\w)(?:\+33|0033|0)[\s.]?[1-9](?:[\s.-]?\d{2}){4}(?!\w)"),  # téléphone FR
 ]
 
 MAX_QUERY_LENGTH = 200
