@@ -42,3 +42,4 @@ CLAUDE.md
 documents/
 # NEVER export calendars. it's a major security risk.
 *.ics 
+data/

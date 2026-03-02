@@ -30,9 +30,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd --gid 1000 mnemo \
  && useradd  --uid 1000 --gid 1000 --create-home --shell /bin/false mnemo  && mkdir -p /home/mnemo/.local/share  && chown -R mnemo:mnemo /home/mnemo
 
-# ── Dépendances Python (encore root pour pip) ────────────────────
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+ && pip install --no-cache-dir litellm
 
 # ── Code source (lecture seule dans le conteneur) ────────────────
 COPY src/ /app/src/
@@ -57,6 +57,8 @@ ENV PYTHONUNBUFFERED=1
 # Désactive la télémétrie CrewAI — aucun envoi vers app.crewai.com
 ENV OTEL_SDK_DISABLED=true
 ENV CREWAI_DISABLE_TELEMETRY=true
+ENV CREWAI_DISABLE_EXECUTION_TRACE_VIEWER=true
+ENV CREWAI_TRACING_ENABLED=false
 
 # ── Point d'entrée ───────────────────────────────────────────────
 ENTRYPOINT ["python", "-u", "-m", "Mnemo.main"]

@@ -78,7 +78,8 @@ services:
 
     # ── Réseau isolé ──────────────────────────────────────────────
     networks:
-      - mnemo_net
+      - mnemo_internal   # SearXNG uniquement — réseau isolé
+      - mnemo_external   # Ollama sur l'hôte — accès sortant nécessaire
 
     # ── host.docker.internal → Ollama sur l'hôte ─────────────────
     extra_hosts:
@@ -105,7 +106,7 @@ services:
     expose:
       - "8080"
     networks:
-      - mnemo_net
+      - mnemo_internal
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 10s
@@ -115,14 +116,19 @@ services:
     volumes:
       - searxng_data:/etc/searxng
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8080
+      - SEARXNG_BASE_URL=http://searxng:8080
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-change_me_in_env}
 
 
 networks:
-  mnemo_net:
+  mnemo_internal:
+    # Réseau isolé — Mnemo ↔ SearXNG uniquement, pas d'accès internet
     driver: bridge
     internal: true
+  mnemo_external:
+    # Réseau avec accès sortant — nécessaire pour joindre Ollama sur l'hôte
+    # La sécurité repose sur cap_drop + read_only, pas sur l'isolation réseau
+    driver: bridge
 
 volumes:
   searxng_data:

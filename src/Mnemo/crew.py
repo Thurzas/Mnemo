@@ -12,12 +12,9 @@ from Mnemo.tools.memory_tools import (
 from Mnemo.tools.calendar_tools import GetCalendarTool
 from Mnemo.tools.web_tools import WebSearchTool
 
-MODEL    = os.getenv("MODEL")
-API_BASE = os.getenv("API_BASE")
+MODEL    = os.getenv("MODEL", "ollama/mistral")
+API_BASE = os.getenv("API_BASE", "http://localhost:11434")
 
-# ── LLM par rôle ────────────────────────────────────────────────
-# Ajuste les modèles selon ce que tu as dans Ollama.
-# Le principe : modèle léger pour les tâches structurées, plus lourd pour la réponse finale.
 def _llm(temperature: float = 0.0) -> LLM:
     return LLM(model=MODEL, base_url=API_BASE, temperature=temperature)
 

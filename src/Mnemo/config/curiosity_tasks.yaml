@@ -65,7 +65,7 @@ write_answers_task:
 
     Pour chaque entrée dans le JSON :
     1. Si le champ "label" est présent et non vide, formate le contenu en :
-         - **{label}** : {réponse}
+         - **{{label}}** : {{réponse}}
        Sinon, reformule en prose concise (1-3 phrases).
     2. Appelle update_markdown_memory avec :
        - section    : la valeur du champ "section" dans le JSON
