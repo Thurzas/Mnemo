@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Crée un utilisateur dédié (uid/gid 1000) sans shell de login.
 # Le conteneur ne tourne JAMAIS en root — même en cas d'exploitation.
 RUN groupadd --gid 1000 mnemo \
- && useradd  --uid 1000 --gid 1000 --no-create-home --shell /bin/false mnemo
+ && useradd  --uid 1000 --gid 1000 --create-home --shell /bin/false mnemo  && mkdir -p /home/mnemo/.local/share  && chown -R mnemo:mnemo /home/mnemo
 
 # ── Dépendances Python (encore root pour pip) ────────────────────
 COPY requirements.txt /tmp/requirements.txt
@@ -50,6 +50,9 @@ USER mnemo
 # ── Variables d'environnement ────────────────────────────────────
 # src/ est ajouté au PYTHONPATH pour que `import Mnemo` fonctionne
 ENV PYTHONPATH="/app/src"
+# Redirige HOME vers /tmp (tmpfs) — évite les erreurs de lecture seule
+# CrewAI écrit son cache ChromaDB dans HOME/.local/share/data
+ENV HOME=/tmp
 ENV PYTHONUNBUFFERED=1
 # Désactive la télémétrie CrewAI — aucun envoi vers app.crewai.com
 ENV OTEL_SDK_DISABLED=true
