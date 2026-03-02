@@ -34,6 +34,11 @@ services:
     # ── Variables d'environnement ─────────────────────────────────
     env_file:
       - .env
+    environment:
+      # Redirige le home de l'utilisateur vers /tmp (déjà tmpfs).
+      # CrewAI écrit son cache ChromaDB dans HOME/.local/share/data —
+      # avec read_only:true, /home/mnemo est non accessible en écriture.
+      - HOME=/tmp
 
     # ── Volumes ───────────────────────────────────────────────────
     # /data  → données persistantes (DB, mémoire, sessions, docs)

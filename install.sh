@@ -12,9 +12,16 @@
 #
 # Usage :
 #   chmod +x install.sh && ./install.sh
+#
+# WSL2 : assure-toi que Docker Desktop a l'intégration WSL2 activée
+#   pour ta distro (Docker Desktop → Settings → Resources → WSL Integration)
 # ══════════════════════════════════════════════════════════════════
 
-set -e  # Stoppe si une commande échoue
+set -e
+
+# Se place dans le répertoire du script ──────────────────────────
+# Permet de lancer ./install.sh depuis n'importe quel répertoire.
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
 # ── Couleurs ──────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -30,31 +37,107 @@ echo -e "\n${BOLD}🧠 Installation de Mnemo${RESET}"
 echo "════════════════════════════════════════"
 
 # ══════════════════════════════════════════════════════════════════
+# Détection de l'environnement
+# ══════════════════════════════════════════════════════════════════
+
+# Détecte WSL2 pour adapter les messages d'erreur
+IS_WSL=false
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    IS_WSL=true
+    info "Environnement WSL2 détecté"
+fi
+
+# ══════════════════════════════════════════════════════════════════
 # 1. Prérequis
 # ══════════════════════════════════════════════════════════════════
 step "Vérification des prérequis"
 
-# Docker
-if ! command -v docker &>/dev/null; then
-    fail "Docker non trouvé. Installe Docker Desktop ou Docker Engine."
-fi
-ok "Docker : $(docker --version | cut -d' ' -f3 | tr -d ',')"
+# ── Docker ────────────────────────────────────────────────────────
+# Cherche docker dans le PATH standard + chemins WSL2/Docker Desktop
+DOCKER_BIN=""
+for candidate in docker \
+    /usr/bin/docker \
+    /usr/local/bin/docker \
+    /mnt/c/Program\ Files/Docker/Docker/resources/bin/docker; do
+    if command -v "$candidate" &>/dev/null 2>&1; then
+        DOCKER_BIN="$candidate"
+        break
+    fi
+done
 
-# Docker Compose
-if ! docker compose version &>/dev/null; then
-    fail "Docker Compose plugin non trouvé. Installe Docker Compose v2."
+if [ -z "$DOCKER_BIN" ]; then
+    echo -e "${RED}❌ Docker non trouvé.${RESET}"
+    if $IS_WSL; then
+        echo ""
+        echo "  Sur WSL2, Docker Desktop doit être installé sur Windows ET"
+        echo "  l'intégration WSL2 doit être activée pour ta distro :"
+        echo "    Docker Desktop → Settings → Resources → WSL Integration"
+        echo "    → Active le toggle pour ta distro (Ubuntu, Debian...)"
+        echo ""
+        echo "  Ensuite relance un terminal WSL2 et retente ./install.sh"
+    else
+        echo "  Installe Docker Engine : https://docs.docker.com/engine/install/"
+    fi
+    exit 1
 fi
-ok "Docker Compose : $(docker compose version --short)"
+ok "Docker : $($DOCKER_BIN --version 2>/dev/null | cut -d' ' -f3 | tr -d ',')"
 
-# Ollama
-if ! command -v ollama &>/dev/null; then
+# Vérifie que le daemon Docker répond (pas seulement que le binaire existe)
+if ! $DOCKER_BIN info &>/dev/null 2>&1; then
+    echo -e "${RED}❌ Le daemon Docker ne répond pas.${RESET}"
+    if $IS_WSL; then
+        echo ""
+        echo "  Docker Desktop n'est probablement pas lancé."
+        echo "  Lance Docker Desktop sur Windows, attends qu'il soit prêt"
+        echo "  (icône dans la barre des tâches = vert), puis relance ce script."
+    else
+        echo "  Lance le daemon Docker : sudo systemctl start docker"
+    fi
+    exit 1
+fi
+ok "Daemon Docker : actif"
+
+# ── Docker Compose ────────────────────────────────────────────────
+# Teste d'abord le plugin v2 (docker compose), puis le binaire v1 (docker-compose)
+COMPOSE_CMD=""
+if $DOCKER_BIN compose version &>/dev/null 2>&1; then
+    COMPOSE_CMD="$DOCKER_BIN compose"
+elif command -v docker-compose &>/dev/null 2>&1; then
+    warn "Docker Compose v1 détecté (docker-compose). La v2 est recommandée."
+    COMPOSE_CMD="docker-compose"
+else
+    echo -e "${RED}❌ Docker Compose non trouvé.${RESET}"
+    echo "  Installe le plugin Compose v2 :"
+    echo "    sudo apt-get install docker-compose-plugin"
+    echo "  Ou via Docker Desktop (inclus par défaut)."
+    exit 1
+fi
+ok "Docker Compose : $($COMPOSE_CMD version --short 2>/dev/null || $COMPOSE_CMD version)"
+
+# Substitue 'docker compose' par la commande détectée dans la suite du script
+docker_compose() { $COMPOSE_CMD "$@"; }
+
+# ── Ollama ────────────────────────────────────────────────────────
+OLLAMA_BIN=""
+for candidate in ollama /usr/local/bin/ollama /usr/bin/ollama; do
+    if command -v "$candidate" &>/dev/null 2>&1; then
+        OLLAMA_BIN="$candidate"
+        break
+    fi
+done
+
+if [ -z "$OLLAMA_BIN" ]; then
     warn "Ollama non trouvé dans le PATH."
-    warn "Installe Ollama depuis https://ollama.com puis relance ce script."
-    warn "Si Ollama tourne déjà en service (WSL2, serveur), tu peux ignorer."
+    if $IS_WSL; then
+        warn "Si Ollama tourne sur Windows (hors WSL2), c'est normal —"
+        warn "l'agent le rejoindra via host.docker.internal."
+    else
+        warn "Installe Ollama depuis https://ollama.com puis relance ce script."
+    fi
     read -p "  Continuer quand même ? (o/N) " CONTINUE
     [[ "${CONTINUE,,}" == "o" ]] || exit 0
 else
-    ok "Ollama : $(ollama --version 2>/dev/null || echo 'installé')"
+    ok "Ollama : $($OLLAMA_BIN --version 2>/dev/null || echo 'installé')"
 fi
 
 # ══════════════════════════════════════════════════════════════════
@@ -66,9 +149,8 @@ if [ ! -f ".env" ]; then
     cp .env.example .env
     ok ".env créé depuis .env.example"
 
-    # Détection du modèle disponible
-    if command -v ollama &>/dev/null; then
-        AVAILABLE=$(ollama list 2>/dev/null | awk 'NR>1 {print $1}' | head -5)
+    if [ -n "$OLLAMA_BIN" ]; then
+        AVAILABLE=$($OLLAMA_BIN list 2>/dev/null | awk 'NR>1 {print $1}' | head -5)
         if [ -n "$AVAILABLE" ]; then
             info "Modèles Ollama disponibles :"
             echo "$AVAILABLE" | while read -r m; do echo "    - $m"; done
@@ -86,7 +168,6 @@ else
     ok ".env déjà présent — non modifié"
 fi
 
-# Charge les variables pour la suite
 source .env
 MODEL="${MODEL:-ollama/mistral}"
 DATA_DIR="${DATA_DIR:-./data}"
@@ -99,7 +180,6 @@ step "Création de data/"
 mkdir -p "${DATA_DIR}/sessions"
 mkdir -p "${DATA_DIR}/docs"
 
-# Crée memory.md vierge si absent
 if [ ! -f "${DATA_DIR}/memory.md" ]; then
     cat > "${DATA_DIR}/memory.md" << 'MEMORY_TEMPLATE'
 # Memory — Agent
@@ -142,40 +222,37 @@ ok "Structure data/ prête : ${DATA_DIR}/"
 # ══════════════════════════════════════════════════════════════════
 step "Modèles Ollama"
 
-MODEL_NAME="${MODEL#ollama/}"  # Retire le préfixe "ollama/"
+MODEL_NAME="${MODEL#ollama/}"
 
 pull_if_needed() {
     local model="$1"
-    if ollama list 2>/dev/null | grep -q "^${model}"; then
+    if [ -z "$OLLAMA_BIN" ]; then
+        warn "Ollama absent — tire le modèle manuellement : ollama pull ${model}"
+        return
+    fi
+    if $OLLAMA_BIN list 2>/dev/null | grep -q "^${model}"; then
         ok "${model} déjà présent"
     else
         info "Téléchargement de ${model}..."
-        ollama pull "${model}" || warn "Impossible de tirer ${model} — vérifie qu'Ollama tourne"
+        $OLLAMA_BIN pull "${model}" || warn "Impossible de tirer ${model}"
     fi
 }
 
-if command -v ollama &>/dev/null; then
-    pull_if_needed "${MODEL_NAME}"
-    pull_if_needed "nomic-embed-text"
-else
-    warn "Ollama absent — assure-toi que ces modèles sont disponibles sur ton serveur Ollama :"
-    echo "    ollama pull ${MODEL_NAME}"
-    echo "    ollama pull nomic-embed-text"
-fi
+pull_if_needed "${MODEL_NAME}"
+pull_if_needed "nomic-embed-text"
 
 # ══════════════════════════════════════════════════════════════════
 # 5. Build Docker
 # ══════════════════════════════════════════════════════════════════
 step "Build de l'image Docker"
-docker compose build
+docker_compose build
 ok "Image mnemo:latest construite"
 
 # ══════════════════════════════════════════════════════════════════
 # 6. Initialisation de la base SQLite
 # ══════════════════════════════════════════════════════════════════
 step "Initialisation de la base SQLite"
-
-docker compose run --rm mnemo init_db
+docker_compose run --rm mnemo init_db
 ok "Base SQLite initialisée dans ${DATA_DIR}/memory.db"
 
 # ══════════════════════════════════════════════════════════════════
@@ -193,5 +270,10 @@ echo -e "  ${BOLD}docker compose run --rm mnemo ingest /data/docs/ton_fichier.pd
 echo ""
 echo "  Pour relancer le questionnaire d'initialisation :"
 echo -e "  ${BOLD}docker compose run --rm mnemo curiosity${RESET}"
+if $IS_WSL; then
+    echo ""
+    info "WSL2 : SearXNG peut être lancé séparément si besoin :"
+    echo -e "  ${BOLD}docker compose --profile search up -d searxng${RESET}"
+fi
 echo "════════════════════════════════════════"
 echo ""
