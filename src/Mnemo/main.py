@@ -807,7 +807,7 @@ if __name__ == "__main__":
             else:
                 ingest(sys.argv[2])
         elif sys.argv[1] == "docs":
-            list_docs()
+            print(list_ingested_documents())
         elif sys.argv[1] == "curiosity":
             debug_curiosity()
         elif sys.argv[1] == "init_db":
