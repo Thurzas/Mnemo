@@ -19,9 +19,17 @@
 
 set -e
 
-# Se place dans le répertoire du script ──────────────────────────
-# Permet de lancer ./install.sh depuis n'importe quel répertoire.
+# ── Se place dans le répertoire du script + localise docker-compose.yml ───
 cd "$(dirname "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(pwd)"
+if [ -f "${SCRIPT_DIR}/docker-compose.yml" ]; then
+    COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
+elif [ -f "${SCRIPT_DIR}/docker/docker-compose.yml" ]; then
+    COMPOSE_FILE="${SCRIPT_DIR}/docker/docker-compose.yml"
+else
+    echo "❌ docker-compose.yml introuvable dans ${SCRIPT_DIR}"
+    exit 1
+fi
 
 # ── Couleurs ──────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -115,7 +123,7 @@ fi
 ok "Docker Compose : $($COMPOSE_CMD version --short 2>/dev/null || $COMPOSE_CMD version)"
 
 # Substitue 'docker compose' par la commande détectée dans la suite du script
-docker_compose() { $COMPOSE_CMD "$@"; }
+docker_compose() { $COMPOSE_CMD -f "${COMPOSE_FILE}" "$@"; }
 
 # ── Ollama ────────────────────────────────────────────────────────
 OLLAMA_BIN=""
