@@ -23,7 +23,7 @@ def _llm(temperature: float = 0.0) -> LLM:
 
 
 # ══════════════════════════════════════════════════════════════
-# Evaluation Crew — tourne à chaque message
+# Conversation Crew — tourne à chaque message
 # ══════════════════════════════════════════════════════════════
 
 @CrewBase
@@ -59,9 +59,6 @@ class EvaluationCrew:
             verbose=False,
         )
 
-# ══════════════════════════════════════════════════════════════
-# Conversation Crew — tourne à chaque message
-# ══════════════════════════════════════════════════════════════
 
 @CrewBase
 class ConversationCrew:
@@ -204,4 +201,48 @@ class CuriosityCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
+        )
+
+# ══════════════════════════════════════════════════════════════
+# Phase 3 — Crews d'action (stubs — seront remplis par étape)
+# ══════════════════════════════════════════════════════════════
+
+class ShellCrew:
+    """
+    Crew pour l'exécution de commandes système.
+    STUB — implémenté en phase 3 étape 2 (outils shell).
+    Reçoit : user_message, evaluation_result, web_context, temporal_context.
+    Garanties : confirmation obligatoire, commande figée, pas d'accès mémoire.
+    """
+    def run(self, inputs: dict) -> str:
+        return (
+            "[ShellCrew non encore implémenté] "
+            "La gestion des commandes système arrive prochainement."
+        )
+
+
+class CalendarWriteCrew:
+    """
+    Crew pour l'écriture CalDAV (créer, modifier, supprimer des événements).
+    STUB — implémenté en phase 3 étape 3 (agenda CRUD).
+    Reçoit : user_message, evaluation_result, web_context, temporal_context.
+    Garanties : confirmation obligatoire, opération figée, lecture seule sur la mémoire.
+    """
+    def run(self, inputs: dict) -> str:
+        return (
+            "[CalendarWriteCrew non encore implémenté] "
+            "La gestion de l'agenda en écriture arrive prochainement."
+        )
+
+
+class SchedulerCrew:
+    """
+    Crew pour la planification de tâches différées ou récurrentes.
+    STUB — implémenté en phase 3 étape 4 (scheduler).
+    Reçoit : user_message, evaluation_result, temporal_context.
+    """
+    def run(self, inputs: dict) -> str:
+        return (
+            "[SchedulerCrew non encore implémenté] "
+            "La planification de tâches différées arrive prochainement."
         )

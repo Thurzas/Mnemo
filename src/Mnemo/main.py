@@ -9,7 +9,10 @@ from datetime import datetime
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 # ─────────────────────────────────────────────────────────────
 
-from Mnemo.crew import ConversationCrew, ConsolidationCrew, CuriosityCrew, EvaluationCrew
+from Mnemo.crew import (
+    ConversationCrew, ConsolidationCrew, CuriosityCrew, EvaluationCrew,
+    ShellCrew, CalendarWriteCrew, SchedulerCrew,   # Phase 3 — stubs
+)
 from Mnemo.tools.memory_tools import (
     update_session_memory, load_session_json, SESSIONS_DIR,
     check_and_sync, MARKDOWN_PATH, get_db, compute_hash,
@@ -19,6 +22,9 @@ from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
     get_temporal_context, get_upcoming_events,
     get_deadline_context, format_startup_banner, calendar_is_configured,
+)
+from Mnemo.tools.web_tools import (
+    SEARXNG_URL, _DDG_AVAILABLE, web_search, format_results_for_prompt,
 )
 
 
@@ -354,81 +360,148 @@ def _confirm_web_search(web_query: str, backend: str) -> bool:
         return False
 
 
+def _parse_eval_json(raw: str) -> dict:
+    """Extrait le JSON d'évaluation depuis la réponse brute du LLM — best-effort."""
+    try:
+        # Extrait toujours le sous-string JSON — même si ça commence par {,
+        # il peut y avoir du texte après le } final (ex: "{"route":"x"} Voilà.")
+        start = raw.index("{")
+        end   = raw.rindex("}") + 1
+        return json.loads(raw[start:end])
+    except (json.JSONDecodeError, ValueError):
+        return {}
+
+
+def _handle_clarification(
+    eval_json: dict, user_message: str, temporal_ctx: str
+) -> tuple[dict, str, str]:
+    """
+    Interception needs_clarification : pose la question, ré-évalue si réponse.
+    Retourne (eval_json, eval_raw, user_message) potentiellement mis à jour.
+    """
+    if not (eval_json.get("needs_clarification") and eval_json.get("clarification_reason")):
+        return eval_json, json.dumps(eval_json, ensure_ascii=False), user_message
+
+    reason = eval_json["clarification_reason"]
+    print(f"\n  🤔 Mnemo a besoin d'une précision : {reason}")
+    try:
+        clarif = input("    Toi > ").strip()
+        if clarif:
+            user_message = f"{user_message}\n[Précision : {clarif}]"
+            eval_result  = EvaluationCrew().crew().kickoff(inputs={
+                "user_message":     user_message,
+                "temporal_context": temporal_ctx,
+            })
+            eval_raw  = eval_result.raw.strip()
+            eval_json = _parse_eval_json(eval_raw)
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+    return eval_json, json.dumps(eval_json, ensure_ascii=False), user_message
+
+
+def _handle_web_confirmation(eval_json: dict) -> tuple[dict, str]:
+    """
+    Interception needs_web : affiche la query figée, demande confirmation.
+    Si refus, désactive needs_web dans eval_json.
+    Retourne (eval_json, web_context) — web_context est la chaîne formatée ou "".
+    """
+    web_context = ""
+    if not (eval_json.get("needs_web") and eval_json.get("web_query")):
+        return eval_json, web_context
+
+    web_query = eval_json["web_query"]
+    backend = "SearXNG" if SEARXNG_URL else \
+              "DuckDuckGo" if _DDG_AVAILABLE else "aucun backend configuré"
+
+    if _confirm_web_search(web_query, backend):
+        results = web_search(web_query)
+        web_context = format_results_for_prompt(results) if results else ""
+    else:
+        eval_json["needs_web"] = False
+        eval_json["web_query"] = None
+        print("     Recherche web annulée — réponse depuis la mémoire uniquement.\n")
+
+    return eval_json, web_context
+
+
+def _route_message(
+    eval_json: dict,
+    user_message: str,
+    session_id: str,
+    temporal_ctx: str,
+    web_context: str,
+) -> str:
+    """
+    Dispatche vers le bon crew selon eval_json["route"].
+
+    Routes :
+      "conversation" (défaut) → ConversationCrew
+      "shell"                 → ShellCrew  (stub phase 3.2)
+      "calendar"              → CalendarWriteCrew (stub phase 3.3)
+      "scheduler"             → SchedulerCrew (stub phase 3.4)
+    Route inconnue ou absente → conversation silencieux.
+
+    Si web_context non vide (needs_web confirmé) :
+      injecté dans les inputs pour toutes les routes — enrichit le contexte avant l'action.
+    """
+    route = eval_json.get("route", "conversation")
+    eval_raw = json.dumps(eval_json, ensure_ascii=False)
+
+    base_inputs = {
+        "user_message":      user_message,
+        "evaluation_result": eval_raw,
+        "temporal_context":  temporal_ctx,
+        "web_context":       web_context,
+    }
+
+    if route == "shell":
+        return ShellCrew().run({**base_inputs})
+
+    if route == "calendar":
+        return CalendarWriteCrew().run({**base_inputs})
+
+    if route == "scheduler":
+        return SchedulerCrew().run({**base_inputs})
+
+    # "conversation" ou route inconnue → ConversationCrew (défaut silencieux)
+    result = ConversationCrew().crew().kickoff(inputs={
+        **base_inputs,
+        "session_id":    session_id,
+        "memory_context": "",
+    })
+    return result.raw
+
+
 def handle_message(user_message: str, session_id: str) -> str:
     """
-    Traite un message utilisateur en deux temps :
-      1. EvaluationCrew  — analyse le message, produit le JSON d'évaluation
-      2. Interception    — confirmation web si needs_web=true, clarification si besoin
-      3. ConversationCrew — retrieve + réponse finale avec inputs validés
-    Le LLM ne peut ni modifier la web_query ni la rejouer après confirmation.
+    Pipeline principal :
+      1. EvaluationCrew    — produit le JSON d'évaluation avec route
+      2. Clarification     — interception si needs_clarification
+      3. Web confirmation  — interception si needs_web (query figée, LLM exclu)
+      4. Router            — dispatche vers le crew approprié selon route
     """
     temporal_ctx = get_temporal_context()
 
-    # ── Étape 1 : évaluation ────────────────────────────────────────
+    # ── 1. Évaluation ───────────────────────────────────────────────
     eval_result = EvaluationCrew().crew().kickoff(inputs={
         "user_message":     user_message,
         "temporal_context": temporal_ctx,
     })
-    eval_raw = eval_result.raw.strip()
+    eval_json = _parse_eval_json(eval_result.raw.strip())
 
-    # Parse le JSON d'évaluation — best-effort
-    eval_json = {}
-    try:
-        clean = eval_raw if eval_raw.startswith("{") else \
-                eval_raw[eval_raw.index("{"):eval_raw.rindex("}")+1]
-        eval_json = json.loads(clean)
-    except (json.JSONDecodeError, ValueError):
-        pass
+    # ── 2. Clarification ────────────────────────────────────────────
+    eval_json, _, user_message = _handle_clarification(
+        eval_json, user_message, temporal_ctx
+    )
 
-    # ── Interception needs_clarification ───────────────────────────
-    if eval_json.get("needs_clarification") and eval_json.get("clarification_reason"):
-        reason = eval_json["clarification_reason"]
-        print(f"\n  🤔 Mnemo a besoin d'une précision : {reason}")
-        try:
-            clarif = input("    Toi > ").strip()
-            if clarif:
-                user_message = f"{user_message}\n[Précision : {clarif}]"
-                # Ré-évalue avec le message enrichi
-                eval_result = EvaluationCrew().crew().kickoff(inputs={
-                    "user_message":     user_message,
-                    "temporal_context": temporal_ctx,
-                })
-                eval_raw = eval_result.raw.strip()
-                try:
-                    clean = eval_raw if eval_raw.startswith("{") else \
-                            eval_raw[eval_raw.index("{"):eval_raw.rindex("}")+1]
-                    eval_json = json.loads(clean)
-                except (json.JSONDecodeError, ValueError):
-                    pass
-        except (EOFError, KeyboardInterrupt):
-            pass
+    # ── 3. Web (séquence : web avant action si route != conversation)
+    eval_json, web_context = _handle_web_confirmation(eval_json)
 
-    # ── Interception needs_web ──────────────────────────────────────
-    # La query est figée ici — le LLM ne peut plus la modifier
-    if eval_json.get("needs_web") and eval_json.get("web_query"):
-        web_query = eval_json["web_query"]
-        # Détermine le backend pour l'affichage
-        from Mnemo.tools.web_tools import SEARXNG_URL, _DDG_AVAILABLE
-        backend = "SearXNG" if SEARXNG_URL else \
-                  "DuckDuckGo" if _DDG_AVAILABLE else "aucun backend configuré"
-
-        confirmed = _confirm_web_search(web_query, backend)
-        if not confirmed:
-            # Annule la recherche web — le LLM répondra sans contexte web
-            eval_json["needs_web"]  = False
-            eval_json["web_query"]  = None
-            eval_raw = json.dumps(eval_json, ensure_ascii=False)
-            print("     Recherche web annulée — réponse depuis la mémoire uniquement.\n")
-
-    # ── Étape 2 : retrieve + réponse ───────────────────────────────
-    result = ConversationCrew().crew().kickoff(inputs={
-        "user_message":      user_message,
-        "session_id":        session_id,
-        "evaluation_result": eval_raw,
-        "memory_context":    "",
-        "temporal_context":  temporal_ctx,
-    })
-    response = result.raw
+    # ── 4. Router ───────────────────────────────────────────────────
+    response = _route_message(
+        eval_json, user_message, session_id, temporal_ctx, web_context
+    )
 
     update_session_memory(session_id, user_message, response)
     return response

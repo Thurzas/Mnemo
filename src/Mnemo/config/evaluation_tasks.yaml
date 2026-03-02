@@ -18,7 +18,8 @@ evaluate_task:
       "needs_web": false,
       "web_query": null,
       "temporal_reference": "past | present | future | none",
-      "reference_date": null
+      "reference_date": null,
+      "route": "conversation"
     }
 
     needs_memory : false uniquement pour les messages triviaux (bonjour, merci, etc.).
@@ -68,6 +69,23 @@ evaluate_task:
         "la semaine dernière" → "2026-02-16/2026-02-22"
         "demain"            → "2026-02-28"
       Si la date ne peut pas être déterminée, mettre null.
+
+    route : détermine quel crew va traiter ce message.
+      - "conversation" : réponse, question, discussion, recherche mémoire, web — cas par défaut.
+          Tout ce qui ne nécessite pas d'action sur le système ou l'agenda.
+      - "shell"        : l'utilisateur demande une action système explicite.
+          Exemples : "crée un fichier", "lance ce script", "déplace ce dossier",
+          "exécute cette commande", "ouvre ce programme".
+          UNIQUEMENT si l'action est demandée de façon explicite — pas pour "montre-moi comment faire".
+      - "calendar"     : l'utilisateur demande une MODIFICATION de l'agenda.
+          Exemples : "crée un événement", "ajoute un rendez-vous", "supprime cette réunion",
+          "décale le rendez-vous de demain".
+          IMPORTANT : la LECTURE de l'agenda reste route "conversation" (needs_calendar=true).
+          Seule l'ÉCRITURE → route "calendar".
+      - "scheduler"    : l'utilisateur demande de planifier une tâche différée ou récurrente.
+          Exemples : "rappelle-moi demain matin", "fais ça tous les lundis",
+          "envoie-moi un résumé à 8h".
+      En cas de doute : "conversation".
   expected_output: >
     Un objet JSON valide et uniquement le JSON, sans markdown, sans explication.
   agent: evaluator
