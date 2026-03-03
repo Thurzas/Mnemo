@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+from pathlib import Path
 from typing import Optional, Type
 
 from crewai.tools import BaseTool
@@ -60,8 +61,32 @@ def validate_command(command_str: str) -> ValidationResult:
     if not command_str or not command_str.strip():
         return ValidationResult(False, "commande vide")
 
-    # Détection de chaînage de commandes — toujours refusé
-    # (&&, ||, ;, |, >, <, `, $(...))
+    READ_ONLY_CMDS = {"ls", "cat", "find", "grep", "head", "tail",
+                      "wc", "du", "stat", "file", "diff", "sort", "uniq"}
+
+    # Pipe unique entre deux commandes de lecture — autorisé
+    # Exemples : "ls /data/docs | grep .pdf"  "cat /data/f.txt | wc -l"
+    if "|" in command_str and "||" not in command_str:
+        pipe_parts = command_str.split("|")
+        if len(pipe_parts) == 2:
+            left, right = pipe_parts[0].strip(), pipe_parts[1].strip()
+            left_ok  = validate_command(left)
+            right_ok = validate_command(right)
+            try:
+                right_cmd = shlex.split(right)[0] if right else ""
+            except ValueError:
+                right_cmd = ""
+            if left_ok and right_ok and right_cmd in READ_ONLY_CMDS:
+                return ValidationResult(True)
+            if not left_ok:
+                reason = f"côté gauche du pipe : {left_ok.reason}"
+            elif not right_ok:
+                reason = f"côté droit du pipe : {right_ok.reason}"
+            else:
+                reason = f"pipe vers {right_cmd!r} interdit — droit limité aux commandes de lecture"
+            return ValidationResult(False, reason)
+
+    # Détection de chaînage dangereux — toujours refusé
     for metachar in ("&&", "||", ";", "|", "`", "$(", ">", "<"):
         if metachar in command_str:
             return ValidationResult(
