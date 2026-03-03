@@ -34,6 +34,10 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
  && pip install --no-cache-dir litellm
 
+# ── Patch CrewAI : désactive le prompt interactif de tracing ────
+COPY patch_crewai_tracing.py /tmp/patch_crewai_tracing.py
+RUN python3 /tmp/patch_crewai_tracing.py
+
 # ── Code source (lecture seule dans le conteneur) ────────────────
 COPY src/ /app/src/
 RUN chown -R mnemo:mnemo /app
