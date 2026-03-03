@@ -19,7 +19,8 @@ evaluate_task:
       "web_query": null,
       "temporal_reference": "past | present | future | none",
       "reference_date": null,
-      "route": "conversation"
+      "route": "conversation",
+      "shell_command": null
     }
 
     needs_memory : false uniquement pour les messages triviaux (bonjour, merci, etc.).
@@ -86,6 +87,17 @@ evaluate_task:
           Exemples : "rappelle-moi demain matin", "fais ça tous les lundis",
           "envoie-moi un résumé à 8h".
       En cas de doute : "conversation".
+
+    shell_command : si route est "shell", la commande EXACTE à exécuter,
+      formatée comme une commande shell valide avec ses arguments.
+      Exemples :
+        "crée un dossier projets dans data"  → "mkdir /data/projets"
+        "liste les fichiers dans data"       → "ls /data"
+        "affiche le contenu de notes.txt"    → "cat /data/notes.txt"
+        "lance le script analyse.py"         → "python /data/analyse.py"
+      null si route != "shell".
+      IMPORTANT : une seule commande — pas de &&, |, ;.
+      Toutes les opérations fichiers doivent utiliser /data comme racine.
   expected_output: >
     Un objet JSON valide et uniquement le JSON, sans markdown, sans explication.
   agent: evaluator

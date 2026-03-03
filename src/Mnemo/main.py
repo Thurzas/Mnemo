@@ -360,6 +360,34 @@ def _confirm_web_search(web_query: str, backend: str) -> bool:
         return False
 
 
+def _confirm_shell_command(shell_command: str) -> bool:
+    """
+    Affiche la commande shell proposée et demande confirmation explicite.
+    La commande est figée — le LLM ne peut plus la modifier après cette étape.
+    Retourne True si l'utilisateur tape 'oui' (pas de validation par défaut).
+    """
+    from Mnemo.tools.shell_whitelist import describe_command_policy
+    from Mnemo.tools.shell_tools import validate_command
+
+    print()
+    print("  🖥️  L'agent veut exécuter une commande système.")
+    print(f"     Commande : {shell_command!r}")
+
+    # Pré-validation — affiche le problème avant même de demander
+    validation = validate_command(shell_command)
+    if not validation:
+        print(f"     ❌ Commande refusée par la whitelist : {validation.reason}")
+        return False
+
+    print("     ⚠️  Cette commande sera exécutée sur le système de fichiers /data.")
+    print("     Tape 'oui' pour confirmer (toute autre réponse annule).")
+    try:
+        answer = input("     Confirmer ? > ").strip().lower()
+        return answer in ("oui", "o", "yes", "y")
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
 def _parse_eval_json(raw: str) -> dict:
     """Extrait le JSON d'évaluation depuis la réponse brute du LLM — best-effort."""
     try:
@@ -425,6 +453,32 @@ def _handle_web_confirmation(eval_json: dict) -> tuple[dict, str]:
     return eval_json, web_context
 
 
+def _handle_shell_confirmation(eval_json: dict) -> tuple[dict, str]:
+    """
+    Interception route=shell : affiche la commande figée, demande confirmation EXPLICITE.
+    Si refus ou commande invalide, revert vers route conversation.
+    Retourne (eval_json, shell_command_confirmed) — shell_command_confirmed est "" si annulé.
+    """
+    if eval_json.get("route") != "shell":
+        return eval_json, ""
+
+    shell_command = eval_json.get("shell_command", "").strip()
+
+    if not shell_command:
+        print("  ⚠️  L'agent a détecté une demande shell mais n'a pas proposé de commande.")
+        print("     Redirection vers conversation.")
+        eval_json["route"] = "conversation"
+        return eval_json, ""
+
+    if _confirm_shell_command(shell_command):
+        print(f"     ✅ Commande confirmée — exécution en cours...")
+        return eval_json, shell_command
+    else:
+        print("     Commande annulée — réponse depuis la mémoire uniquement.")
+        eval_json["route"] = "conversation"
+        return eval_json, ""
+
+
 def _route_message(
     eval_json: dict,
     user_message: str,
@@ -456,7 +510,11 @@ def _route_message(
     }
 
     if route == "shell":
-        return ShellCrew().run({**base_inputs})
+        shell_command = eval_json.get("shell_command", "")
+        return ShellCrew().run({
+            **base_inputs,
+            "shell_command": shell_command,
+        })
 
     if route == "calendar":
         return CalendarWriteCrew().run({**base_inputs})
@@ -497,6 +555,9 @@ def handle_message(user_message: str, session_id: str) -> str:
 
     # ── 3. Web (séquence : web avant action si route != conversation)
     eval_json, web_context = _handle_web_confirmation(eval_json)
+
+    # ── 3b. Shell — confirmation EXPLICITE avant exécution ──────────
+    eval_json, _ = _handle_shell_confirmation(eval_json)
 
     # ── 4. Router ───────────────────────────────────────────────────
     response = _route_message(
@@ -714,7 +775,7 @@ def ingest(file_path: str) -> None:
     """
     Ingère un fichier PDF dans la base de connaissances.
     Appelé via : crewai run -- ingest chemin/vers/fichier.pdf
-    Ou directement : python -m waifuclawd.main ingest fichier.pdf
+    Ou directement : python -m Mnemo.main ingest fichier.pdf
     """
     path = Path(file_path)
     if not path.exists():
@@ -754,7 +815,7 @@ def debug_curiosity() -> None:
     """
     Déclenche le questionnement directement sans passer par une session complète.
     Utile pour tester CuriosityCrew en isolation.
-    Usage : python -m waifuclawd.main curiosity
+    Usage : python -m Mnemo.main curiosity
     """
     print("🧪 Mode debug — déclenchement direct du questionnaire\n")
 
@@ -805,7 +866,7 @@ if __name__ == "__main__":
             test()
         elif sys.argv[1] == "ingest":
             if len(sys.argv) < 3:
-                print("Usage : python -m waifuclawd.main ingest <fichier.pdf>")
+                print("Usage : python -m Mnemo.main ingest <fichier.pdf>")
             else:
                 ingest(sys.argv[2])
         elif sys.argv[1] == "docs":

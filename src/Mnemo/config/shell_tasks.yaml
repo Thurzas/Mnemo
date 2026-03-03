@@ -1,0 +1,24 @@
+execute_shell_task:
+  description: >
+    L'utilisateur a demandé une action système et a confirmé son exécution.
+
+    Message original : {user_message}
+    Commande à exécuter : {shell_command}
+
+    Ta tâche :
+    1. Appelle execute_shell_command avec exactement la commande indiquée
+       dans "Commande à exécuter" — ne la modifie pas.
+    2. Lis la sortie.
+    3. Produis une réponse courte et claire :
+       - Si succès : confirme ce qui a été fait, résume la sortie si longue.
+       - Si erreur : explique le problème, propose une correction si évidente.
+
+    RÈGLES :
+    - N'exécute qu'une seule fois la commande.
+    - Ne propose PAS d'autres commandes non demandées.
+    - Ne modifie PAS la commande approuvée.
+    - Réponds en français, de façon concise.
+  expected_output: >
+    Une réponse courte confirmant l'exécution et résumant le résultat.
+    En cas d'erreur, une explication claire du problème.
+  agent: shell_executor

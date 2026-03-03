@@ -41,6 +41,7 @@ class EvaluationCrew:
             allow_delegation=False,
             max_iter=2,
             llm=_llm(0.0),
+            tracing=False,
         )
 
     @task
@@ -54,6 +55,7 @@ class EvaluationCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
+            tracing=False,
         )
 
 
@@ -75,6 +77,7 @@ class ConversationCrew:
             tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool(), WebSearchTool()],
             max_iter=8,   # session + mémoire + calendrier + web = jusqu'à 4 appels, marge incluse
             llm=_llm(0.0),
+            tracing=False,
         )
 
     @agent
@@ -85,6 +88,7 @@ class ConversationCrew:
             allow_delegation=False,
             max_iter=3,
             llm=_llm(0.5),
+            tracing=False,
         )
 
     @task
@@ -102,6 +106,7 @@ class ConversationCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
+            tracing=False,
         )
 
 
@@ -122,6 +127,7 @@ class ConsolidationCrew:
             allow_delegation=False,
             max_iter=2,          # Analyse + produit un JSON, 2 passes suffisent
             llm=_llm(0.1),
+            tracing=False,
         )
 
     @agent
@@ -133,6 +139,7 @@ class ConsolidationCrew:
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
             max_iter=6,          # N faits à écrire + 1 sync → N+1 appels tool
             llm=_llm(0.0),
+            tracing=False,
         )
 
     @task
@@ -150,6 +157,7 @@ class ConsolidationCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,       # verbose=True sur la consolidation ralentissait aussi
+            tracing=False,
         )
 
 
@@ -170,6 +178,7 @@ class CuriosityCrew:
             allow_delegation=False,
             max_iter=2,          # Analyse + produit un JSON, pas de tools
             llm=_llm(0.0),
+            tracing=False,
         )
 
     @agent
@@ -181,6 +190,7 @@ class CuriosityCrew:
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
             max_iter=6,
             llm=_llm(0.0),
+            tracing=False,
         )
 
     @task
@@ -198,24 +208,53 @@ class CuriosityCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
+            tracing=False,
         )
 
 # ══════════════════════════════════════════════════════════════
 # Phase 3 — Crews d'action (stubs — seront remplis par étape)
 # ══════════════════════════════════════════════════════════════
 
+@CrewBase
 class ShellCrew:
     """
     Crew pour l'exécution de commandes système.
-    STUB — implémenté en phase 3 étape 2 (outils shell).
-    Reçoit : user_message, evaluation_result, web_context, temporal_context.
-    Garanties : confirmation obligatoire, commande figée, pas d'accès mémoire.
+    La commande a déjà été validée et confirmée par l'utilisateur dans main.py.
+    Cet agent l'exécute et interprète le résultat — sans accès à la mémoire.
     """
-    def run(self, inputs: dict) -> str:
-        return (
-            "[ShellCrew non encore implémenté] "
-            "La gestion des commandes système arrive prochainement."
+    agents_config = "config/shell_agents.yaml"
+    tasks_config  = "config/shell_tasks.yaml"
+
+    @agent
+    def shell_executor(self) -> Agent:
+        from Mnemo.tools.shell_tools import ShellExecuteTool
+        return Agent(
+            config=self.agents_config["shell_executor"],
+            tools=[ShellExecuteTool()],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=2,
+            llm=_llm(0.0),
+            tracing=False,
         )
+
+    @task
+    def execute_shell_task(self) -> Task:
+        return Task(config=self.tasks_config["execute_shell_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+            tracing=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        result = self.crew().kickoff(inputs=inputs)
+        return result.raw.strip()
 
 
 class CalendarWriteCrew:
