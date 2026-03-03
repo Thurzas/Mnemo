@@ -127,14 +127,19 @@ def validate_command(command_str: str) -> ValidationResult:
                     )
     else:
         # Commandes de lecture : les chemins sous / sont autorisés SAUF
-        # les chemins sensibles
+        # les chemins sensibles — on résout d'abord pour bloquer les traversals
         SENSITIVE_PATHS = {"/etc/shadow", "/etc/passwd", "/proc/keys",
                            "/root", "/home"}
         for arg in args:
             if arg.startswith("-"):
                 continue
+            # Résout le chemin pour neutraliser /data/../etc/passwd
+            try:
+                resolved = str(Path(arg).resolve())
+            except (ValueError, OSError):
+                resolved = arg
             for sensitive in SENSITIVE_PATHS:
-                if arg.startswith(sensitive):
+                if resolved.startswith(sensitive):
                     return ValidationResult(
                         False,
                         f"chemin sensible interdit : {arg!r}"
