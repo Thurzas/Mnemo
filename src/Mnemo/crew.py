@@ -41,7 +41,6 @@ class EvaluationCrew:
             allow_delegation=False,
             max_iter=2,
             llm=_llm(0.0),
-            tracing=False,
         )
 
     @task
@@ -55,7 +54,6 @@ class EvaluationCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
-            tracing=False,
         )
 
 
@@ -77,7 +75,6 @@ class ConversationCrew:
             tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool(), WebSearchTool()],
             max_iter=8,   # session + mémoire + calendrier + web = jusqu'à 4 appels, marge incluse
             llm=_llm(0.0),
-            tracing=False,
         )
 
     @agent
@@ -88,7 +85,6 @@ class ConversationCrew:
             allow_delegation=False,
             max_iter=3,
             llm=_llm(0.5),
-            tracing=False,
         )
 
     @task
@@ -106,7 +102,6 @@ class ConversationCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
-            tracing=False,
         )
 
 
@@ -127,7 +122,6 @@ class ConsolidationCrew:
             allow_delegation=False,
             max_iter=2,          # Analyse + produit un JSON, 2 passes suffisent
             llm=_llm(0.1),
-            tracing=False,
         )
 
     @agent
@@ -139,7 +133,6 @@ class ConsolidationCrew:
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
             max_iter=6,          # N faits à écrire + 1 sync → N+1 appels tool
             llm=_llm(0.0),
-            tracing=False,
         )
 
     @task
@@ -157,7 +150,6 @@ class ConsolidationCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,       # verbose=True sur la consolidation ralentissait aussi
-            tracing=False,
         )
 
 
@@ -178,7 +170,6 @@ class CuriosityCrew:
             allow_delegation=False,
             max_iter=2,          # Analyse + produit un JSON, pas de tools
             llm=_llm(0.0),
-            tracing=False,
         )
 
     @agent
@@ -190,7 +181,6 @@ class CuriosityCrew:
             tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
             max_iter=6,
             llm=_llm(0.0),
-            tracing=False,
         )
 
     @task
@@ -208,7 +198,6 @@ class CuriosityCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
-            tracing=False,
         )
 
 # ══════════════════════════════════════════════════════════════
@@ -227,15 +216,14 @@ class ShellCrew:
 
     @agent
     def shell_executor(self) -> Agent:
-        from Mnemo.tools.shell_tools import ShellExecuteTool
+        from Mnemo.tools.shell_tools import ShellExecuteTool, ReadPdfTool
         return Agent(
             config=self.agents_config["shell_executor"],
-            tools=[ShellExecuteTool()],
+            tools=[ShellExecuteTool(), ReadPdfTool()],
             verbose=False,
             allow_delegation=False,
-            max_iter=2,
+            max_iter=5,
             llm=_llm(0.0),
-            tracing=False,
         )
 
     @task
@@ -249,7 +237,6 @@ class ShellCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
-            tracing=False,
         )
 
     def run(self, inputs: dict) -> str:

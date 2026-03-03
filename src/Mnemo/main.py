@@ -7,6 +7,27 @@ from pathlib import Path
 from datetime import datetime
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
+
+# ── Désactive le prompt interactif de tracing CrewAI ──────────────
+# CrewAI stocke la préférence dans /tmp/.local/share/data/.crewai_user.json
+# (tmpfs — recréé à chaque run). On pré-remplit le fichier avant tout
+# import crewai pour que is_first_execution() retourne False immédiatement.
+def _disable_crewai_tracing() -> None:
+    try:
+        p = Path("/tmp/.local/share/data/.crewai_user.json")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if not p.exists() or not json.loads(p.read_text()).get("first_execution_done"):
+            p.write_text(json.dumps({
+                "first_execution_done": True,
+                "first_execution_at":   datetime.now().timestamp(),
+                "trace_consent":        False,
+                "user_id":              "mnemo-docker",
+                "machine_id":           "mnemo-docker",
+            }))
+    except Exception:
+        pass  # silencieux — ne jamais bloquer le démarrage
+
+_disable_crewai_tracing()
 # ─────────────────────────────────────────────────────────────
 
 from Mnemo.crew import (
@@ -775,7 +796,7 @@ def ingest(file_path: str) -> None:
     """
     Ingère un fichier PDF dans la base de connaissances.
     Appelé via : crewai run -- ingest chemin/vers/fichier.pdf
-    Ou directement : python -m Mnemo.main ingest fichier.pdf
+    Ou directement : python -m waifuclawd.main ingest fichier.pdf
     """
     path = Path(file_path)
     if not path.exists():
@@ -815,7 +836,7 @@ def debug_curiosity() -> None:
     """
     Déclenche le questionnement directement sans passer par une session complète.
     Utile pour tester CuriosityCrew en isolation.
-    Usage : python -m Mnemo.main curiosity
+    Usage : python -m waifuclawd.main curiosity
     """
     print("🧪 Mode debug — déclenchement direct du questionnaire\n")
 
@@ -866,7 +887,7 @@ if __name__ == "__main__":
             test()
         elif sys.argv[1] == "ingest":
             if len(sys.argv) < 3:
-                print("Usage : python -m Mnemo.main ingest <fichier.pdf>")
+                print("Usage : python -m waifuclawd.main ingest <fichier.pdf>")
             else:
                 ingest(sys.argv[2])
         elif sys.argv[1] == "docs":

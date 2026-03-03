@@ -74,10 +74,17 @@ evaluate_task:
     route : détermine quel crew va traiter ce message.
       - "conversation" : réponse, question, discussion, recherche mémoire, web — cas par défaut.
           Tout ce qui ne nécessite pas d'action sur le système ou l'agenda.
-      - "shell"        : l'utilisateur demande une action système explicite.
-          Exemples : "crée un fichier", "lance ce script", "déplace ce dossier",
-          "exécute cette commande", "ouvre ce programme".
-          UNIQUEMENT si l'action est demandée de façon explicite — pas pour "montre-moi comment faire".
+      - "shell"        : l'utilisateur demande une action ou une lecture sur le système de fichiers réel.
+          Deux cas déclenchent "shell" :
+          (A) Action sur le filesystem : "crée un fichier", "lance ce script", "déplace ce dossier",
+              "exécute cette commande", "supprime ce fichier", "renomme ce dossier".
+          (B) Lecture directe du filesystem : "liste les fichiers dans docs", "montre-moi les PDF
+              dans data", "qu'est-ce qu'il y a dans le dossier projets", "affiche le contenu de
+              notes.txt", "cherche les fichiers .py dans data".
+          RÈGLE CLÉ : si l'utilisateur veut savoir CE QUI EXISTE RÉELLEMENT sur le disque
+          (et pas ce que Mnemo sait en mémoire), c'est "shell".
+          UNIQUEMENT si l'action ou la lecture est demandée de façon explicite.
+          Pas pour "montre-moi comment faire" ou "explique-moi comment lister des fichiers".
       - "calendar"     : l'utilisateur demande une MODIFICATION de l'agenda.
           Exemples : "crée un événement", "ajoute un rendez-vous", "supprime cette réunion",
           "décale le rendez-vous de demain".
@@ -91,8 +98,9 @@ evaluate_task:
     shell_command : si route est "shell", la commande EXACTE à exécuter,
       formatée comme une commande shell valide avec ses arguments.
       Exemples :
-        "crée un dossier projets dans data"  → "mkdir /data/projets"
-        "liste les fichiers dans data"       → "ls /data"
+        "crée un dossier projets dans data"     → "mkdir /data/projets"
+        "liste les fichiers PDF dans docs"      → "ls /data/docs | grep .pdf"
+        "qu'est-ce qu'il y a dans data"         → "ls /data"
         "affiche le contenu de notes.txt"    → "cat /data/notes.txt"
         "lance le script analyse.py"         → "python /data/analyse.py"
       null si route != "shell".

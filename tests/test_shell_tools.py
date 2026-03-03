@@ -438,6 +438,50 @@ class TestExecuteCommand:
         assert not result["success"]
         assert result["error"] is not None
 
+    def test_pipe_uses_popen(self):
+        """Le pipe doit utiliser Popen (pas run) pour chaîner les processus."""
+        mock_left  = MagicMock()
+        mock_right = MagicMock()
+        mock_left.stdout = MagicMock()
+        mock_right.communicate.return_value = (b"file.pdf\n", b"")
+        mock_right.returncode = 0
+        mock_left.wait.return_value = 0
+
+        with patch("Mnemo.tools.shell_tools.subprocess.Popen") as mock_popen:
+            mock_popen.side_effect = [mock_left, mock_right]
+            result = execute_command("ls /data/docs | grep .pdf")
+
+        assert mock_popen.call_count == 2
+        assert result["success"]
+        assert "file.pdf" in result["stdout"]
+
+    def test_pipe_timeout(self):
+        """Timeout sur un pipe doit tuer les deux processus."""
+        mock_left  = MagicMock()
+        mock_right = MagicMock()
+        mock_left.stdout = MagicMock()
+        mock_right.communicate.side_effect = __import__('subprocess').TimeoutExpired(cmd="ls", timeout=30)
+        mock_left.kill = MagicMock()
+        mock_right.kill = MagicMock()
+
+        with patch("Mnemo.tools.shell_tools.subprocess.Popen") as mock_popen:
+            mock_popen.side_effect = [mock_left, mock_right]
+            result = execute_command("ls /data | grep x")
+
+        assert not result["success"]
+        assert "Timeout" in result["error"]
+        mock_left.kill.assert_called_once()
+        mock_right.kill.assert_called_once()
+
+    def test_single_command_uses_run(self):
+        """Une commande sans pipe doit utiliser subprocess.run."""
+        with patch("Mnemo.tools.shell_tools.subprocess.run") as mock_run:
+            mock_run.return_value = make_proc(stdout=b"ok\n")
+            with patch("Mnemo.tools.shell_tools.subprocess.Popen") as mock_popen:
+                result = execute_command("ls /data")
+        mock_run.assert_called_once()
+        mock_popen.assert_not_called()
+
 
 # ══════════════════════════════════════════════════════════════════
 # 4. format_result_for_agent
