@@ -68,7 +68,7 @@ def _log_uncertain(message: str, final_route: str, ml_conf: float) -> None:
 
 from Mnemo.crew import (
     ConversationCrew, ConsolidationCrew, CuriosityCrew, EvaluationCrew,
-    ShellCrew, CalendarWriteCrew, SchedulerCrew,   # Phase 3 — stubs
+    ShellCrew, BriefingCrew, CalendarWriteCrew, SchedulerCrew,
 )
 from Mnemo.tools.memory_tools import (
     update_session_memory, load_session_json, SESSIONS_DIR,
@@ -593,7 +593,7 @@ def _route_message(
       "conversation" (défaut) → ConversationCrew
       "shell"                 → ShellCrew  (stub phase 3.2)
       "calendar"              → CalendarWriteCrew (stub phase 3.3)
-      "scheduler"             → SchedulerCrew (stub phase 3.4)
+      "scheduler"             → SchedulerCrew
     Route inconnue ou absente → conversation silencieux.
 
     Si web_context non vide (needs_web confirmé) :
@@ -679,6 +679,27 @@ def _detect_shell_intent(msg: str) -> bool:
     return any(kw in m for kw in _SHELL_KEYWORDS)
 
 
+_SCHEDULER_KEYWORDS = [
+    "rappelle-moi", "rappelle moi",
+    "planifie", "planifier", "programme", "programmer",
+    "chaque lundi", "chaque mardi", "chaque mercredi", "chaque jeudi",
+    "chaque vendredi", "chaque samedi", "chaque dimanche",
+    "tous les lundis", "tous les mardis", "tous les mercredis",
+    "tous les jeudis", "tous les vendredis",
+    "chaque semaine", "chaque jour", "tous les jours",
+    "tous les matins", "chaque matin",
+    "dans 1 jour", "dans 2 jours", "dans 3 jours",
+    "demain matin", "demain soir",
+    "annule le rappel", "annule la tache", "supprime le rappel",
+    "liste mes rappels", "liste mes taches planifiees",
+    "quels sont mes rappels",
+]
+
+def _detect_scheduler_intent(msg: str) -> bool:
+    m = msg.lower()
+    return any(kw in m for kw in _SCHEDULER_KEYWORDS)
+
+
 _ROUTER_MODEL = None
 
 def _load_router_model():
@@ -727,21 +748,24 @@ def handle_message(user_message: str, session_id: str) -> str:
 
     # ── 0. Pre-check deterministe + ML ──────────────────────────────
     kw_shell          = _detect_shell_intent(user_message)
+    kw_scheduler      = _detect_scheduler_intent(user_message)
     ml_route, ml_conf = _ml_detect_intent(user_message)
 
-    _dbg(f"keywords_shell={kw_shell} | ml={ml_route} ({ml_conf:.2f})")
+    _dbg(f"keywords_shell={kw_shell} | kw_scheduler={kw_scheduler} | ml={ml_route} ({ml_conf:.2f})")
 
     skip_llm = (
-        (kw_shell and ml_route == "shell"    and ml_conf >= 0.80) or
-        (ml_route == "calendar"   and ml_conf >= 0.92) or
-        (ml_route == "scheduler"  and ml_conf >= 0.92)
+        (kw_shell      and ml_route == "shell"     and ml_conf >= 0.80) or
+        (ml_route == "calendar"    and ml_conf >= 0.92) or
+        (ml_route == "scheduler"   and ml_conf >= 0.92) or
+        (kw_scheduler  and ml_route == "scheduler" and ml_conf >= 0.75)
     )
 
     if skip_llm:
-        _dbg(f"SKIP LLM -> route={ml_route} (conf={ml_conf:.2f})")
+        route = ml_route if not (kw_scheduler and ml_route != "shell") else "scheduler"
+        _dbg(f"SKIP LLM -> route={route} (conf={ml_conf:.2f})")
         eval_json = {
-            "route":               ml_route,
-            "needs_memory":        ml_route == "conversation",
+            "route":               route,
+            "needs_memory":        route == "conversation",
             "needs_web":           False,
             "needs_clarification": False,
             "needs_calendar":      False,
@@ -763,6 +787,9 @@ def handle_message(user_message: str, session_id: str) -> str:
         if kw_shell and llm_route == "conversation":
             eval_json["route"] = "shell"
             _dbg("CORRECTION keywords: conversation -> shell")
+        elif kw_scheduler and llm_route == "conversation":
+            eval_json["route"] = "scheduler"
+            _dbg("CORRECTION keywords: conversation -> scheduler")
         elif ml_conf >= 0.85 and ml_route != "conversation" and llm_route == "conversation":
             eval_json["route"] = ml_route
             _dbg(f"CORRECTION ML: conversation -> {ml_route} (conf={ml_conf:.2f})")
@@ -857,6 +884,44 @@ def consolidate_orphan_sessions():
 # Entrypoints CrewAI (run / train / replay / test)
 # ══════════════════════════════════════════════════════════════
 
+def _show_briefing_if_fresh() -> None:
+    """
+    Affiche le contenu de briefing.md au démarrage si le fichier
+    a été généré aujourd'hui (par le scheduler) et n'a pas encore été lu.
+    Marque le fichier comme lu en ajoutant briefing.read à côté.
+    """
+    briefing_path = MARKDOWN_PATH.parent / "briefing.md"
+    read_flag     = MARKDOWN_PATH.parent / "briefing.read"
+
+    if not briefing_path.exists():
+        return
+
+    # Vérifie que le fichier date d'aujourd'hui
+    from datetime import date as _date
+    import os as _os
+    mtime = _os.path.getmtime(briefing_path)
+    file_date = _date.fromtimestamp(mtime)
+    if file_date != _date.today():
+        return
+
+    # Déjà lu aujourd'hui ?
+    if read_flag.exists():
+        read_flag_date = _date.fromtimestamp(_os.path.getmtime(read_flag))
+        if read_flag_date == _date.today():
+            return
+
+    try:
+        content = briefing_path.read_text(encoding="utf-8")
+        print("\n" + "─" * 50)
+        print(content.strip())
+        print("─" * 50 + "\n")
+        # Marque comme lu
+        read_flag.touch()
+    except Exception:
+        pass  # Silencieux si lecture impossible
+
+
+
 def run():
     """
     Point d'entrée principal — appelé par `crewai run`.
@@ -895,6 +960,9 @@ def run():
             print(f"\n💬 Mnemo : Au fait, tu as {' | '.join(parts)}.")
             print("   Tu veux qu'on en parle ou on avance sur autre chose ?")
     print()
+
+    # Briefing matinal — affiché si généré aujourd'hui par le scheduler
+    _show_briefing_if_fresh()
 
     # Premier lancement — memory.md vierge → questionnaire d'initialisation
     memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \

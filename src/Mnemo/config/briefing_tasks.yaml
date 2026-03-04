@@ -1,0 +1,44 @@
+briefing_task:
+  description: >
+    Contexte temporel : {temporal_context}
+
+    Calendrier du jour :
+    {calendar_today}
+
+    Dernière session (résumé) :
+    {last_session_summary}
+
+    Mémoire long terme (extraits pertinents) :
+    {memory_highlights}
+
+    Génère un briefing matinal en Markdown avec exactement ces sections :
+
+    # 🌅 Briefing — {date_str}
+
+    ## 📅 Aujourd'hui
+    Liste les événements du jour avec leur horaire depuis calendar_today.
+    Si calendar_today contient des événements : les lister, ne PAS écrire "Journée libre."
+    Si calendar_today est vide ou dit "Aucun événement" : écrire "Journée libre."
+
+    ## 🔁 Hier
+    2-3 phrases résumant ce qui s'est passé lors de la dernière session.
+    Si aucune session disponible : "Pas de session enregistrée."
+
+    ## 🧠 À garder en tête
+    3 points maximum issus UNIQUEMENT du champ memory_highlights ci-dessus.
+    Si memory_highlights est vide ou dit "Mémoire vide" : écrire une seule ligne
+    "Mémoire non encore initialisée." et rien d'autre.
+    INTERDIT : répéter des événements du calendrier dans cette section.
+    INTERDIT : inventer des projets ou tâches non présents dans memory_highlights.
+
+    *Généré automatiquement par Mnemo — {datetime_str}*
+
+    RÈGLES :
+    - Pas de section vide — si pas de données, écrire une ligne courte explicative
+    - Pas de répétition entre sections
+    - Pas de contenu inventé — uniquement ce qui est dans les données fournies
+    - Ton sobre et direct, pas de formules de politesse
+  expected_output: >
+    Un document Markdown complet avec les 3 sections remplies, prêt à être
+    écrit dans briefing.md.
+  agent: briefing_agent

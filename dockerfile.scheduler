@@ -1,0 +1,57 @@
+# ══════════════════════════════════════════════════════════════════
+# Dockerfile.scheduler — Mnemo scheduler service
+#
+# Service séparé — tourne en background, génère briefing.md chaque matin.
+# Partage le volume /data avec le service mnemo principal.
+# Même base image, même sécurité (non-root, read-only).
+# ══════════════════════════════════════════════════════════════════
+
+FROM python:3.12-slim
+
+LABEL maintainer="Mnemo"
+LABEL description="Mnemo Scheduler — morning briefing service"
+LABEL version="1.0"
+
+# ── Dépendances système minimales ────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Utilisateur non-root ─────────────────────────────────────────
+RUN groupadd --gid 1000 mnemo \
+ && useradd  --uid 1000 --gid 1000 --create-home --shell /bin/false mnemo \
+ && mkdir -p /home/mnemo/.local/share \
+ && chown -R mnemo:mnemo /home/mnemo
+
+# ── Dépendances Python ───────────────────────────────────────────
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+ && pip install --no-cache-dir litellm
+
+# ── Patch CrewAI tracing ─────────────────────────────────────────
+COPY docker/patch_crewai_tracing.py /tmp/patch_crewai_tracing.py
+RUN python3 /tmp/patch_crewai_tracing.py
+
+# ── Code source ───────────────────────────────────────────────────
+COPY src/ /app/src/
+RUN chown -R mnemo:mnemo /app
+
+# ── Répertoire de travail ─────────────────────────────────────────
+RUN mkdir -p /data && chown mnemo:mnemo /data
+WORKDIR /data
+
+USER mnemo
+
+# ── Variables d'environnement ────────────────────────────────────
+ENV PYTHONPATH="/app/src"
+ENV HOME=/tmp
+ENV PYTHONUNBUFFERED=1
+ENV OTEL_SDK_DISABLED=true
+ENV CREWAI_DISABLE_TELEMETRY=true
+ENV CREWAI_DISABLE_EXECUTION_TRACE_VIEWER=true
+ENV CREWAI_TRACING_ENABLED=false
+
+# ── Point d'entrée ───────────────────────────────────────────────
+ENTRYPOINT ["python", "-u", "-m", "Mnemo.scheduler"]
+CMD []

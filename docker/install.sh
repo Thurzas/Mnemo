@@ -187,6 +187,7 @@ step "Création de data/"
 
 mkdir -p "${DATA_DIR}/sessions"
 mkdir -p "${DATA_DIR}/docs"
+touch "${DATA_DIR}/briefing.read" 2>/dev/null || true
 
 if [ ! -f "${DATA_DIR}/memory.md" ]; then
     cat > "${DATA_DIR}/memory.md" << 'MEMORY_TEMPLATE'
@@ -252,9 +253,11 @@ pull_if_needed "nomic-embed-text"
 # ══════════════════════════════════════════════════════════════════
 # 5. Build Docker
 # ══════════════════════════════════════════════════════════════════
-step "Build de l'image Docker"
-docker_compose build
+step "Build des images Docker"
+docker_compose build mnemo
 ok "Image mnemo:latest construite"
+docker_compose build mnemo-scheduler
+ok "Image mnemo-scheduler:latest construite"
 
 # ══════════════════════════════════════════════════════════════════
 # 6. Initialisation de la base SQLite
@@ -264,23 +267,52 @@ docker_compose run --rm mnemo init_db
 ok "Base SQLite initialisée dans ${DATA_DIR}/memory.db"
 
 # ══════════════════════════════════════════════════════════════════
+# 7. Scheduler (optionnel)
+# ══════════════════════════════════════════════════════════════════
+step "Scheduler — morning briefing"
+echo "  Le scheduler génère chaque matin :"
+echo "    - briefing.md  (heure : BRIEFING_TIME dans .env, défaut 07:30)"
+echo "    - weekly.md    (chaque lundi matin, WEEKLY_TIME, défaut 08:00)"
+echo "    - alertes deadlines J-1/J-3 injectées dans briefing.md"
+echo ""
+read -p "  Démarrer le scheduler maintenant en arrière-plan ? (o/N) " START_SCHED
+if [[ "${START_SCHED,,}" == "o" ]]; then
+    docker_compose up -d mnemo-scheduler
+    ok "Scheduler démarré (docker compose up -d mnemo-scheduler)"
+    info "Logs : docker compose logs -f mnemo-scheduler"
+    info "Test immédiat : docker compose run --rm mnemo-scheduler --now briefing"
+else
+    info "Scheduler non démarré — lance-le manuellement quand tu veux :"
+    echo -e "    ${BOLD}docker compose up -d mnemo-scheduler${RESET}"
+fi
+
+# ══════════════════════════════════════════════════════════════════
 # Fin
 # ══════════════════════════════════════════════════════════════════
 echo ""
 echo -e "${BOLD}════════════════════════════════════════${RESET}"
 echo -e "${GREEN}${BOLD}✅ Mnemo est prêt.${RESET}"
 echo ""
-echo "  Pour démarrer une session :"
-echo -e "  ${BOLD}docker compose run --rm mnemo${RESET}"
+echo "  ── Sessions ──────────────────────────────"
+echo -e "  Démarrer une session    : ${BOLD}docker compose run --rm mnemo${RESET}"
+echo -e "  Ingérer un document     : ${BOLD}docker compose run --rm mnemo ingest /data/docs/fichier.pdf${RESET}"
+echo -e "  Questionnaire init      : ${BOLD}docker compose run --rm mnemo curiosity${RESET}"
 echo ""
-echo "  Pour ingérer un document :"
-echo -e "  ${BOLD}docker compose run --rm mnemo ingest /data/docs/ton_fichier.pdf${RESET}"
+echo "  ── Scheduler ─────────────────────────────"
+echo -e "  Démarrer (daemon)       : ${BOLD}docker compose up -d mnemo-scheduler${RESET}"
+echo -e "  Arrêter                 : ${BOLD}docker compose stop mnemo-scheduler${RESET}"
+echo -e "  Logs                    : ${BOLD}docker compose logs -f mnemo-scheduler${RESET}"
+echo -e "  Test briefing immédiat  : ${BOLD}docker compose run --rm mnemo-scheduler --now briefing${RESET}"
+echo -e "  Test weekly immédiat    : ${BOLD}docker compose run --rm mnemo-scheduler --now weekly${RESET}"
+echo -e "  Test deadlines immédiat : ${BOLD}docker compose run --rm mnemo-scheduler --now deadline${RESET}"
 echo ""
-echo "  Pour relancer le questionnaire d'initialisation :"
-echo -e "  ${BOLD}docker compose run --rm mnemo curiosity${RESET}"
+echo "  ── Fichiers générés dans data/ ───────────"
+echo "    briefing.md  — mis à jour chaque matin"
+echo "    weekly.md    — mis à jour chaque lundi"
+echo "    tasks.md     — tâches planifiées (miroir DB)"
 if $IS_WSL; then
     echo ""
-    info "WSL2 : SearXNG peut être lancé séparément si besoin :"
+    info "WSL2 : SearXNG (recherche web locale) :"
     echo -e "  ${BOLD}docker compose --profile search up -d searxng${RESET}"
 fi
 echo "════════════════════════════════════════"

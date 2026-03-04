@@ -244,6 +244,42 @@ class ShellCrew:
         return result.raw.strip()
 
 
+
+@CrewBase
+class BriefingCrew:
+    """
+    Crew pour la génération du briefing matinal.
+    Produit un fichier briefing.md dans /data depuis :
+      - Le calendrier du jour
+      - La dernière session consolidée
+      - Les points clés de memory.md
+    """
+    agents_config = "config/briefing_agents.yaml"
+    tasks_config  = "config/briefing_tasks.yaml"
+
+    @agent
+    def briefing_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["briefing_agent"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=2,
+            llm=_llm(0.3),
+        )
+
+    @task
+    def briefing_task(self) -> Task:
+        return Task(config=self.tasks_config["briefing_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
 class CalendarWriteCrew:
     """
     Crew pour l'écriture CalDAV (créer, modifier, supprimer des événements).
@@ -258,14 +294,118 @@ class CalendarWriteCrew:
         )
 
 
+@CrewBase
 class SchedulerCrew:
     """
     Crew pour la planification de tâches différées ou récurrentes.
-    STUB — implémenté en phase 3 étape 4 (scheduler).
-    Reçoit : user_message, evaluation_result, temporal_context.
+    Transforme les demandes en langage naturel en entrées scheduled_tasks.
+    Reçoit : user_message, temporal_context, evaluation_result.
     """
-    def run(self, inputs: dict) -> str:
-        return (
-            "[SchedulerCrew non encore implémenté] "
-            "La planification de tâches différées arrive prochainement."
+    agents_config = "config/scheduler_agents.yaml"
+    tasks_config  = "config/scheduler_tasks_config.yaml"
+
+    @agent
+    def scheduler_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["scheduler_agent"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=2,
+            llm=_llm(0.0),
         )
+
+    @task
+    def schedule_task(self) -> Task:
+        return Task(config=self.tasks_config["schedule_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        """
+        Point d'entrée depuis _route_message.
+        Parse le JSON produit par l'agent, crée/annule la tâche en DB,
+        retourne la confirmation en langage naturel.
+        """
+        import json as _json
+        import hashlib as _hashlib
+        from datetime import datetime as _dt
+
+        # Récupère les tâches existantes pour le contexte
+        try:
+            from Mnemo.tools.scheduler_tasks import list_tasks, create_task, cancel_task
+            existing = list_tasks(status="pending")
+            existing_tasks = _json.dumps(
+                [{"id": t["id"], "action": t["action"],
+                  "next_run": t["next_run"], "payload": t["payload"]}
+                 for t in existing],
+                ensure_ascii=False, indent=2
+            )
+        except Exception:
+            existing_tasks = "[]"
+            existing = []
+
+        result = self.crew().kickoff(inputs={
+            **inputs,
+            "existing_tasks": existing_tasks,
+        })
+
+        # Parse le JSON de l'agent
+        raw = result.raw.strip()
+        # Nettoie les fences markdown éventuelles
+        import re as _re
+        raw = _re.sub(r'^```[a-zA-Z]*\n', '', raw, flags=_re.MULTILINE)
+        raw = _re.sub(r'^```\s*$', '', raw, flags=_re.MULTILINE)
+        raw = raw.strip()
+
+        try:
+            plan = _json.loads(raw)
+        except Exception:
+            return f"Je n'ai pas pu interpréter la demande de planification. Peux-tu reformuler ?"
+
+        action = plan.get("action", "create")
+
+        if action == "cancel":
+            tid = plan.get("task_id_to_cancel")
+            if tid:
+                try:
+                    cancelled = cancel_task(tid)
+                    if cancelled:
+                        return plan.get("confirmation_message", f"Tâche {tid} annulée.")
+                    else:
+                        return f"Tâche introuvable ou déjà terminée : {tid}"
+                except Exception as e:
+                    return f"Erreur lors de l'annulation : {e}"
+            return "Aucun identifiant de tâche fourni pour l'annulation."
+
+        # Création
+        task_type   = plan.get("task_type", "one_shot")
+        task_action = plan.get("task_action", "reminder")
+        trigger_at  = plan.get("trigger_at")
+        cron_expr   = plan.get("cron_expr")
+        payload     = plan.get("payload", {})
+
+        # Génère un ID court unique
+        seed    = f"{task_action}-{trigger_at or cron_expr}-{payload.get('message','')}"
+        task_id = "usr_" + _hashlib.md5(seed.encode()).hexdigest()[:8]
+
+        try:
+            created = create_task(
+                task_id   = task_id,
+                task_type = task_type,
+                action    = task_action,
+                payload   = payload,
+                trigger_at = trigger_at,
+                cron_expr  = cron_expr,
+            )
+            next_run = created.get("next_run", "?")
+            return plan.get("confirmation_message",
+                            f"Tâche planifiée pour {next_run}.")
+        except Exception as e:
+            return f"Erreur lors de la création de la tâche : {e}"

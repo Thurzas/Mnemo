@@ -120,6 +120,60 @@ services:
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-change_me_in_env}
 
 
+
+  # ── Scheduler — morning briefing (service background) ────────────
+  # Génère /data/briefing.md chaque matin à BRIEFING_TIME.
+  # Démarrer avec : docker compose up -d mnemo-scheduler
+  # Test immédiat : docker compose run --rm mnemo-scheduler --now
+  mnemo-scheduler:
+    build:
+      context: .
+      dockerfile: dockerfile.scheduler
+    image: mnemo-scheduler:latest
+    container_name: mnemo-scheduler
+
+    env_file:
+      - .env
+    environment:
+      - HOME=/tmp
+      - DATA_PATH=/data   # forcé absolu — évite résolution depuis WORKDIR
+
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+
+    read_only: true
+
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    user: "1000:1000"
+
+    deploy:
+      resources:
+        limits:
+          memory: ${SCHEDULER_MEMORY_LIMIT:-512m}
+          cpus: "1.0"
+
+    networks:
+      - mnemo_external
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Redémarre automatiquement si le container crash
+    # (ne redémarre PAS après docker stop — comportement attendu)
+    restart: on-failure:3
+
+    depends_on:
+      searxng:
+        condition: service_healthy
+        required: false
+
 networks:
   mnemo_internal:
     # Réseau isolé — Mnemo ↔ SearXNG uniquement, pas d'accès internet
