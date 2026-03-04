@@ -97,7 +97,12 @@ FORBIDDEN_COMMANDS: set[str] = {
 
 # Chemin racine autorisé — toutes les opérations sur fichiers
 # doivent rester sous /data
-ALLOWED_PATH_ROOT = Path("/data")
+# Chemin racine configurable via DATA_PATH
+# Docker  : DATA_PATH=/data (defaut)
+# Local   : DATA_PATH=./data  ou chemin absolu vers le dossier data du projet
+import os as _os
+_data_env = _os.getenv("DATA_PATH", "/data")
+ALLOWED_PATH_ROOT = Path(_data_env).resolve()
 
 # Extensions autorisées pour les scripts Python
 ALLOWED_PYTHON_EXTENSIONS = {".py"}
