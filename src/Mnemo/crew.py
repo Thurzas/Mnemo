@@ -12,12 +12,9 @@ from Mnemo.tools.memory_tools import (
 from Mnemo.tools.calendar_tools import GetCalendarTool
 from Mnemo.tools.web_tools import WebSearchTool
 
-MODEL    = os.getenv("MODEL")
-API_BASE = os.getenv("API_BASE")
+MODEL    = os.getenv("MODEL", "ollama/mistral")
+API_BASE = os.getenv("API_BASE", "http://localhost:11434")
 
-# ── LLM par rôle ────────────────────────────────────────────────
-# Ajuste les modèles selon ce que tu as dans Ollama.
-# Le principe : modèle léger pour les tâches structurées, plus lourd pour la réponse finale.
 def _llm(temperature: float = 0.0) -> LLM:
     return LLM(model=MODEL, base_url=API_BASE, temperature=temperature)
 
@@ -201,4 +198,74 @@ class CuriosityCrew:
             tasks=self.tasks,
             process=Process.sequential,
             verbose=False,
+        )
+
+# ══════════════════════════════════════════════════════════════
+# Phase 3 — Crews d'action (stubs — seront remplis par étape)
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class ShellCrew:
+    """
+    Crew pour l'exécution de commandes système.
+    La commande a déjà été validée et confirmée par l'utilisateur dans main.py.
+    Cet agent l'exécute et interprète le résultat — sans accès à la mémoire.
+    """
+    agents_config = "config/shell_agents.yaml"
+    tasks_config  = "config/shell_tasks.yaml"
+
+    @agent
+    def shell_executor(self) -> Agent:
+        from Mnemo.tools.shell_tools import ShellExecuteTool, ReadPdfTool
+        return Agent(
+            config=self.agents_config["shell_executor"],
+            tools=[ShellExecuteTool(), ReadPdfTool()],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=5,
+            llm=_llm(0.0),
+        )
+
+    @task
+    def execute_shell_task(self) -> Task:
+        return Task(config=self.tasks_config["execute_shell_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        result = self.crew().kickoff(inputs=inputs)
+        return result.raw.strip()
+
+
+class CalendarWriteCrew:
+    """
+    Crew pour l'écriture CalDAV (créer, modifier, supprimer des événements).
+    STUB — implémenté en phase 3 étape 3 (agenda CRUD).
+    Reçoit : user_message, evaluation_result, web_context, temporal_context.
+    Garanties : confirmation obligatoire, opération figée, lecture seule sur la mémoire.
+    """
+    def run(self, inputs: dict) -> str:
+        return (
+            "[CalendarWriteCrew non encore implémenté] "
+            "La gestion de l'agenda en écriture arrive prochainement."
+        )
+
+
+class SchedulerCrew:
+    """
+    Crew pour la planification de tâches différées ou récurrentes.
+    STUB — implémenté en phase 3 étape 4 (scheduler).
+    Reçoit : user_message, evaluation_result, temporal_context.
+    """
+    def run(self, inputs: dict) -> str:
+        return (
+            "[SchedulerCrew non encore implémenté] "
+            "La planification de tâches différées arrive prochainement."
         )

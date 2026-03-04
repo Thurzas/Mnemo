@@ -68,6 +68,14 @@ consolidate_task:
 
     RÈGLE CRITIQUE : ne jamais écrire ## ou ### dans les valeurs de target_section ou target_subsection.
 
+    DONNÉES À NE JAMAIS PERSISTER — ces informations sont éphémères et ne doivent
+    JAMAIS apparaître dans les facts[] :
+    - Événements calendrier, réunions, cours, rendez-vous (même si mentionnés dans la session)
+    - Rappels temporels ("aujourd'hui", "demain", "cette semaine")
+    - Horaires d'événements (09:30, 14:00, etc.)
+    - Toute information issue du contexte calendrier injecté en début de session
+    Ces données vivent dans le calendrier, pas dans la mémoire long terme.
+
     RÈGLES ANTI-DUPLICATION — à respecter impérativement :
     - Si un fait est déjà présent dans la session (ex: SQLite déjà mentionné), ne pas le réémettre.
     - Pour les sections atomiques (Profil de base, Préférences & style, etc.) : n'émettre un fait
@@ -78,6 +86,10 @@ consolidate_task:
     - En cas de doute sur si une information est nouvelle : ne pas l'émettre.
     - Inventer des noms, pseudos ou identités non mentionnés dans la session est INTERDIT.
       Utiliser uniquement les valeurs explicitement données par l'utilisateur.
+    - Le champ session_id (format "session_YYYYMMDD_HHMMSS_xxxxx") est un identifiant
+      technique interne. Ce N'EST PAS un nom d'utilisateur. Ne jamais l'écrire dans
+      "Identité Utilisateur" > "Profil de base" ni dans aucune section identité.
+      Si aucun nom réel n'est mentionné dans la session, ne pas émettre de fait Nom/Pseudo.
 
     Retourne UNIQUEMENT un JSON valide avec cette structure :
     {

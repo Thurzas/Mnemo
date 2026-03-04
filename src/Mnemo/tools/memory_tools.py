@@ -3,6 +3,15 @@ import math
 import sqlite3
 import numpy as np
 import ollama
+import os
+# Client Ollama explicite — lit OLLAMA_HOST ou API_BASE depuis l'env.
+# Sans ça, le client Python se connecte toujours à localhost:11434
+# ce qui échoue dans un conteneur Docker où Ollama est sur l'hôte.
+_OLLAMA_HOST = (
+    os.getenv("OLLAMA_HOST")
+    or os.getenv("API_BASE", "http://localhost:11434").replace("/v1", "")
+)
+_ollama_client = ollama.Client(host=_OLLAMA_HOST)
 import hashlib
 import re
 from datetime import datetime
@@ -16,7 +25,10 @@ from typing import Type
 DB_PATH      = Path("memory.db")
 MARKDOWN_PATH = Path("memory.md")
 SESSIONS_DIR = Path("sessions")
-SESSIONS_DIR.mkdir(exist_ok=True)
+try:
+    SESSIONS_DIR.mkdir(exist_ok=True)
+except OSError:
+    pass  # /data pas encore monté — le mkdir sera retentré au premier usage
 
 EMBED_MODEL   = "nomic-embed-text"
 TOP_K_SEARCH  = 10
@@ -58,7 +70,7 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def embed(text: str, prefix: str = "search_document") -> np.ndarray:
-    response = ollama.embeddings(model=EMBED_MODEL, prompt=f"{prefix}: {text}")
+    response = _ollama_client.embeddings(model=EMBED_MODEL, prompt=f"{prefix}: {text}")
     return np.array(response["embedding"], dtype=np.float32)
 
 

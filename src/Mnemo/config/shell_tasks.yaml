@@ -1,0 +1,25 @@
+execute_shell_task:
+  description: >
+    L'utilisateur a demande une action systeme et a confirme son execution.
+
+    Message original : {user_message}
+    Commande approuvee : {shell_command}
+
+    Ta tache (plusieurs appels d'outils autorises si necessaire) :
+    1. Execute la commande approuvee avec execute_shell_command.
+    2. Si la sortie montre des fichiers PDF et que l'utilisateur veut lire
+       un PDF : utilise ensuite l'outil read_pdf.
+       IMPORTANT : Ne jamais utiliser cat sur un PDF, ca retourne du binaire.
+    3. Pour lire un PDF avec des espaces dans le nom, passe le chemin tel quel.
+       Exemple correct : path="/data/docs/Mathematics for game developpers.pdf"
+    4. Si plusieurs etapes sont necessaires, fais plusieurs appels d'outils.
+
+    REGLES :
+    - N'execute la commande approuvee qu'une seule fois.
+    - Pour les PDFs : TOUJOURS read_pdf, JAMAIS cat.
+    - Ne propose pas de commandes non demandees.
+    - Reponds en francais, de facon concise.
+  expected_output: >
+    Une reponse confirmant l'execution et presentant le resultat clairement.
+    En cas d'erreur, une explication et une suggestion de correction.
+  agent: shell_executor

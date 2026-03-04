@@ -1,0 +1,134 @@
+# ══════════════════════════════════════════════════════════════════
+# docker-compose.yml — Mnemo  (Phase 3 — durci)
+#
+# Usage standard :
+#   docker compose run --rm mnemo          # démarre la session interactive
+#   docker compose run --rm mnemo ingest /data/docs/rapport.pdf
+#
+# Pré-requis :
+#   - Ollama installé et lancé sur la machine hôte
+#   - Modèles tirés : ollama pull <MODEL> && ollama pull nomic-embed-text
+#   - Fichier .env copié depuis .env.example et rempli
+#   - SearXNG optionnel : docker compose --profile search up -d searxng
+#
+# Réseau :
+#   mnemo_net = réseau interne isolé.
+#   Mnemo peut joindre Ollama (hôte) et SearXNG (conteneur).
+#   Tout autre accès internet est coupé.
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── Agent principal ─────────────────────────────────────────────
+  mnemo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mnemo:latest
+    container_name: mnemo
+
+    # ── Mode interactif obligatoire pour le chat CLI ──────────────
+    stdin_open: true
+    tty: true
+
+    # ── Variables d'environnement ─────────────────────────────────
+    env_file:
+      - .env
+    environment:
+      # Redirige le home de l'utilisateur vers /tmp (déjà tmpfs).
+      # CrewAI écrit son cache ChromaDB dans HOME/.local/share/data —
+      # avec read_only:true, /home/mnemo est non accessible en écriture.
+      - HOME=/tmp
+
+    # ── Volumes ───────────────────────────────────────────────────
+    # /data  → données persistantes (DB, mémoire, sessions, docs)
+    # Tout le reste du filesystem est read-only (défini plus bas).
+    # /tmp   → tmpfs en mémoire — nécessaire pour SQLite et pip
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+      - /run:size=16m,mode=0755
+
+    # ── Filesystem read-only ──────────────────────────────────────
+    # Le code source dans /app est non modifiable depuis le conteneur.
+    # Seuls /data et les tmpfs ci-dessus sont accessibles en écriture.
+    read_only: true
+
+    # ── Sécurité Linux ───────────────────────────────────────────
+    # Retire toutes les capabilities Linux — Mnemo n'en a besoin d'aucune.
+    # no-new-privileges : empêche tout setuid / escalade de droits.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # ── Utilisateur non-root ─────────────────────────────────────
+    # Défini dans le Dockerfile (uid 1000) — jamais root dans le conteneur.
+    user: "1000:1000"
+
+    # ── Limites ressources ────────────────────────────────────────
+    # Évite qu'une commande mal formée sature la machine hôte.
+    deploy:
+      resources:
+        limits:
+          memory: ${MNEMO_MEMORY_LIMIT:-1g}
+          cpus: "${MNEMO_CPU_LIMIT:-2.0}"
+
+    # ── Réseau isolé ──────────────────────────────────────────────
+    networks:
+      - mnemo_internal   # SearXNG uniquement — réseau isolé
+      - mnemo_external   # Ollama sur l'hôte — accès sortant nécessaire
+
+    # ── host.docker.internal → Ollama sur l'hôte ─────────────────
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # ── Restart ───────────────────────────────────────────────────
+    restart: "no"
+
+    # ── Dépendances optionnelles ──────────────────────────────────
+    depends_on:
+      searxng:
+        condition: service_healthy
+        required: false
+
+
+  # ── SearXNG — moteur de recherche local (optionnel) ──────────────
+  # Lancé uniquement avec : docker compose --profile search up -d searxng
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    profiles:
+      - search
+    restart: unless-stopped
+    expose:
+      - "8080"
+    networks:
+      - mnemo_internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    volumes:
+      - searxng_data:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-change_me_in_env}
+
+
+networks:
+  mnemo_internal:
+    # Réseau isolé — Mnemo ↔ SearXNG uniquement, pas d'accès internet
+    driver: bridge
+    internal: true
+  mnemo_external:
+    # Réseau avec accès sortant — nécessaire pour joindre Ollama sur l'hôte
+    # La sécurité repose sur cap_drop + read_only, pas sur l'isolation réseau
+    driver: bridge
+
+volumes:
+  searxng_data:
