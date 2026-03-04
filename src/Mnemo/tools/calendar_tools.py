@@ -19,6 +19,15 @@ from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+# ── Expansion RRULE ──────────────────────────────────────────────
+# On tente d'utiliser recurring_ical_events si dispo,
+# sinon on fait une expansion manuelle légère des FREQ=WEEKLY/DAILY.
+try:
+    import recurring_ical_events as _rie
+    _HAS_RIE = True
+except ImportError:
+    _HAS_RIE = False
+
 # ── Tentative d'import icalendar — silencieux si absent ──────────
 try:
     from icalendar import Calendar, Event
@@ -141,6 +150,147 @@ def get_events_for_date(target_date: date) -> list[dict]:
     return get_upcoming_events(days=0, from_date=target_date, to_date=target_date)
 
 
+def _expand_rrule(component, start: date, end: date) -> list[date]:
+    """
+    Expand une RRULE FREQ=WEEKLY ou DAILY dans [start, end].
+    Retourne la liste des dates d'occurrence dans la fenêtre.
+    Gère BYDAY, UNTIL, COUNT, EXDATE.
+    """
+    rrule_prop = component.get("RRULE")
+    if not rrule_prop:
+        return []
+
+    dtstart_raw = component.get("DTSTART")
+    if dtstart_raw is None:
+        return []
+    base_dt = dtstart_raw.dt
+    base_date = _to_date(base_dt)
+    if base_date is None:
+        return []
+
+    rrule = rrule_prop
+    freq  = str(rrule.get("FREQ", [""])[0]).upper()
+    if freq not in ("WEEKLY", "DAILY"):
+        return []
+
+    # BYDAY → liste de noms de jours (MO, TU, WE, TH, FR, SA, SU)
+    byday   = [str(d) for d in rrule.get("BYDAY", [])]
+    day_map = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+
+    # UNTIL
+    until_list = rrule.get("UNTIL", [])
+    until_date = None
+    if until_list:
+        u = until_list[0]
+        until_date = _to_date(u) if hasattr(u, "year") else None
+
+    # COUNT
+    count_list = rrule.get("COUNT", [])
+    max_count  = int(count_list[0]) if count_list else None
+
+    # EXDATE — dates à exclure
+    exdate_prop = component.get("EXDATE")
+    excluded = set()
+    if exdate_prop:
+        items = exdate_prop if isinstance(exdate_prop, list) else [exdate_prop]
+        for item in items:
+            vals = item.dts if hasattr(item, "dts") else [item]
+            for v in vals:
+                d = _to_date(v.dt if hasattr(v, "dt") else v)
+                if d:
+                    excluded.add(d)
+
+    # Génération
+    results = []
+    cursor  = base_date
+    count   = 0
+    step    = timedelta(weeks=1) if freq == "WEEKLY" else timedelta(days=1)
+
+    # Pour WEEKLY+BYDAY, on avance jour par jour dans la semaine
+    if freq == "WEEKLY" and byday:
+        # On part du lundi de la semaine de base_date
+        week_start = base_date - timedelta(days=base_date.weekday())
+        cursor = week_start
+        while True:
+            for day_name, day_idx in day_map.items():
+                if day_name not in byday:
+                    continue
+                d = cursor + timedelta(days=day_idx)
+                if d < base_date:
+                    continue
+                if until_date and d > until_date:
+                    return results
+                if max_count and count >= max_count:
+                    return results
+                if d > end + timedelta(days=1):
+                    return results
+                if d not in excluded and start <= d <= end:
+                    results.append(d)
+                count += 1
+            cursor += timedelta(weeks=1)
+            if cursor > end + timedelta(weeks=1):
+                break
+    else:
+        while cursor <= end:
+            if until_date and cursor > until_date:
+                break
+            if max_count and count >= max_count:
+                break
+            if cursor >= base_date and cursor not in excluded:
+                if start <= cursor <= end:
+                    results.append(cursor)
+            count += 1
+            cursor += step
+
+    return results
+
+
+def _make_event_dict(component, ev_date: date, today: date) -> dict:
+    """Construit un dict événement depuis un composant VEVENT et une date d'occurrence."""
+    dtstart_raw = component.get("DTSTART")
+    dt_val      = dtstart_raw.dt if dtstart_raw else None
+    all_day     = isinstance(dt_val, date) and not isinstance(dt_val, datetime)
+
+    if all_day or dt_val is None:
+        ev_datetime = None
+    else:
+        # Reconstruit l'heure sur la nouvelle date
+        base_dt = _to_datetime(dt_val)
+        if base_dt:
+            ev_datetime = datetime(ev_date.year, ev_date.month, ev_date.day,
+                                   base_dt.hour, base_dt.minute, base_dt.second)
+        else:
+            ev_datetime = None
+
+    summary     = _clean_text(str(component.get("SUMMARY", "")))
+    location    = _clean_text(str(component.get("LOCATION", ""))) or None
+    description = _clean_text(str(component.get("DESCRIPTION", ""))) or None
+
+    days_until = (ev_date - today).days
+    if days_until == 0:
+        label = "Aujourd'hui"
+    elif days_until == 1:
+        label = "Demain"
+    elif days_until > 0:
+        label = f"Dans {days_until} jours"
+    elif days_until == -1:
+        label = "Hier"
+    else:
+        label = f"Il y a {abs(days_until)} jours"
+
+    return {
+        "title"      : summary,
+        "date"       : ev_date,
+        "datetime"   : ev_datetime,
+        "location"   : location,
+        "description": description,
+        "days_until" : days_until,
+        "is_today"   : days_until == 0,
+        "is_tomorrow": days_until == 1,
+        "label"      : label,
+    }
+
+
 def get_upcoming_events(
     days: int = LOOKAHEAD_DAYS,
     from_date: Optional[date] = None,
@@ -148,80 +298,72 @@ def get_upcoming_events(
 ) -> list[dict]:
     """
     Retourne les événements du calendrier dans une fenêtre de dates.
+    Gère les événements récurrents (RRULE WEEKLY/DAILY + BYDAY + EXDATE).
 
     Modes d'utilisation :
       get_upcoming_events()                        → today .. today+14j
       get_upcoming_events(days=7)                  → today .. today+7j
       get_upcoming_events(from_date=d, to_date=d)  → jour exact (passé ou futur)
-
-    Chaque événement est un dict :
-    {
-        "title"      : str,
-        "date"       : date,
-        "datetime"   : datetime | None,
-        "location"   : str | None,
-        "description": str | None,
-        "days_until" : int,          # négatif si passé
-        "is_today"   : bool,
-        "is_tomorrow": bool,
-        "label"      : str,
-    }
-    Trié par date croissante.
     """
     cal = _get_calendar()
     if cal is None:
         return []
 
-    today  = date.today()
-    start  = from_date if from_date is not None else today
-    end    = to_date   if to_date   is not None else (today + timedelta(days=days))
+    today = date.today()
+    start = from_date if from_date is not None else today
+    end   = to_date   if to_date   is not None else (today + timedelta(days=days))
+
+    # Utilise recurring_ical_events si disponible (gère tous les cas edge)
+    if _HAS_RIE:
+        try:
+            start_dt = datetime(start.year, start.month, start.day, 0, 0, 0)
+            end_dt   = datetime(end.year,   end.month,   end.day,   23, 59, 59)
+            raw_events = _rie.of(cal).between(start_dt, end_dt)
+            events = []
+            for component in raw_events:
+                dtstart = component.get("DTSTART")
+                if dtstart is None:
+                    continue
+                ev_date = _to_date(dtstart.dt)
+                if ev_date is None:
+                    continue
+                events.append(_make_event_dict(component, ev_date, today))
+            events.sort(key=lambda e: (e["date"], e["datetime"] or datetime.min))
+            return events
+        except Exception:
+            pass  # fallback sur notre expansion manuelle
+
+    # Expansion manuelle — gère VEVENT simples + RRULE WEEKLY/DAILY
+    seen   = set()   # (uid, date) pour éviter les doublons
     events = []
 
     for component in cal.walk():
         if component.name != "VEVENT":
             continue
 
-        dtstart = component.get("DTSTART")
-        if dtstart is None:
-            continue
-        dt_val  = dtstart.dt
-        ev_date = _to_date(dt_val)
-        if ev_date is None:
-            continue
+        uid = str(component.get("UID", ""))
 
-        if not (start <= ev_date <= end):
-            continue
+        # Cas 1 : événement récurrent → expand les occurrences dans la fenêtre
+        if component.get("RRULE"):
+            occurrence_dates = _expand_rrule(component, start, end)
+            for occ_date in occurrence_dates:
+                key = (uid, occ_date)
+                if key not in seen:
+                    seen.add(key)
+                    events.append(_make_event_dict(component, occ_date, today))
 
-        all_day     = isinstance(dt_val, date) and not isinstance(dt_val, datetime)
-        ev_datetime = None if all_day else _to_datetime(dt_val)
-
-        summary     = _clean_text(str(component.get("SUMMARY", "")))
-        location    = _clean_text(str(component.get("LOCATION", ""))) or None
-        description = _clean_text(str(component.get("DESCRIPTION", ""))) or None
-
-        days_until  = (ev_date - today).days
-        if days_until == 0:
-            label = "Aujourd'hui"
-        elif days_until == 1:
-            label = "Demain"
-        elif days_until > 0:
-            label = f"Dans {days_until} jours"
-        elif days_until == -1:
-            label = "Hier"
+        # Cas 2 : événement simple (ou RECURRENCE-ID = exception d'une récurrence)
         else:
-            label = f"Il y a {abs(days_until)} jours"
-
-        events.append({
-            "title"      : summary,
-            "date"       : ev_date,
-            "datetime"   : ev_datetime,
-            "location"   : location,
-            "description": description,
-            "days_until" : days_until,
-            "is_today"   : days_until == 0,
-            "is_tomorrow": days_until == 1,
-            "label"      : label,
-        })
+            dtstart = component.get("DTSTART")
+            if dtstart is None:
+                continue
+            ev_date = _to_date(dtstart.dt)
+            if ev_date is None or not (start <= ev_date <= end):
+                continue
+            key = (uid, ev_date)
+            if key not in seen:
+                seen.add(key)
+                events.append(_make_event_dict(component, ev_date, today))
 
     events.sort(key=lambda e: (e["date"], e["datetime"] or datetime.min))
     return events
@@ -253,19 +395,16 @@ def format_events_for_prompt(events: list[dict]) -> str:
 def format_startup_banner(events: list[dict]) -> str:
     """
     Formate un résumé compact pour l'affichage au démarrage CLI.
-    N'affiche que les événements urgents (≤ 3 jours).
+    N'affiche que les événements d'aujourd'hui.
     """
-    urgent = [e for e in events if e["days_until"] <= 3]
-    if not urgent:
+    today_events = [e for e in events if e["days_until"] == 0]
+    if not today_events:
         return ""
 
-    lines = ["\n📅 Événements à venir :"]
-    for ev in urgent:
-        time_str = ""
-        if ev["datetime"]:
-            time_str = f" {ev['datetime'].strftime('%H:%M')}"
-        icon = "🔴" if ev["is_today"] else ("🟡" if ev["is_tomorrow"] else "🟢")
-        lines.append(f"  {icon} {ev['label']}{time_str} — {ev['title']}")
+    lines = ["\n📅 Aujourd'hui :"]
+    for ev in today_events:
+        time_str = f" {ev['datetime'].strftime('%H:%M')}" if ev["datetime"] else ""
+        lines.append(f"  🔴{time_str} — {ev['title']}")
     return "\n".join(lines)
 
 
@@ -348,7 +487,7 @@ def get_deadline_context() -> str:
     Retourne "" si aucun événement urgent ou calendrier non configuré.
     """
     events = get_upcoming_events(days=3)
-    urgent = [e for e in events if e["days_until"] <= 3]
+    urgent = [e for e in events if 0 <= e["days_until"] <= 3]
     if not urgent:
         return ""
 
