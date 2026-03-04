@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 generate_training_data.py
@@ -9,8 +10,9 @@ from pathlib import Path
 import requests
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-MODEL = os.getenv("MODEL", "ollama/qwen2.5-8k").replace("ollama/", "")
-OUTPUT      = Path(__file__).parent / "training_data.jsonl"
+MODEL = os.getenv("MODEL", "ollama/mistral").replace("ollama/", "")
+_DATA  = Path(os.getenv("DATA_PATH", ".")).resolve()
+OUTPUT = _DATA / "training_data.jsonl"
 ROUTES      = ["conversation", "shell", "calendar", "scheduler"]
 BATCH_SIZE  = 20
 

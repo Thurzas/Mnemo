@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 retrain_router.py
@@ -11,10 +12,13 @@ import argparse, json, sys
 from pathlib import Path
 from collections import Counter
 
+# Tous les fichiers de données dans /data (WORKDIR Docker)
+# → pas dans /app qui est read-only en production
+_DATA = Path(os.getenv("DATA_PATH", ".")).resolve()
 BASE       = Path(__file__).parent
-TRAIN_DATA = BASE / "training_data.jsonl"
-UNCERTAIN  = BASE / "uncertain_cases.jsonl"
-OUTPUT     = BASE / "router_model.joblib"
+TRAIN_DATA = _DATA / "training_data.jsonl"
+UNCERTAIN  = _DATA / "uncertain_cases.jsonl"
+OUTPUT     = _DATA / "router_model.joblib"
 ROUTES     = ["conversation", "shell", "calendar", "scheduler"]
 
 

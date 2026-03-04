@@ -39,7 +39,8 @@ def _dbg(msg: str) -> None:
 
 
 # ── Active learning — collecte les cas incertains pour re-entrainement ──
-_UNCERTAIN_LOG = Path(__file__).parent / "uncertain_cases.jsonl"
+# uncertain_cases.jsonl dans /data — pas dans /app (read-only)
+_UNCERTAIN_LOG = Path("uncertain_cases.jsonl")  # relatif à WORKDIR=/data
 _UNCERTAIN_CONF_THRESHOLD = 0.70  # en dessous = cas incertain
 
 def _log_uncertain(message: str, final_route: str, ml_conf: float) -> None:
@@ -706,7 +707,10 @@ def _load_router_model():
     global _ROUTER_MODEL
     if _ROUTER_MODEL is not None:
         return _ROUTER_MODEL
-    model_path = Path(__file__).parent / "router_model.joblib"
+    # Cherche d'abord dans /data (retrain sans rebuild), fallback /app
+    model_path = Path("router_model.joblib")
+    if not model_path.exists():
+        model_path = Path(__file__).parent / "router_model.joblib"
     if not model_path.exists():
         return None
     try:
