@@ -77,6 +77,28 @@ for sp in search_paths:
             patched_files.append(filepath)
             print(f"  ✓ patché : {os.path.relpath(filepath, sp)}")
 
+
+# ── Patch litellm cold storage logging (bruit fastapi) ───────────
+# litellm essaie d'initialiser proxy_server.py qui requiert fastapi.
+# On patche cold_storage_handler.py pour court-circuiter l'import.
+import os as _os
+
+_litellm_paths = [
+    "/usr/local/lib/python3.12/site-packages/litellm/proxy/spend_tracking/cold_storage_handler.py",
+]
+for _path in _litellm_paths:
+    if not _os.path.exists(_path):
+        continue
+    try:
+        _src = open(_path, encoding="utf-8").read()
+        _old = "from litellm.proxy.proxy_server import general_settings"
+        _new = "general_settings = {}  # patched — proxy_server import skipped (no fastapi)"
+        if _old in _src:
+            open(_path, "w", encoding="utf-8").write(_src.replace(_old, _new, 1))
+            print(f"  ✓ patché litellm cold_storage_handler")
+    except Exception as e:
+        print(f"  ⚠ patch litellm échoué : {e}")
+
 if patched_files:
     print(f"\n✅ {len(patched_files)} fichier(s) patchés")
 else:

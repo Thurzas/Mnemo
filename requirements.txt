@@ -4,6 +4,10 @@
 
 # ── CrewAI & LLM ──────────────────────────────────────────────────
 crewai[tools]>=0.130.0
+# litellm est requis par crewai au runtime pour router les appels LLM.
+# On le déclare explicitement sans contraindre la version — crewai[tools]
+# pinne déjà la version compatible via ses dépendances.
+litellm
 ollama>=0.4.0
 
 # ── Embeddings & calcul vectoriel ─────────────────────────────────
@@ -18,6 +22,10 @@ icalendar>=6.0.0
 
 # ── Recherche web (fallback DDG) ──────────────────────────────────
 ddgs>=1.0.0
+
+# ── ML Router ─────────────────────────────────────────────────────
+scikit-learn>=1.4.0
+joblib>=1.3.0
 
 pydantic>=2.0.0
 pysbd>=0.3.4
