@@ -52,3 +52,4 @@ schedule_task:
   expected_output: >
     Un objet JSON valide décrivant la tâche à créer ou annuler.
   agent: scheduler_agent
+  

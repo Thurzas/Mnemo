@@ -21,9 +21,9 @@ from typing import Optional
 import os
 
 # ── Paths ─────────────────────────────────────────────────────────
-DATA_PATH  = Path(os.getenv("DATA_PATH", "/data")).resolve()
-DB_PATH    = DATA_PATH / "memory.db"
-TASKS_MD   = DATA_PATH / "tasks.md"
+# Identique à memory_tools.py — relatif au WORKDIR (/data dans Docker)
+DB_PATH  = Path("memory.db")
+TASKS_MD = Path("tasks.md")
 
 _JOURS_FR = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 _JOURS_EN = {j: i for i, j in enumerate(_JOURS_FR)}

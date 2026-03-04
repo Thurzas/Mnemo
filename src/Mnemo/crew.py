@@ -337,6 +337,13 @@ class SchedulerCrew:
         import hashlib as _hashlib
         from datetime import datetime as _dt
 
+        # Assure que la table scheduled_tasks existe (migrate idempotent)
+        try:
+            from Mnemo.init_db import migrate_db as _migrate
+            _migrate()
+        except Exception:
+            pass
+
         # Récupère les tâches existantes pour le contexte
         try:
             from Mnemo.tools.scheduler_tasks import list_tasks, create_task, cancel_task
