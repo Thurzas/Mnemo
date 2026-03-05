@@ -72,8 +72,8 @@ Give Mnemo the ability to perceive its environment beyond typed text.
 
 Move from an agent that responds to an agent that acts — and give it a window onto the desktop.
 
-- [ ] **Action tools**
-  - [ ] Shell command execution (mandatory confirmation, never autonomous)
+- [x] **Action tools**
+  - [x] Shell command execution (mandatory confirmation, never autonomous)
   - [ ] File management (create, move, rename)
   - [ ] Structured note-taking → direct writing into `memory.md` or project files
 - [ ] **Local web dashboard**
