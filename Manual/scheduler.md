@@ -210,6 +210,62 @@ error_msg   TEXT    -- message d'erreur (500 chars max)
 | `/data/weekly.md` | `action_weekly()` | Resume de la semaine passee |
 | `/data/tasks.md` | `_sync_tasks_md()` (apres chaque CRUD) | Miroir humain des taches planifiees |
 
+
+---
+## Pipeline:
+
+```
+User: "tous les lundis à 8h, briefing + rappelle-moi de faire mon point projets"
+  │
+  ├─ router (keywords / ML / LLM) ──────────────────────► route = scheduler
+  │
+  └─ SchedulerCrew.run()
+       │
+       ├─ 1. list_tasks(status="pending")  ──────────────► contexte tâches existantes
+       │
+       ├─ 2. kickoff(user_message, temporal_context,
+       │             existing_tasks)
+       │       └─ LLM décompose en tâches primitives
+       │           └─ retourne JSON :
+       │               {
+       │                 "tasks": [
+       │                   { "action": "create",
+       │                     "task_type": "recurring",
+       │                     "task_action": "briefing",
+       │                     "cron_expr": "weekly lundi 08:00",
+       │                     "payload": {} },
+       │                   { "action": "create",
+       │                     "task_type": "recurring",
+       │                     "task_action": "reminder",
+       │                     "cron_expr": "weekly lundi 08:00",
+       │                     "payload": {"message": "Point projets"} }
+       │                 ],
+       │                 "confirmation_message": "Planifié chaque lundi à 8h."
+       │               }
+       │
+       ├─ 3. parse JSON  (strip fences, json.loads)
+       │
+       ├─ 4. pour chaque tâche dans tasks[] :
+       │       ├─ action = "create"  ──► create_task()  ──► INSERT scheduled_tasks
+       │       │                                         └─► _sync_tasks_md()
+       │       └─ action = "cancel"  ──► cancel_task()  ──► UPDATE status=cancelled
+       │                                                 └─► _sync_tasks_md()
+       │
+       └─ 5. retourne confirmation_message  ─────────────► affiché à l'utilisateur
+
+
+─── plus tard, scheduler.py (boucle 60s) ──────────────────────────────────────
+
+  get_due_tasks()  ──► tâches pending dont next_run ≤ now
+    │
+    ├─ action = briefing       ──► BriefingCrew  ──► briefing.md
+    ├─ action = weekly         ──► BriefingCrew  ──► weekly.md
+    ├─ action = deadline_alert ──► calendrier    ──► injecte dans briefing.md
+    └─ action = reminder       ──► payload.msg   ──► injecte dans briefing.md
+         │
+         ├─ one_shot   ──► mark_done()
+         └─ recurring  ──► reschedule()  ──► next_run recalculé
+```
 ---
 
 ## Couverture de tests (etat au 06 mars 2026)

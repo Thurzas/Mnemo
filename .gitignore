@@ -37,6 +37,7 @@ latest_crew_run.log
 
 # Claude
 CLAUDE.md
+.claude/
 
 #Autres
 documents/
