@@ -165,9 +165,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-    # Redémarre automatiquement si le container crash
-    # (ne redémarre PAS après docker stop — comportement attendu)
-    restart: on-failure:3
+    # Redémarre automatiquement si le container crash ou après un reboot machine.
+    # (ne redémarre PAS après docker stop mnemo-scheduler — comportement attendu)
+    restart: unless-stopped
 
     depends_on:
       searxng:

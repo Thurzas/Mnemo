@@ -627,3 +627,319 @@ class TestSchedulerCrewRun:
             json.loads(t["payload"]).get("message") == "Test fences"
             for t in list_tasks()
         )
+
+
+# ══════════════════════════════════════════════════════════════════
+# Fixtures — couche exécution scheduler.py
+# ══════════════════════════════════════════════════════════════════
+
+@pytest.fixture
+def sched_env(tmp_path, monkeypatch):
+    """
+    Redirige les paths module-level de scheduler.py vers tmp_path.
+    Crée les dossiers nécessaires.
+    """
+    import Mnemo.scheduler as sched
+
+    data_path    = tmp_path / "data"
+    sessions_dir = data_path / "sessions"
+    data_path.mkdir()
+    sessions_dir.mkdir()
+
+    briefing_out  = data_path / "briefing.md"
+    weekly_out    = data_path / "weekly.md"
+    markdown_path = data_path / "memory.md"
+
+    monkeypatch.setattr(sched, "DATA_PATH",     data_path)
+    monkeypatch.setattr(sched, "BRIEFING_OUT",  briefing_out)
+    monkeypatch.setattr(sched, "WEEKLY_OUT",    weekly_out)
+    monkeypatch.setattr(sched, "SESSIONS_DIR",  sessions_dir)
+    monkeypatch.setattr(sched, "MARKDOWN_PATH", markdown_path)
+
+    return {
+        "data":     data_path,
+        "sessions": sessions_dir,
+        "briefing": briefing_out,
+        "weekly":   weekly_out,
+        "memory":   markdown_path,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
+# Niveau 2 — action_reminder()
+# ══════════════════════════════════════════════════════════════════
+
+class TestActionReminder:
+
+    def test_cree_briefing_md_si_absent(self, sched_env):
+        from Mnemo.scheduler import action_reminder
+        action_reminder({"message": "Boire de l'eau"})
+        assert sched_env["briefing"].exists()
+        assert "Boire de l'eau" in sched_env["briefing"].read_text(encoding="utf-8")
+
+    def test_appende_a_briefing_existant(self, sched_env):
+        from Mnemo.scheduler import action_reminder
+        sched_env["briefing"].write_text("# Briefing du jour\n", encoding="utf-8")
+        action_reminder({"message": "Point projets"})
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "# Briefing du jour" in content
+        assert "Point projets" in content
+
+    def test_bloc_rappel_dans_output(self, sched_env):
+        from Mnemo.scheduler import action_reminder
+        action_reminder({"message": "Appeler le dentiste"})
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "Rappel" in content
+        assert "Appeler le dentiste" in content
+
+    def test_payload_vide_message_fallback(self, sched_env):
+        from Mnemo.scheduler import action_reminder
+        action_reminder({})  # pas de clé "message"
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "Rappel sans message" in content
+
+
+# ══════════════════════════════════════════════════════════════════
+# Niveau 2 — action_deadline_alert()
+# ══════════════════════════════════════════════════════════════════
+
+class TestActionDeadlineAlert:
+
+    def _make_event(self, title: str, days_until: int, has_time: bool = True):
+        from datetime import datetime
+        dt = datetime.now() if has_time else None
+        return {"title": title, "days_until": days_until, "datetime": dt}
+
+    def test_injecte_alertes_dans_briefing_existant(self, sched_env):
+        from Mnemo.scheduler import action_deadline_alert
+        sched_env["briefing"].write_text("# Briefing\n", encoding="utf-8")
+        events = [self._make_event("Réunion client", 1)]
+        with patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=events):
+            action_deadline_alert()
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "Réunion client" in content
+        assert "Alertes" in content
+
+    def test_cree_briefing_si_absent(self, sched_env):
+        from Mnemo.scheduler import action_deadline_alert
+        events = [self._make_event("Deadline projet", 3)]
+        with patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=events):
+            action_deadline_alert()
+        assert sched_env["briefing"].exists()
+        assert "Deadline projet" in sched_env["briefing"].read_text(encoding="utf-8")
+
+    def test_alerte_j1_libelle_demain(self, sched_env):
+        from Mnemo.scheduler import action_deadline_alert
+        events = [self._make_event("Rendez-vous médecin", 1)]
+        with patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=events):
+            action_deadline_alert()
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "Demain" in content
+
+    def test_alerte_j3_libelle_dans_3_jours(self, sched_env):
+        from Mnemo.scheduler import action_deadline_alert
+        events = [self._make_event("Livraison sprint", 3)]
+        with patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=events):
+            action_deadline_alert()
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "3 jours" in content
+
+    def test_ignore_evenements_autres_jours(self, sched_env):
+        from Mnemo.scheduler import action_deadline_alert
+        events = [
+            self._make_event("Dans 2 jours", 2),
+            self._make_event("Dans 4 jours", 4),
+        ]
+        with patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=events):
+            action_deadline_alert()
+        assert not sched_env["briefing"].exists()
+
+    def test_pas_de_doublon_si_alertes_deja_presentes(self, sched_env):
+        from Mnemo.scheduler import action_deadline_alert
+        sched_env["briefing"].write_text(
+            "# Briefing\n\n## ⚠️ Alertes deadlines\n- déjà là\n",
+            encoding="utf-8"
+        )
+        events = [self._make_event("Autre deadline", 1)]
+        with patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=events):
+            action_deadline_alert()
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        # La section ne doit apparaître qu'une seule fois
+        assert content.count("## ⚠️ Alertes deadlines") == 1
+
+    def test_erreur_calendrier_ne_plante_pas(self, sched_env):
+        from Mnemo.scheduler import action_deadline_alert
+        with patch("Mnemo.tools.calendar_tools.get_upcoming_events",
+                   side_effect=Exception("Calendrier indisponible")):
+            action_deadline_alert()  # ne doit pas lever d'exception
+
+
+# ══════════════════════════════════════════════════════════════════
+# Niveau 3 — action_briefing() (BriefingCrew mocké)
+# ══════════════════════════════════════════════════════════════════
+
+class TestActionBriefing:
+
+    def test_ecrit_briefing_md(self, sched_env):
+        from Mnemo.scheduler import action_briefing
+        mock_result = make_crew_result("# Briefing\n\nContenu du briefing.")
+        with patch("Mnemo.crew.BriefingCrew") as MockCrew, \
+             patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=[]), \
+             patch("Mnemo.tools.calendar_tools.format_events_for_prompt", return_value=""), \
+             patch("Mnemo.tools.calendar_tools.get_temporal_context", return_value="2026-03-06"):
+            MockCrew.return_value.crew.return_value.kickoff.return_value = mock_result
+            action_briefing()
+        assert sched_env["briefing"].exists()
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "Contenu du briefing" in content
+
+    def test_strip_fences_dans_output_llm(self, sched_env):
+        from Mnemo.scheduler import action_briefing
+        mock_result = make_crew_result("```markdown\n# Briefing\n\nContenu.\n```")
+        with patch("Mnemo.crew.BriefingCrew") as MockCrew, \
+             patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=[]), \
+             patch("Mnemo.tools.calendar_tools.format_events_for_prompt", return_value=""), \
+             patch("Mnemo.tools.calendar_tools.get_temporal_context", return_value="2026-03-06"):
+            MockCrew.return_value.crew.return_value.kickoff.return_value = mock_result
+            action_briefing()
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "```" not in content
+
+    def test_fallback_si_crew_crash(self, sched_env):
+        from Mnemo.scheduler import action_briefing
+        with patch("Mnemo.crew.BriefingCrew") as MockCrew, \
+             patch("Mnemo.tools.calendar_tools.get_upcoming_events", return_value=[]), \
+             patch("Mnemo.tools.calendar_tools.format_events_for_prompt", return_value=""), \
+             patch("Mnemo.tools.calendar_tools.get_temporal_context", return_value="2026-03-06"):
+            MockCrew.return_value.crew.return_value.kickoff.side_effect = Exception("Ollama down")
+            action_briefing()
+        assert sched_env["briefing"].exists()
+        content = sched_env["briefing"].read_text(encoding="utf-8")
+        assert "indisponible" in content.lower() or "Erreur" in content
+
+    def test_erreur_calendrier_ne_bloque_pas(self, sched_env):
+        from Mnemo.scheduler import action_briefing
+        mock_result = make_crew_result("# Briefing OK")
+        with patch("Mnemo.crew.BriefingCrew") as MockCrew, \
+             patch("Mnemo.tools.calendar_tools.get_upcoming_events",
+                   side_effect=Exception("ICS indisponible")), \
+             patch("Mnemo.tools.calendar_tools.get_temporal_context", return_value="2026-03-06"):
+            MockCrew.return_value.crew.return_value.kickoff.return_value = mock_result
+            action_briefing()
+        assert sched_env["briefing"].exists()
+
+
+# ══════════════════════════════════════════════════════════════════
+# Niveau 3 — action_weekly() (BriefingCrew mocké)
+# ══════════════════════════════════════════════════════════════════
+
+class TestActionWeekly:
+
+    def test_ecrit_weekly_md(self, sched_env):
+        from Mnemo.scheduler import action_weekly
+        mock_result = make_crew_result("# Weekly\n\nRésumé de la semaine.")
+        with patch("Mnemo.crew.BriefingCrew") as MockCrew, \
+             patch("Mnemo.tools.calendar_tools.get_events_for_date", return_value=[]), \
+             patch("Mnemo.tools.calendar_tools.format_events_for_prompt", return_value=""):
+            MockCrew.return_value.crew.return_value.kickoff.return_value = mock_result
+            action_weekly()
+        assert sched_env["weekly"].exists()
+        content = sched_env["weekly"].read_text(encoding="utf-8")
+        assert "Résumé de la semaine" in content
+
+    def test_fallback_si_crew_crash(self, sched_env):
+        from Mnemo.scheduler import action_weekly
+        with patch("Mnemo.crew.BriefingCrew") as MockCrew, \
+             patch("Mnemo.tools.calendar_tools.get_events_for_date", return_value=[]), \
+             patch("Mnemo.tools.calendar_tools.format_events_for_prompt", return_value=""):
+            MockCrew.return_value.crew.return_value.kickoff.side_effect = Exception("Crash")
+            action_weekly()
+        assert sched_env["weekly"].exists()
+        content = sched_env["weekly"].read_text(encoding="utf-8")
+        assert "indisponible" in content.lower() or "Erreur" in content
+
+
+# ══════════════════════════════════════════════════════════════════
+# Niveau 2 — dispatch()
+# ══════════════════════════════════════════════════════════════════
+
+class TestDispatch:
+
+    def test_dispatch_reminder(self, sched_env):
+        from Mnemo.scheduler import dispatch
+        task = {"action": "reminder", "payload": '{"message": "Test dispatch"}'}
+        with patch("Mnemo.scheduler.action_reminder") as mock_fn:
+            dispatch(task)
+            mock_fn.assert_called_once()
+
+    def test_dispatch_briefing(self, sched_env):
+        from Mnemo.scheduler import dispatch
+        task = {"action": "briefing", "payload": "{}"}
+        with patch("Mnemo.scheduler.action_briefing") as mock_fn:
+            dispatch(task)
+            mock_fn.assert_called_once()
+
+    def test_dispatch_weekly(self, sched_env):
+        from Mnemo.scheduler import dispatch
+        task = {"action": "weekly", "payload": "{}"}
+        with patch("Mnemo.scheduler.action_weekly") as mock_fn:
+            dispatch(task)
+            mock_fn.assert_called_once()
+
+    def test_dispatch_deadline_alert(self, sched_env):
+        from Mnemo.scheduler import dispatch
+        task = {"action": "deadline_alert", "payload": "{}"}
+        with patch("Mnemo.scheduler.action_deadline_alert") as mock_fn:
+            dispatch(task)
+            mock_fn.assert_called_once()
+
+    def test_dispatch_action_inconnue_ne_plante_pas(self, sched_env):
+        from Mnemo.scheduler import dispatch
+        dispatch({"action": "action_inexistante", "payload": "{}"})  # ne doit pas lever
+
+    def test_dispatch_payload_malformed_ne_plante_pas(self, sched_env):
+        from Mnemo.scheduler import dispatch
+        task = {"action": "reminder", "payload": "pas du json {{{"}
+        with patch("Mnemo.scheduler.action_reminder"):
+            dispatch(task)  # ne doit pas lever
+
+
+# ══════════════════════════════════════════════════════════════════
+# Niveau 2 — run_now()
+# ══════════════════════════════════════════════════════════════════
+
+class TestRunNow:
+
+    def test_run_now_briefing(self, sched_env):
+        from Mnemo.scheduler import run_now
+        with patch("Mnemo.scheduler.action_briefing") as mock_b, \
+             patch("Mnemo.scheduler.action_weekly") as mock_w, \
+             patch("Mnemo.scheduler.action_deadline_alert") as mock_d:
+            run_now(["briefing"])
+            mock_b.assert_called_once()
+            mock_w.assert_not_called()
+            mock_d.assert_not_called()
+
+    def test_run_now_weekly(self, sched_env):
+        from Mnemo.scheduler import run_now
+        with patch("Mnemo.scheduler.action_briefing") as mock_b, \
+             patch("Mnemo.scheduler.action_weekly") as mock_w, \
+             patch("Mnemo.scheduler.action_deadline_alert") as mock_d:
+            run_now(["weekly"])
+            mock_w.assert_called_once()
+            mock_b.assert_not_called()
+            mock_d.assert_not_called()
+
+    def test_run_now_all_appelle_les_trois(self, sched_env):
+        from Mnemo.scheduler import run_now
+        with patch("Mnemo.scheduler.action_briefing") as mock_b, \
+             patch("Mnemo.scheduler.action_weekly") as mock_w, \
+             patch("Mnemo.scheduler.action_deadline_alert") as mock_d:
+            run_now(["all"])
+            mock_b.assert_called_once()
+            mock_w.assert_called_once()
+            mock_d.assert_called_once()
+
+    def test_run_now_cible_inconnue_ne_plante_pas(self, sched_env):
+        from Mnemo.scheduler import run_now
+        run_now(["cible_inexistante"])  # ne doit pas lever
