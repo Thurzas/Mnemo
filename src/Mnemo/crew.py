@@ -216,10 +216,10 @@ class ShellCrew:
 
     @agent
     def shell_executor(self) -> Agent:
-        from Mnemo.tools.shell_tools import ShellExecuteTool, ReadPdfTool
+        from Mnemo.tools.shell_tools import ShellExecuteTool, ReadPdfTool, FileWriterTool
         return Agent(
             config=self.agents_config["shell_executor"],
-            tools=[ShellExecuteTool(), ReadPdfTool()],
+            tools=[ShellExecuteTool(), ReadPdfTool(), FileWriterTool()],
             verbose=False,
             allow_delegation=False,
             max_iter=5,
@@ -292,6 +292,46 @@ class CalendarWriteCrew:
             "[CalendarWriteCrew non encore implémenté] "
             "La gestion de l'agenda en écriture arrive prochainement."
         )
+
+
+@CrewBase
+class NoteWriterCrew:
+    """
+    Crew pour l'écriture directe en mémoire longue durée (memory.md).
+    Déclenché par route=note : l'utilisateur veut noter quelque chose maintenant,
+    sans attendre la consolidation de fin de session.
+    Réutilise UpdateMarkdownTool + SyncMemoryDbTool — pas de subprocess, pas de confirmation.
+    """
+    agents_config = "config/note_agents.yaml"
+    tasks_config  = "config/note_tasks.yaml"
+
+    @agent
+    def note_writer(self) -> Agent:
+        return Agent(
+            config=self.agents_config["note_writer"],
+            verbose=False,
+            allow_delegation=False,
+            tools=[UpdateMarkdownTool(), SyncMemoryDbTool()],
+            max_iter=4,   # update × N sections + 1 sync
+            llm=_llm(0.0),
+        )
+
+    @task
+    def write_note_task(self) -> Task:
+        return Task(config=self.tasks_config["write_note_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        result = self.crew().kickoff(inputs=inputs)
+        return result.raw.strip()
 
 
 @CrewBase

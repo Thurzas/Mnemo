@@ -18,7 +18,7 @@ except ImportError:
 _DATA          = Path(os.getenv("DATA_PATH", ".")).resolve()
 DEFAULT_DATA   = _DATA / "training_data.jsonl"
 DEFAULT_OUTPUT = _DATA / "router_model.joblib"
-ROUTES = ["conversation", "shell", "calendar", "scheduler"]
+ROUTES = ["conversation", "shell", "calendar", "scheduler", "note"]
 
 
 def load_data(path):
@@ -57,6 +57,11 @@ TESTS = [
     ("tous les soirs a 20h envoie un resume", "scheduler"),
     ("t aurais pas mes PDF dans data", "shell"),
     ("dans 20 minutes previens-moi de sortir le poulet", "scheduler"),
+    ("note que je prefere vim a vscode", "note"),
+    ("retiens que j habite a Bordeaux", "note"),
+    ("memorise que mon projet principal c est Mnemo", "note"),
+    ("souviens-toi que je suis allergique aux arachides", "note"),
+    ("garde en memoire que j ai decide d utiliser FastAPI", "note"),
 ]
 
 

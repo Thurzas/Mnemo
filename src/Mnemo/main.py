@@ -69,7 +69,7 @@ def _log_uncertain(message: str, final_route: str, ml_conf: float) -> None:
 
 from Mnemo.crew import (
     ConversationCrew, ConsolidationCrew, CuriosityCrew, EvaluationCrew,
-    ShellCrew, BriefingCrew, CalendarWriteCrew, SchedulerCrew,
+    ShellCrew, BriefingCrew, CalendarWriteCrew, SchedulerCrew, NoteWriterCrew,
 )
 from Mnemo.tools.memory_tools import (
     update_session_memory, load_session_json, SESSIONS_DIR,
@@ -636,6 +636,9 @@ def _route_message(
             "shell_command": shell_command,
         })
 
+    if route == "note":
+        return NoteWriterCrew().run({"user_message": user_message})
+
     if route == "calendar":
         return CalendarWriteCrew().run({**base_inputs})
 
@@ -701,6 +704,24 @@ def _detect_scheduler_intent(msg: str) -> bool:
     return any(kw in m for kw in _SCHEDULER_KEYWORDS)
 
 
+_NOTE_KEYWORDS = [
+    "note que", "notes que", "retiens que", "retiens bien que",
+    "mémorise que", "mémorise ça", "mémorise ceci",
+    "n'oublie pas que", "n'oublie pas ça",
+    "souviens-toi que", "souviens toi que",
+    "garde en mémoire", "garde ça en mémoire",
+    "enregistre que", "enregistre ceci", "enregistre ça",
+    "ajoute à ma mémoire", "ecris dans ma memoire", "écris dans ma mémoire",
+    "ajoute à mes notes", "ajoute dans mes notes",
+    "important à noter", "important a noter",
+    "à noter :", "a noter :",
+]
+
+def _detect_note_intent(msg: str) -> bool:
+    m = msg.lower()
+    return any(kw in m for kw in _NOTE_KEYWORDS)
+
+
 _ROUTER_MODEL = None
 
 def _load_router_model():
@@ -753,16 +774,29 @@ def handle_message(user_message: str, session_id: str) -> str:
     temporal_ctx = get_temporal_context()
     
     # --- 1. PRE-CHECK : Keywords & ML ---
-    kw_shell = _detect_shell_intent(user_message)
-    kw_scheduler = _detect_scheduler_intent(user_message)
+    kw_shell      = _detect_shell_intent(user_message)
+    kw_scheduler  = _detect_scheduler_intent(user_message)
+    kw_note       = _detect_note_intent(user_message)
     ml_route, ml_conf = _ml_detect_intent(user_message)
-    
-    _dbg(f"[Check] KW: shell={kw_shell}, sched={kw_scheduler} | ML: {ml_route} ({ml_conf:.2f})")
+
+    _dbg(f"[Check] KW: shell={kw_shell}, sched={kw_scheduler}, note={kw_note} | ML: {ml_route} ({ml_conf:.2f})")
+
+    # Route note déterministe — les formules "note que / retiens que" sont
+    # non ambiguës : on bypass directement le LLM
+    if kw_note:
+        _dbg("SKIP LLM activé -> Route retenue : note (keyword)")
+        eval_json = {
+            "route": "note",
+            "needs_memory": False,
+            "needs_web": False,
+            "needs_clarification": False,
+        }
+        return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
     # --- 2. DÉCISION DU SKIP (Bypass LLM pour la performance) ---
     # On bypass si le ML est ultra-sûr OU si Keywords + ML concordent
     should_skip_llm = (
-        (ml_conf >= 0.95) or 
+        (ml_conf >= 0.95) or
         (kw_shell and ml_route == "shell" and ml_conf >= 0.80) or
         (kw_scheduler and ml_route == "scheduler" and ml_conf >= 0.80)
     )
