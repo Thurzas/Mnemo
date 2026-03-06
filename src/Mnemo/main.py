@@ -732,95 +732,105 @@ def _ml_detect_intent(message: str) -> tuple:
     try:
         pipeline = md["pipeline"]
         proba    = pipeline.predict_proba([message])[0]
-        routes   = md["routes"]
-        idx      = int(proba.argmax())
-        return routes[idx], float(proba[idx])
+        max_idx = proba.argmax()
+        conf = float(proba[max_idx])        
+        # Si le ML est vraiment perdu (ex: < 0.40), on ne lui fait pas confiance du tout
+        if conf < 0.40:
+            return "conversation", 0.0
+        return md["routes"][max_idx], conf
     except Exception:
         return "conversation", 0.0
 
 
 def handle_message(user_message: str, session_id: str) -> str:
     """
-    Pipeline principal :
-      0. Pre-check  — keywords + ML (evite l'EvaluationCrew si confiance haute)
-      1. EvaluationCrew    — produit le JSON d'evaluation avec route
-      2. Clarification     — interception si needs_clarification
-      3. Web confirmation  — interception si needs_web (query figee, LLM exclu)
-      4. Router            — dispatche vers le crew approprie selon route
+    Pipeline d'arbitrage haute-fidélité :
+    Priorité 1 : Keywords critiques (Déterminisme)
+    Priorité 2 : ML à haute confiance (Vitesse)
+    Priorité 3 : LLM (Nuance sémantique)
+    Priorité 4 : Arbitrage ML vs LLM (Sécurité)
     """
     temporal_ctx = get_temporal_context()
-
-    # ── 0. Pre-check deterministe + ML ──────────────────────────────
-    kw_shell          = _detect_shell_intent(user_message)
-    kw_scheduler      = _detect_scheduler_intent(user_message)
+    
+    # --- 1. PRE-CHECK : Keywords & ML ---
+    kw_shell = _detect_shell_intent(user_message)
+    kw_scheduler = _detect_scheduler_intent(user_message)
     ml_route, ml_conf = _ml_detect_intent(user_message)
+    
+    _dbg(f"[Check] KW: shell={kw_shell}, sched={kw_scheduler} | ML: {ml_route} ({ml_conf:.2f})")
 
-    _dbg(f"keywords_shell={kw_shell} | kw_scheduler={kw_scheduler} | ml={ml_route} ({ml_conf:.2f})")
-
-    skip_llm = (
-        (kw_shell      and ml_route == "shell"     and ml_conf >= 0.80) or
-        (ml_route == "calendar"    and ml_conf >= 0.92) or
-        (ml_route == "scheduler"   and ml_conf >= 0.92) or
-        (kw_scheduler  and ml_route == "scheduler" and ml_conf >= 0.75)
+    # --- 2. DÉCISION DU SKIP (Bypass LLM pour la performance) ---
+    # On bypass si le ML est ultra-sûr OU si Keywords + ML concordent
+    should_skip_llm = (
+        (ml_conf >= 0.95) or 
+        (kw_shell and ml_route == "shell" and ml_conf >= 0.80) or
+        (kw_scheduler and ml_route == "scheduler" and ml_conf >= 0.80)
     )
 
-    if skip_llm:
-        route = ml_route if not (kw_scheduler and ml_route != "shell") else "scheduler"
-        _dbg(f"SKIP LLM -> route={route} (conf={ml_conf:.2f})")
+    if should_skip_llm:
+        _dbg(f"SKIP LLM activé -> Route retenue : {ml_route}")
         eval_json = {
-            "route":               route,
-            "needs_memory":        route == "conversation",
-            "needs_web":           False,
+            "route": ml_route,
+            "needs_memory": ml_route == "conversation",
+            "needs_web": False,
             "needs_clarification": False,
-            "needs_calendar":      False,
-            "shell_command":       None,
-            "memory_query":        user_message,
+            "shell_command": None # Sera extrait plus tard si besoin
         }
     else:
-        # ── 1. Evaluation LLM ───────────────────────────────────────
-        _dbg("LLM eval...")
+        # --- 3. EVALUATION LLM (Le juge sémantique) ---
+        _dbg("Lancement de l'EvaluationCrew (LLM)...")
         eval_result = EvaluationCrew().crew().kickoff(inputs={
-            "user_message":     user_message,
+            "user_message": user_message,
             "temporal_context": temporal_ctx,
         })
         eval_json = _parse_eval_json(eval_result.raw.strip())
         llm_route = eval_json.get("route", "conversation")
-        _dbg(f"LLM -> route={llm_route}")
 
-        # Arbitrage post-LLM
-        if kw_shell and llm_route == "conversation":
-            eval_json["route"] = "shell"
-            _dbg("CORRECTION keywords: conversation -> shell")
-        elif kw_scheduler and llm_route == "conversation":
-            eval_json["route"] = "scheduler"
-            _dbg("CORRECTION keywords: conversation -> scheduler")
-        elif ml_conf >= 0.85 and ml_route != "conversation" and llm_route == "conversation":
-            eval_json["route"] = ml_route
-            _dbg(f"CORRECTION ML: conversation -> {ml_route} (conf={ml_conf:.2f})")
+        # --- 4. ARBITRAGE (La Correction) ---
+        # Ici on gère ton cas d'école : LLM dit "conversation" (RAG) 
+        # mais le ML voit des fichiers (Shell)
+        
+        final_route = llm_route
+        
+        # Règle d'or : Si le LLM veut discuter mais que le ML est formel sur une action
+        if llm_route == "conversation":
+            if ml_conf >= 0.85 and ml_route != "conversation":
+                final_route = ml_route
+                _dbg(f"ARBITRAGE : ML redresse {llm_route} -> {ml_route} (Conf: {ml_conf:.2f})")
+            
+            # Priorité absolue aux mots-clés techniques (ls, rm, cd...)
+            elif kw_shell:
+                final_route = "shell"
+                _dbg("ARBITRAGE : Keyword Shell prioritaire sur LLM Conversation")
+                
+        eval_json["route"] = final_route
 
-    # ── 2. Clarification ────────────────────────────────────────────
-    eval_json, _, user_message = _handle_clarification(
-        eval_json, user_message, temporal_ctx
-    )
-
-    # ── 3. Web (séquence : web avant action si route != conversation)
+    # --- 5. POST-TRAITEMENT (Clarification / Web / Shell) ---
+    # Clarification si besoin (ex: "quel fichier ?")
+    eval_json, _, user_message = _handle_clarification(eval_json, user_message, temporal_ctx)
+    
+    # Recherche Web si le LLM l'a demandé ou si route conversation
     eval_json, web_context = _handle_web_confirmation(eval_json)
-
-    # ── 3b. Shell — confirmation EXPLICITE avant exécution ──────────
+    
+    # Confirmation de commande Shell si route == shell
     eval_json, _ = _handle_shell_confirmation(eval_json)
 
-    eval_json["_user_message"] = user_message  # pour _extract_shell_command
+    # Sauvegarde du message pour l'extraction de commande
+    eval_json["_user_message"] = user_message
     final_route = eval_json.get("route", "conversation")
-    _dbg(f"route finale -> {final_route} | shell_cmd={eval_json.get('shell_command')!r}")
-    _log_uncertain(user_message, final_route, ml_conf)
-    # ── 4. Router ───────────────────────────────────────────────────
+
+    # Log pour futur entraînement (si ml_conf est bas, on veut apprendre de cette phrase)
+    if ml_conf < 0.70:
+        _log_uncertain(user_message, final_route, ml_conf)
+
+    # --- 6. ROUTAGE FINAL VERS LES AGENTS ---
+    _dbg(f"ROUTE FINALE -> {final_route}")
     response = _route_message(
         eval_json, user_message, session_id, temporal_ctx, web_context
     )
 
     update_session_memory(session_id, user_message, response)
     return response
-
 
 def end_session(session_id: str) -> tuple:
     """

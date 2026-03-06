@@ -1,20 +1,20 @@
-{"text": "salut, peux tu fouiller sur le net et me donner une explication clair et concise de l'algorithme A* ? j'en ai besoin pour faire un graphe de proximité dans un GOAP.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
-{"text": "salut, liste moi les fichiers dans data/docs", "route": "shell", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "peux tu fouiller sur le net et me donner une explication clair et concise de l'algorithme A* ? j'en ai besoin pour faire un graphe de proximité dans un GOAP.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "liste moi les fichiers dans data/docs", "route": "shell", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "salut, liste moi les fichiers dans le dossier docs", "route": "shell", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "décidément, lit moi les 100 premières lignes du fichier train_router.py", "route": "shell", "ml_conf": 0.0, "source": "active_learning"}
-{"text": "salut, pour vérifier que tout fonctionne, vaffiche moi les 100 premières lignes du fichier train_router.py", "route": "shell", "ml_conf": 0.0, "source": "active_learning"}
-{"text": "ok, trie par date d'écriture les fichiers du dossier sessions, ensuite, affiche moi le contenu du premier JSON de la liste", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "pour vérifier que tout fonctionne, vaffiche moi les 100 premières lignes du fichier train_router.py", "route": "shell", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "trie par date d'écriture les fichiers du dossier sessions, ensuite, affiche moi le contenu du premier JSON de la liste", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "donne moi en une combinaison de commande shell le contenu du fichier JSON de session le plus récent en date de création", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "ok on va faire par étapes ce truc et on verra comment plus tard je pourrais me servir de cet exemple pour construire des commandes plus complexes....", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "liste moi par date de création les fichiers de sessions, uniquement les JSON", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
-{"text": "?? attend ! tu as pu lancer une commande shell sans demander d'autorisations ? ou bien il trainais dans ta mémoire ?", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "attend ! tu as pu lancer une commande shell sans demander d'autorisations ? ou bien il trainais dans ta mémoire ?", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "salut, j'ai commencé un nouveau projet cette semaine,", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "un jeu en Unity avec de l'IA comportementale pour les PNJexit", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "Toi > salut, j'ai commencé un nouveau projet cette semaine,", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "un jeu en Unity avec de l'IA comportementale pour les PNJ", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
-{"text": "jj'ai commencé un jeu Unity avec GOAP", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "j'ai commencé un jeu Unity avec GOAP", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "trappel moi le programme de la semaine", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
-{"text": "ok, donne moi la prochaine session de projets, j'ai une deadline pour cettte journée là à rendre.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
-{"text": "ok, je me suis trompé, la deadline n'est pas celle de cet après midi, mais bien la prochaine session Projet.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "donne moi la prochaine session de projets, j'ai une deadline pour cettte journée là à rendre.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "je me suis trompé, la deadline n'est pas celle de cet après midi, mais bien la prochaine session Projet.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
 {"text": "nous sommes mercredi, ne prend pas en compte la session de projet d'aujourd'hui, mais défini la prochaine session de projet en tant que deadline", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
-{"text": "salut, aujourd'hui j'ai une session de projets, mais j'ai mis en place une deadline pour la session qui suivra, peux tu me l'a marquer pour la signaler ?", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "aujourd'hui j'ai une session de projets, mais j'ai mis en place une deadline pour la session qui suivra, peux tu me l'a marquer pour la signaler ?", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}

@@ -33,7 +33,8 @@ case "$CMD" in
 
   run|"")
     info "Démarrage de la session Mnemo..."
-    docker compose run --rm mnemo
+    docker compose run --rm mnemo 
+    docker compose run --rm mnemo-scheduler --now all
     ;;
 
   scheduler)

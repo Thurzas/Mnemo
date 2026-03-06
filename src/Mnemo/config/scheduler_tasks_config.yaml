@@ -7,49 +7,69 @@ schedule_task:
     Tâches déjà planifiées :
     {existing_tasks}
 
-    Analyse la demande et détermine :
+    Analyse la demande et décompose-la en une liste de tâches primitives.
+    Une demande complexe peut nécessiter plusieurs tâches combinées.
 
-    1. TYPE de tâche :
+    ACTIONS DISPONIBLES (task_action) :
+       - "reminder"       : rappel simple → le message apparaît dans briefing.md
+       - "briefing"       : génère un briefing.md complet (calendrier + mémoire + session)
+       - "weekly"         : génère un weekly.md (résumé de la semaine passée)
+       - "deadline_alert" : scan du calendrier et injection des alertes J-1/J-3
+
+    TYPES de tâche (task_type) :
        - "one_shot"  : exécution unique à une date/heure précise
                        ("rappelle-moi demain à 9h", "dans 3 jours, fais...")
        - "recurring" : exécution répétée
                        ("chaque lundi", "tous les jours à 8h", "chaque vendredi soir")
 
-    2. ACTION :
-       - "reminder"  : rappel simple → le message apparaît dans briefing.md
-       - "summary"   : demande de résumé mémoire/projet à une heure donnée
-       - "weekly"    : résumé hebdomadaire (normalement géré en système, mais
-                       l'utilisateur peut demander un jour/heure différent)
-
-    3. TRIGGER :
+    TRIGGER :
        - one_shot  : trigger_at = datetime ISO précis (calcule depuis "demain", "dans 3 jours", etc.)
                      Utilise la date du contexte temporel comme ancrage.
        - recurring : cron_expr = "weekly WEEKDAY HH:MM" ou "daily HH:MM"
                      WEEKDAY en français minuscule : lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche
                      Exemples : "weekly lundi 08:00", "daily 07:30", "weekly vendredi 18:00"
 
-    4. PAYLOAD :
+    PAYLOAD :
        - "message" : texte exact du rappel ou description de la tâche (extrait du message utilisateur)
+
+    EXEMPLES DE DÉCOMPOSITION :
+       "rappelle-moi tous les lundis de faire mon point projets"
+         → [{{ task_action: "reminder", task_type: "recurring", cron_expr: "weekly lundi 09:00",
+               payload: {{"message": "Faire le point projets"}} }}]
+
+       "chaque lundi matin, génère un résumé de ma semaine"
+         → [{{ task_action: "weekly", task_type: "recurring", cron_expr: "weekly lundi 08:00",
+               payload: {{"message": "Résumé hebdomadaire"}} }}]
+
+       "tous les jours à 7h, briefing + rappel de boire de l'eau"
+         → [{{ task_action: "briefing",  task_type: "recurring", cron_expr: "daily 07:00", payload: {{}} }},
+            {{ task_action: "reminder",  task_type: "recurring", cron_expr: "daily 07:00",
+               payload: {{"message": "Boire de l'eau"}} }}]
 
     Si la demande est ambiguë (pas d'heure précise, pas de jour clair) :
     → Utilise des valeurs par défaut raisonnables (09:00 si pas d'heure, demain si pas de date)
-    → Signale l'hypothèse dans ta réponse
+    → Signale l'hypothèse dans confirmation_message
 
     Si la demande est une annulation ("annule le rappel...", "supprime la tâche...") :
-    → Identifie la tâche dans existing_tasks et retourne action="cancel" avec le task_id
+    → Identifie la tâche dans existing_tasks
+    → Retourne une tâche avec action="cancel" et task_id_to_cancel renseigné
 
     Retourne UNIQUEMENT un objet JSON valide :
     {{
-      "action": "create | cancel",
-      "task_type": "one_shot | recurring",
-      "task_action": "reminder | summary | weekly",
-      "trigger_at": "2026-03-06T09:00:00 ou null",
-      "cron_expr": "weekly lundi 08:00 ou null",
-      "payload": {{"message": "texte du rappel"}},
-      "task_id_to_cancel": null,
+      "tasks": [
+        {{
+          "action": "create | cancel",
+          "task_type": "one_shot | recurring",
+          "task_action": "reminder | briefing | weekly | deadline_alert",
+          "trigger_at": "2026-03-06T09:00:00 ou null",
+          "cron_expr": "weekly lundi 08:00 ou null",
+          "payload": {{"message": "texte du rappel"}},
+          "task_id_to_cancel": null
+        }}
+      ],
       "confirmation_message": "Phrase courte confirmant ce qui a été planifié, en français naturel."
     }}
   expected_output: >
-    Un objet JSON valide décrivant la tâche à créer ou annuler.
+    Un objet JSON valide avec une liste de tâches à créer ou annuler.
   agent: scheduler_agent
   

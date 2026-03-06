@@ -335,7 +335,6 @@ class SchedulerCrew:
         """
         import json as _json
         import hashlib as _hashlib
-        from datetime import datetime as _dt
 
         # Assure que la table scheduled_tasks existe (migrate idempotent)
         try:
@@ -374,45 +373,57 @@ class SchedulerCrew:
         try:
             plan = _json.loads(raw)
         except Exception:
-            return f"Je n'ai pas pu interpréter la demande de planification. Peux-tu reformuler ?"
+            return "Je n'ai pas pu interpréter la demande de planification. Peux-tu reformuler ?"
 
-        action = plan.get("action", "create")
+        tasks = plan.get("tasks", [])
+        if not tasks:
+            return "Aucune tâche à planifier trouvée dans la réponse."
 
-        if action == "cancel":
-            tid = plan.get("task_id_to_cancel")
-            if tid:
+        confirmation = plan.get("confirmation_message", "")
+        errors = []
+
+        for item in tasks:
+            action = item.get("action", "create")
+
+            if action == "cancel":
+                tid = item.get("task_id_to_cancel")
+                if not tid:
+                    errors.append("Annulation sans identifiant de tâche.")
+                    continue
                 try:
                     cancelled = cancel_task(tid)
-                    if cancelled:
-                        return plan.get("confirmation_message", f"Tâche {tid} annulée.")
-                    else:
-                        return f"Tâche introuvable ou déjà terminée : {tid}"
+                    if not cancelled:
+                        errors.append(f"Tâche introuvable ou déjà terminée : {tid}")
                 except Exception as e:
-                    return f"Erreur lors de l'annulation : {e}"
-            return "Aucun identifiant de tâche fourni pour l'annulation."
+                    errors.append(f"Erreur annulation {tid} : {e}")
+                continue
 
-        # Création
-        task_type   = plan.get("task_type", "one_shot")
-        task_action = plan.get("task_action", "reminder")
-        trigger_at  = plan.get("trigger_at")
-        cron_expr   = plan.get("cron_expr")
-        payload     = plan.get("payload", {})
+            # Création
+            task_type   = item.get("task_type", "one_shot")
+            task_action = item.get("task_action", "reminder")
+            trigger_at  = item.get("trigger_at")
+            cron_expr   = item.get("cron_expr")
+            payload     = item.get("payload", {})
 
-        # Génère un ID court unique
-        seed    = f"{task_action}-{trigger_at or cron_expr}-{payload.get('message','')}"
-        task_id = "usr_" + _hashlib.md5(seed.encode()).hexdigest()[:8]
+            seed    = f"{task_action}-{trigger_at or cron_expr}-{payload.get('message','')}"
+            task_id = "usr_" + _hashlib.md5(seed.encode()).hexdigest()[:8]
 
-        try:
-            created = create_task(
-                task_id   = task_id,
-                task_type = task_type,
-                action    = task_action,
-                payload   = payload,
-                trigger_at = trigger_at,
-                cron_expr  = cron_expr,
-            )
-            next_run = created.get("next_run", "?")
-            return plan.get("confirmation_message",
-                            f"Tâche planifiée pour {next_run}.")
-        except Exception as e:
-            return f"Erreur lors de la création de la tâche : {e}"
+            try:
+                created = create_task(
+                    task_id    = task_id,
+                    task_type  = task_type,
+                    action     = task_action,
+                    payload    = payload,
+                    trigger_at = trigger_at,
+                    cron_expr  = cron_expr,
+                )
+                if not confirmation:
+                    confirmation = f"Tâche planifiée pour {created.get('next_run', '?')}."
+            except Exception as e:
+                errors.append(f"Erreur création ({task_action}) : {e}")
+
+        if errors:
+            suffix = " | Erreurs : " + " ; ".join(errors)
+            return (confirmation or "Planification partielle.") + suffix
+
+        return confirmation or "Tâches planifiées."
