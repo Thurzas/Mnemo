@@ -30,6 +30,9 @@ from Mnemo.tools.shell_tools import (
     ValidationResult,
     COMMAND_TIMEOUT,
 )
+import Mnemo.tools.shell_whitelist as _wl
+import Mnemo.tools.shell_tools as _st
+
 from Mnemo.tools.shell_whitelist import (
     is_command_allowed,
     is_path_safe,
@@ -39,6 +42,17 @@ from Mnemo.tools.shell_whitelist import (
     ALLOWED_PATH_ROOT,
     MAX_OUTPUT_BYTES,
 )
+
+
+@pytest.fixture(autouse=True)
+def _patch_allowed_root_to_data(monkeypatch):
+    """
+    Fixe ALLOWED_PATH_ROOT à Path("/data") pour tous les tests.
+    Les tests hardcodent /data — DATA_PATH env var ne doit pas interférer.
+    TestFileWriterTool._patch_root surclasse cette fixture pour ses propres tests.
+    """
+    monkeypatch.setattr(_wl, "ALLOWED_PATH_ROOT", Path("/data"))
+    monkeypatch.setattr(_st, "ALLOWED_PATH_ROOT", Path("/data"))
 
 
 # ══════════════════════════════════════════════════════════════════

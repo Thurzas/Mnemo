@@ -263,16 +263,16 @@ def execute_command(command_str: str) -> dict:
 def format_result_for_agent(cmd: str, result: dict) -> str:
     lines = [f"[SHELL] `{cmd}`"]
     if result.get("error"):
-        lines.append(f"[ERREUR] {result['error']}")
+        lines.append(f"❌ {result['error']}")
         return "\n".join(lines)
-    status = "OK" if result["success"] else f"ECHEC (code {result['returncode']})"
-    lines.append(f"Statut : {status}")
-    if result["stdout"]:
-        lines.append("Sortie :")
-        lines.append(result["stdout"].rstrip())
-    if result["stderr"] and not result["success"]:
-        lines.append("Erreur :")
-        lines.append(result["stderr"].rstrip())
+    if result["success"]:
+        lines.append("✅ Succès")
+        if result["stdout"]:
+            lines.append(result["stdout"].rstrip())
+    else:
+        lines.append(f"⚠️ Échec (code {result['returncode']})")
+        if result["stderr"]:
+            lines.append(result["stderr"].rstrip())
     return "\n".join(lines)
 
 

@@ -8,7 +8,7 @@ BASE = Path(__file__).parent
 TRAIN_DATA = _DATA / "training_data.jsonl"
 UNCERTAIN = _DATA / "uncertain_cases.jsonl"
 OUTPUT = _DATA / "router_model.joblib"
-ROUTES = ["conversation", "shell", "calendar", "scheduler"]
+ROUTES = ["conversation", "shell", "calendar", "scheduler", "note"]
 
 def clean_text(text):
     """Normalisation pour le dédoublonnement et la comparaison."""
