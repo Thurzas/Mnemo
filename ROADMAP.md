@@ -76,11 +76,11 @@ Move from an agent that responds to an agent that acts — and give it a window 
   - [x] Shell command execution (mandatory confirmation, never autonomous)
   - [x] File management (create, move, rename)
   - [x] Structured note-taking → direct writing into `memory.md` or project files
-- [ ] **Local web dashboard**
-  - [ ] Lightweight `localhost` interface (FastAPI + minimal frontend)
-  - [ ] Visualization of `memory.md` and sessions
-  - [ ] Agenda with CRUD backend.
-  - [ ] Send messages from the browser (CLI alternative)
+- [x] **Local web dashboard**
+  - [x] Lightweight `localhost` interface (FastAPI + minimal frontend)
+  - [x] Visualization of `memory.md` and sessions
+  - [ ] Agenda with CRUD backend
+  - [x] Send messages from the browser (CLI alternative)
   - [ ] *Why web over system tray: better WSL2 portability,  
     naturally prepares the Phase 4 API*
 - [x] **Scheduler**

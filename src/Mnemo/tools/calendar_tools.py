@@ -529,6 +529,249 @@ def calendar_is_configured() -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Écriture ICS (fichiers locaux uniquement)
+# ══════════════════════════════════════════════════════════════════
+
+def calendar_is_writable() -> bool:
+    """True si CALENDAR_SOURCE est un fichier local (pas une URL)."""
+    if not CALENDAR_SOURCE or not _ICALENDAR_AVAILABLE:
+        return False
+    src = CALENDAR_SOURCE.strip()
+    return not (src.startswith("http://") or src.startswith("https://"))
+
+
+def _save_calendar(cal: "Calendar") -> None:
+    """Écrit le calendrier modifié dans le fichier ICS et invalide le cache."""
+    global _cache
+    path = Path(CALENDAR_SOURCE.strip())
+    path.write_bytes(cal.to_ical())
+    _cache["data"] = None
+    _cache["fetched_at"] = None
+
+
+def _load_writable_calendar() -> "Calendar":
+    """
+    Charge le calendrier pour modification.
+    Crée un calendrier vide si le fichier n'existe pas encore.
+    Lève ValueError si non writable.
+    """
+    if not calendar_is_writable():
+        raise ValueError(
+            "Le calendrier est en lecture seule (URL distante) ou non configuré. "
+            "Configure CALENDAR_SOURCE avec un chemin de fichier local."
+        )
+    raw = _fetch_ics_raw()
+    if raw:
+        return Calendar.from_ical(raw)
+    cal = Calendar()
+    cal.add("PRODID", "-//Mnemo//Mnemo Calendar//FR")
+    cal.add("VERSION", "2.0")
+    return cal
+
+
+def get_events_with_uid(days: int = 30) -> list[dict]:
+    """
+    Comme get_upcoming_events() mais inclut le champ 'uid' dans chaque événement.
+    Utilisé par CalendarWriteCrew pour cibler un événement par UID.
+    """
+    cal = _get_calendar()
+    if cal is None:
+        return []
+
+    today = date.today()
+    end   = today + timedelta(days=days)
+    seen  = set()
+    events: list[dict] = []
+
+    for component in cal.walk():
+        if component.name != "VEVENT":
+            continue
+        uid = str(component.get("UID", ""))
+
+        if component.get("RRULE"):
+            for occ_date in _expand_rrule(component, today, end):
+                key = (uid, occ_date)
+                if key not in seen:
+                    seen.add(key)
+                    ev = _make_event_dict(component, occ_date, today)
+                    ev["uid"] = uid
+                    events.append(ev)
+        else:
+            dtstart = component.get("DTSTART")
+            if dtstart is None:
+                continue
+            ev_date = _to_date(dtstart.dt)
+            if ev_date is None or not (today <= ev_date <= end):
+                continue
+            key = (uid, ev_date)
+            if key not in seen:
+                seen.add(key)
+                ev = _make_event_dict(component, ev_date, today)
+                ev["uid"] = uid
+                events.append(ev)
+
+    events.sort(key=lambda e: (e["date"], e["datetime"] or datetime.min))
+    return events
+
+
+def format_events_with_uid(events: list[dict]) -> str:
+    """
+    Formate les événements avec leur UID tronqué pour CalendarWriteCrew.
+    Format : - [uid12car] [label] HH:MM Titre — Lieu
+    """
+    if not events:
+        return "Aucun événement à venir dans les 30 prochains jours."
+    lines = []
+    for ev in events:
+        time_str  = f" à {ev['datetime'].strftime('%H:%M')}" if ev.get("datetime") else ""
+        loc_str   = f" — {ev['location']}" if ev.get("location") else ""
+        uid_short = ev.get("uid", "")[:12]
+        lines.append(f"- [{uid_short}] [{ev['label']}]{time_str} {ev['title']}{loc_str}")
+    return "\n".join(lines)
+
+
+def add_event(
+    title: str,
+    date_iso: str,
+    time_str: Optional[str] = None,
+    duration_minutes: int = 60,
+    location: Optional[str] = None,
+    description: Optional[str] = None,
+) -> str:
+    """
+    Ajoute un VEVENT dans le fichier ICS local.
+    Retourne l'UID du nouvel événement.
+    Lève ValueError si le calendrier n'est pas writable.
+    """
+    import uuid as _uuid
+    from icalendar import Event as _Event
+
+    cal = _load_writable_calendar()
+    uid = str(_uuid.uuid4())
+
+    ev = _Event()
+    ev.add("UID",     uid)
+    ev.add("SUMMARY", title)
+    ev.add("DTSTAMP", datetime.now())
+
+    try:
+        ev_date = date.fromisoformat(date_iso)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Date invalide : {date_iso!r} (format attendu : YYYY-MM-DD)") from exc
+
+    if time_str:
+        try:
+            h, m    = map(int, time_str.split(":"))
+            dt_start = datetime(ev_date.year, ev_date.month, ev_date.day, h, m)
+            dt_end   = dt_start + timedelta(minutes=duration_minutes)
+            ev.add("DTSTART", dt_start)
+            ev.add("DTEND",   dt_end)
+        except Exception:
+            ev.add("DTSTART", ev_date)
+    else:
+        ev.add("DTSTART", ev_date)
+
+    if location:
+        ev.add("LOCATION", location)
+    if description:
+        ev.add("DESCRIPTION", description)
+
+    cal.add_component(ev)
+    _save_calendar(cal)
+    return uid
+
+
+def delete_event(uid: str) -> bool:
+    """
+    Supprime un VEVENT par UID dans le fichier ICS local.
+    Retourne True si trouvé et supprimé, False sinon.
+    """
+    cal = _load_writable_calendar()
+    before = len(cal.subcomponents)
+    cal.subcomponents = [
+        c for c in cal.subcomponents
+        if not (getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == uid)
+    ]
+    if len(cal.subcomponents) == before:
+        return False
+    _save_calendar(cal)
+    return True
+
+
+def update_event(uid: str, **fields) -> bool:
+    """
+    Modifie un VEVENT existant par UID.
+    fields accepte : title, date, time, duration_minutes, location, description.
+    Retourne True si trouvé et modifié, False sinon.
+    """
+    cal = _load_writable_calendar()
+
+    target = None
+    for c in cal.subcomponents:
+        if getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == uid:
+            target = c
+            break
+
+    if target is None:
+        return False
+
+    # SUMMARY
+    if fields.get("title"):
+        if "SUMMARY" in target:
+            del target["SUMMARY"]
+        target.add("SUMMARY", fields["title"])
+
+    # DTSTART / DTEND
+    new_date_str = fields.get("date")
+    new_time_str = fields.get("time")
+    dur          = int(fields.get("duration_minutes") or 60)
+
+    if new_date_str or new_time_str:
+        dtstart_raw = target.get("DTSTART")
+        if new_date_str:
+            ev_date = date.fromisoformat(new_date_str)
+        else:
+            ev_date = _to_date(dtstart_raw.dt) if dtstart_raw else date.today()
+
+        orig_is_dt = dtstart_raw and isinstance(dtstart_raw.dt, datetime)
+
+        if new_time_str or orig_is_dt:
+            if new_time_str:
+                h, m = map(int, new_time_str.split(":"))
+            else:
+                orig_dt = _to_datetime(dtstart_raw.dt)
+                h, m    = (orig_dt.hour, orig_dt.minute) if orig_dt else (0, 0)
+            dt_start = datetime(ev_date.year, ev_date.month, ev_date.day, h, m)
+            dt_end   = dt_start + timedelta(minutes=dur)
+            for key in ("DTSTART", "DTEND"):
+                if key in target:
+                    del target[key]
+            target.add("DTSTART", dt_start)
+            target.add("DTEND",   dt_end)
+        else:
+            if "DTSTART" in target:
+                del target["DTSTART"]
+            target.add("DTSTART", ev_date)
+
+    # LOCATION
+    if "location" in fields:
+        if "LOCATION" in target:
+            del target["LOCATION"]
+        if fields["location"]:
+            target.add("LOCATION", fields["location"])
+
+    # DESCRIPTION
+    if "description" in fields:
+        if "DESCRIPTION" in target:
+            del target["DESCRIPTION"]
+        if fields["description"]:
+            target.add("DESCRIPTION", fields["description"])
+
+    _save_calendar(cal)
+    return True
+
+
+# ══════════════════════════════════════════════════════════════════
 # CrewAI Tool
 # ══════════════════════════════════════════════════════════════════
 

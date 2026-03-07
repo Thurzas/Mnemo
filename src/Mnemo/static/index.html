@@ -339,22 +339,10 @@
     }
     .session-count { font-size: 0.56rem; color: var(--dimmed); margin-top: 4px; }
 
-    .session-detail { flex: 1; overflow-y: auto; padding: 24px 36px; }
-    .sess-msg { margin-bottom: 22px; padding-bottom: 22px; border-bottom: 1px solid rgba(35,35,58,0.5); }
-    .sess-msg:last-child { border-bottom: none; }
-    .sess-msg-role {
-      font-size: 0.56rem;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      margin-bottom: 6px;
-    }
-    .sess-msg-role.user  { color: var(--a1); }
-    .sess-msg-role.mnemo { color: var(--a6); }
-    .sess-msg-text {
-      font-size: 0.72rem;
-      color: var(--muted);
-      line-height: 1.7;
-      white-space: pre-wrap;
+    .session-detail {
+      flex: 1; overflow-y: auto;
+      padding: 28px 40px;
+      display: flex; flex-direction: column; gap: 18px;
     }
 
     /* ══════════════════════════════════════════════════════════════
@@ -700,14 +688,14 @@ async function loadSessionDetail(id) {
       el.innerHTML = '<div class="panel-empty">Session vide</div>';
       return;
     }
-    el.innerHTML = msgs.map(m => `
-      <div class="sess-msg">
-        <div class="sess-msg-role user">Utilisateur</div>
-        <div class="sess-msg-text">${esc(m.user_message || '')}</div>
-        <div class="sess-msg-role mnemo" style="margin-top:12px;">Mnemo</div>
-        <div class="sess-msg-text">${esc(m.agent_response || '')}</div>
-      </div>
-    `).join('');
+    el.innerHTML = msgs.map(m => {
+      const role = m.role === 'agent' ? 'mnemo' : 'user';
+      const avatar = role === 'user' ? 'T' : 'M';
+      return `<div class="msg ${role}">
+        <div class="msg-avatar">${avatar}</div>
+        <div class="msg-bubble">${formatMsg(m.content || '')}</div>
+      </div>`;
+    }).join('');
   } catch {
     el.innerHTML = '<div class="panel-empty">Erreur de chargement</div>';
   }

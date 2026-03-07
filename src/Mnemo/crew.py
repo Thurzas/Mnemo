@@ -280,18 +280,153 @@ class BriefingCrew:
             verbose=False,
         )
 
+@CrewBase
 class CalendarWriteCrew:
     """
-    Crew pour l'écriture CalDAV (créer, modifier, supprimer des événements).
-    STUB — implémenté en phase 3 étape 3 (agenda CRUD).
-    Reçoit : user_message, evaluation_result, web_context, temporal_context.
-    Garanties : confirmation obligatoire, opération figée, lecture seule sur la mémoire.
+    Crew pour l'écriture du calendrier ICS local : créer, modifier, supprimer des événements.
+    Reçoit : user_message, temporal_context, calendar_context (événements avec UIDs).
+    Garanties :
+      - Fichiers ICS locaux uniquement (URL distantes refusées).
+      - Confirmation obligatoire avant toute opération destructive (update / delete).
+      - Opération figée après kickoff : le LLM ne peut pas modifier la commande après confirmation.
     """
-    def run(self, inputs: dict) -> str:
-        return (
-            "[CalendarWriteCrew non encore implémenté] "
-            "La gestion de l'agenda en écriture arrive prochainement."
+    agents_config = "config/calendar_write_agents.yaml"
+    tasks_config  = "config/calendar_write_tasks.yaml"
+
+    @agent
+    def calendar_writer_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["calendar_writer_agent"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=2,
+            llm=_llm(0.0),
         )
+
+    @task
+    def calendar_write_task(self) -> Task:
+        return Task(config=self.tasks_config["calendar_write_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        """
+        Point d'entrée depuis _route_message.
+
+        Flux :
+          1. Vérifie que le calendrier est writable (local).
+          2. Enrichit calendar_context avec les UIDs pour le ciblage.
+          3. Kickoff LLM → JSON {action, event, target_uid, confirmation_message}.
+          4. Pour update/delete : demande confirmation explicite à l'utilisateur.
+          5. Exécute l'opération, retourne la confirmation.
+        """
+        import json as _json
+        import re as _re
+        from Mnemo.tools.calendar_tools import (
+            calendar_is_writable,
+            get_events_with_uid,
+            format_events_with_uid,
+            add_event,
+            update_event,
+            delete_event,
+        )
+
+        if not calendar_is_writable():
+            return (
+                "Le calendrier est en lecture seule (URL distante) ou non configuré. "
+                "Configure CALENDAR_SOURCE avec un chemin de fichier ICS local "
+                "pour activer la création et la modification d'événements."
+            )
+
+        # Enrichit le contexte avec les UIDs pour que le LLM puisse cibler des événements
+        events = get_events_with_uid(days=60)
+        cal_ctx = format_events_with_uid(events) if events else "Aucun événement dans les 60 prochains jours."
+
+        result = self.crew().kickoff(inputs={
+            **inputs,
+            "calendar_context": cal_ctx,
+        })
+
+        raw = result.raw.strip()
+        raw = _re.sub(r"^```[a-zA-Z]*\n", "", raw, flags=_re.MULTILINE)
+        raw = _re.sub(r"^```\s*$",        "", raw, flags=_re.MULTILINE)
+        raw = raw.strip()
+
+        try:
+            plan = _json.loads(raw)
+        except Exception:
+            return "Je n'ai pas pu interpréter la demande de modification d'agenda. Peux-tu reformuler ?"
+
+        action       = plan.get("action", "create")
+        event_fields = plan.get("event") or {}
+        target_uid   = plan.get("target_uid") or ""
+        confirmation = plan.get("confirmation_message", "")
+
+        # Confirmation obligatoire pour les opérations destructives
+        if action in ("update", "delete"):
+            target = next((e for e in events if e.get("uid") == target_uid), None)
+            print()
+            print(f"  📅 Modification agenda — {action.upper()}")
+            if target:
+                time_str = f" à {target['datetime'].strftime('%H:%M')}" if target.get("datetime") else ""
+                print(f"     Événement : {target['title']} ({target['date']}{time_str})")
+            elif target_uid:
+                print(f"     UID cible  : {target_uid[:24]}…")
+            if action == "delete":
+                print("     ⚠️  Cet événement sera supprimé définitivement.")
+            else:
+                print(f"     Modifications : {event_fields}")
+            print("     Tape 'oui' pour confirmer (toute autre réponse annule).")
+            try:
+                answer = input("     Confirmer ? > ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            if answer not in ("oui", "o", "yes", "y"):
+                return "Modification annulée."
+
+        try:
+            if action == "create":
+                date_iso = event_fields.get("date") or ""
+                if not date_iso:
+                    return "Impossible de créer l'événement : date manquante."
+                add_event(
+                    title            = event_fields.get("title", "Événement"),
+                    date_iso         = date_iso,
+                    time_str         = event_fields.get("time"),
+                    duration_minutes = int(event_fields.get("duration_minutes") or 60),
+                    location         = event_fields.get("location"),
+                    description      = event_fields.get("description"),
+                )
+                return confirmation or f"Événement '{event_fields.get('title')}' ajouté."
+
+            elif action == "delete":
+                if not target_uid:
+                    return "Impossible de supprimer : identifiant d'événement manquant."
+                ok = delete_event(target_uid)
+                if ok:
+                    return confirmation or "Événement supprimé."
+                return "Événement introuvable dans le calendrier (UID inconnu)."
+
+            elif action == "update":
+                if not target_uid:
+                    return "Impossible de modifier : identifiant d'événement manquant."
+                ok = update_event(target_uid, **event_fields)
+                if ok:
+                    return confirmation or "Événement modifié."
+                return "Événement introuvable dans le calendrier (UID inconnu)."
+
+            else:
+                return f"Action inconnue : {action!r}. Actions valides : create, update, delete."
+
+        except Exception as e:
+            return f"Erreur lors de la modification du calendrier : {e}"
 
 
 @CrewBase
