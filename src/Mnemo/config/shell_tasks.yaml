@@ -1,0 +1,26 @@
+execute_shell_task:
+  description: >
+    L'utilisateur a demande une action systeme et a confirme son execution.
+
+    Message original : {user_message}
+    Commande approuvee : {shell_command}
+
+    Ta tache (plusieurs appels d'outils autorises si necessaire) :
+    1. Choisis l'outil adapte a la demande :
+       - Pour creer ou ecrire du contenu dans un fichier : utilise write_file
+         (path=chemin complet, content=contenu complet, overwrite=true si le
+         fichier existe deja). Ne jamais utiliser execute_shell_command pour ca.
+       - Pour deplacer, renommer, copier, supprimer, lister : utilise
+         execute_shell_command avec la commande shell appropriee (mv, cp, rm...).
+       - Pour lire un PDF : utilise read_pdf. JAMAIS cat sur un PDF.
+    2. Si plusieurs etapes sont necessaires, fais plusieurs appels d'outils.
+
+    REGLES :
+    - write_file pour toute creation/ecriture de contenu textuel.
+    - execute_shell_command pour les operations fichiers sans contenu (mv, rm...).
+    - Ne propose pas d'actions non demandees.
+    - Reponds en francais, de facon concise.
+  expected_output: >
+    Une reponse confirmant l'execution et presentant le resultat clairement.
+    En cas d'erreur, une explication et une suggestion de correction.
+  agent: shell_executor

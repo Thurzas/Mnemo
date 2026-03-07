@@ -14,14 +14,23 @@ dependencies = [
     "python-docx>=1.2.0",
     "icalendar>=7.0.2",
     "ddgs>=9.10.0",
+    "scikit-learn>=1.7.2",
+    "joblib>=1.5.3",
+    "recurring-ical-events>=3.8.1",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
 ]
 [tool.pytest.ini_options]
 markers = [
     "ollama: tests nécessitant Ollama + nomic-embed-text en fonctionnement",
 ]
+filterwarnings = [
+    "ignore::UserWarning:pydantic",
+]
 [project.scripts]
 Mnemo = "Mnemo.main:run"
 run_crew = "Mnemo.main:run"
+dashboard = "Mnemo.api:run"
 train = "Mnemo.main:train"
 replay = "Mnemo.main:replay"
 test = "Mnemo.main:test"

@@ -37,8 +37,10 @@ latest_crew_run.log
 
 # Claude
 CLAUDE.md
+.claude/
 
 #Autres
 documents/
 # NEVER export calendars. it's a major security risk.
 *.ics 
+data/

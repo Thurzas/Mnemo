@@ -112,11 +112,28 @@ def init_db():
         );
 
         -- ── CuriosityCrew — questions skippées ────────────────────────
-        -- Mémorise les questions refusées pour ne pas les reproposer.
         CREATE TABLE IF NOT EXISTS curiosity_skipped (
-            id          TEXT PRIMARY KEY,   -- hash MD5 de la question normalisée
-            question    TEXT NOT NULL,      -- texte original de la question
+            id          TEXT PRIMARY KEY,
+            question    TEXT NOT NULL,
             skipped_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- ── Scheduler — tâches planifiées ────────────────────────────
+        -- one_shot   : exécution unique à trigger_at
+        -- recurring  : exécution répétée selon cron_expr
+        -- system     : tâches internes (briefing, weekly, deadline_scan)
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id          TEXT PRIMARY KEY,         -- hash court
+            type        TEXT NOT NULL,            -- one_shot | recurring | system
+            action      TEXT NOT NULL,            -- reminder | summary | deadline_alert | weekly | briefing
+            payload     TEXT DEFAULT '{}',        -- JSON libre : message, cible, paramètres
+            trigger_at  DATETIME,                 -- one_shot : datetime ISO d'exécution
+            cron_expr   TEXT,                     -- recurring/system : "lundi 08:00" ou "daily 07:30"
+            status      TEXT DEFAULT 'pending',   -- pending | done | cancelled | error
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_run    DATETIME,
+            next_run    DATETIME,                 -- précalculé par le scheduler
+            error_msg   TEXT                      -- dernier message d'erreur si status=error
         );
     """)
     db.commit()
@@ -176,6 +193,20 @@ def migrate_db():
             id          TEXT PRIMARY KEY,
             question    TEXT NOT NULL,
             skipped_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        # Scheduler
+        """CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id          TEXT PRIMARY KEY,
+            type        TEXT NOT NULL,
+            action      TEXT NOT NULL,
+            payload     TEXT DEFAULT '{}',
+            trigger_at  DATETIME,
+            cron_expr   TEXT,
+            status      TEXT DEFAULT 'pending',
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_run    DATETIME,
+            next_run    DATETIME,
+            error_msg   TEXT
         )""",
     ]
     for sql in migrations:
