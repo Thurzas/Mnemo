@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mnemo — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Design system ──────────────────────────────────────────── */
+    :root {
+      --bg:      #07070d;
+      --surface: #0f0f18;
+      --s2:      #161622;
+      --border:  #23233a;
+      --a1:      #7c6af7;
+      --a2:      #4ecdc4;
+      --a3:      #f7b731;
+      --a4:      #ff6b6b;
+      --a5:      #a8e063;
+      --a6:      #f97af9;
+      --text:    #e8e8f0;
+      --muted:   #6b6b85;
+      --dimmed:  #3a3a55;
+      --mono:    'JetBrains Mono', monospace;
+      --display: 'Syne', sans-serif;
+    }
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Nav ────────────────────────────────────────────────────── */
+    nav {
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      height: 52px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      gap: 0;
+    }
+    .nav-logo {
+      font-family: var(--display);
+      font-weight: 800;
+      font-size: 1.05rem;
+      background: linear-gradient(135deg, var(--a1), var(--a6));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-right: 32px;
+      user-select: none;
+    }
+    .nav-tabs { display: flex; height: 100%; }
+    .nav-tab {
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      font-size: 0.65rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+      user-select: none;
+    }
+    .nav-tab:hover { color: var(--text); }
+    .nav-tab.active { color: var(--a1); border-bottom-color: var(--a1); }
+    .nav-status {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.58rem;
+      color: var(--muted);
+    }
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--a5);
+      flex-shrink: 0;
+    }
+    .status-dot.error { background: var(--a4); }
+    .status-dot.connecting { background: var(--a3); }
+
+    /* ── Panels ─────────────────────────────────────────────────── */
+    .panels { flex: 1; overflow: hidden; position: relative; }
+    .panel {
+      position: absolute;
+      inset: 0;
+      display: none;
+      overflow: hidden;
+    }
+    .panel.active { display: flex; flex-direction: column; }
+
+    /* ── Scrollbars ─────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ══════════════════════════════════════════════════════════════
+       CHAT
+    ══════════════════════════════════════════════════════════════ */
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .msg { display: flex; gap: 10px; }
+    .msg.user { align-self: flex-end; flex-direction: row-reverse; max-width: 75%; }
+    .msg.mnemo { max-width: 80%; }
+    .msg-avatar {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.6rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+    .msg.user .msg-avatar  { background: rgba(124,106,247,0.2); color: var(--a1); }
+    .msg.mnemo .msg-avatar { background: rgba(249,122,249,0.15); color: var(--a6); }
+    .msg-bubble {
+      padding: 11px 16px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      line-height: 1.75;
+    }
+    .msg.user .msg-bubble {
+      background: rgba(124,106,247,0.12);
+      border: 1px solid rgba(124,106,247,0.25);
+      border-radius: 12px 12px 2px 12px;
+    }
+    .msg.mnemo .msg-bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px 12px 12px 2px;
+    }
+    .msg-bubble code {
+      background: var(--s2);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      color: var(--a5);
+    }
+    .msg-bubble pre {
+      background: var(--s2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin: 8px 0;
+      overflow-x: auto;
+      font-size: 0.7rem;
+      line-height: 1.5;
+    }
+    .loading-dots { display: flex; gap: 4px; padding: 2px 0; }
+    .loading-dots span {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+    .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30%            { transform: translateY(-5px); opacity: 1; }
+    }
+
+    .chat-input-bar {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      padding: 14px 40px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #chat-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      outline: none;
+      transition: border-color 0.2s;
+      resize: none;
+      min-height: 40px;
+      max-height: 110px;
+      line-height: 1.5;
+    }
+    #chat-input:focus { border-color: var(--a1); }
+    #send-btn {
+      background: rgba(124,106,247,0.15);
+      border: 1px solid rgba(124,106,247,0.35);
+      border-radius: 8px;
+      color: var(--a1);
+      font-family: var(--mono);
+      font-size: 0.63rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 10px 20px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+      white-space: nowrap;
+      height: 40px;
+    }
+    #send-btn:hover  { background: rgba(124,106,247,0.3); border-color: var(--a1); }
+    #send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .session-pill {
+      font-size: 0.52rem;
+      color: var(--dimmed);
+      white-space: nowrap;
+      letter-spacing: 0.06em;
+      padding-bottom: 2px;
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+       MEMORY
+    ══════════════════════════════════════════════════════════════ */
+    .mem-layout { display: flex; height: 100%; }
+    .mem-sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 16px 0;
+    }
+    .sidebar-label {
+      font-size: 0.52rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--dimmed);
+      padding: 0 16px 10px;
+      display: block;
+    }
+    .mem-section-item {
+      padding: 8px 16px;
+      font-size: 0.67rem;
+      color: var(--muted);
+      cursor: pointer;
+      border-left: 2px solid transparent;
+      transition: background 0.15s, color 0.15s;
+      line-height: 1.4;
+    }
+    .mem-section-item:hover { background: var(--surface); color: var(--text); }
+    .mem-section-item.active {
+      color: var(--a1);
+      border-left-color: var(--a1);
+      background: rgba(124,106,247,0.07);
+    }
+    .mem-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 32px 44px;
+    }
+    .mem-section-title {
+      font-family: var(--display);
+      font-size: 1rem;
+      font-weight: 800;
+      color: var(--a1);
+      margin-bottom: 18px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .mem-section-body {
+      font-size: 0.72rem;
+      color: var(--muted);
+      line-height: 1.85;
+      white-space: pre-wrap;
+    }
+    .panel-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      flex: 1;
+      color: var(--dimmed);
+      font-size: 0.7rem;
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+       SESSIONS
+    ══════════════════════════════════════════════════════════════ */
+    .sessions-layout { display: flex; height: 100%; }
+    .sessions-list {
+      width: 300px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 16px 0;
+    }
+    .session-item {
+      padding: 11px 16px;
+      border-bottom: 1px solid rgba(35,35,58,0.6);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .session-item:hover { background: var(--surface); }
+    .session-item.active { background: var(--s2); border-left: 2px solid var(--a6); }
+    .session-item-id {
+      font-size: 0.6rem;
+      color: var(--a6);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .session-done-badge {
+      font-size: 0.52rem;
+      color: var(--a5);
+      background: rgba(168,224,99,0.12);
+      border: 1px solid rgba(168,224,99,0.25);
+      border-radius: 4px;
+      padding: 1px 6px;
+    }
+    .session-preview {
+      font-size: 0.63rem;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-count { font-size: 0.56rem; color: var(--dimmed); margin-top: 4px; }
+
+    .session-detail { flex: 1; overflow-y: auto; padding: 24px 36px; }
+    .sess-msg { margin-bottom: 22px; padding-bottom: 22px; border-bottom: 1px solid rgba(35,35,58,0.5); }
+    .sess-msg:last-child { border-bottom: none; }
+    .sess-msg-role {
+      font-size: 0.56rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .sess-msg-role.user  { color: var(--a1); }
+    .sess-msg-role.mnemo { color: var(--a6); }
+    .sess-msg-text {
+      font-size: 0.72rem;
+      color: var(--muted);
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+       CALENDAR
+    ══════════════════════════════════════════════════════════════ */
+    .cal-content { flex: 1; overflow-y: auto; padding: 36px 44px; }
+    .cal-page-title {
+      font-family: var(--display);
+      font-size: 1rem;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    .cal-page-sub { font-size: 0.63rem; color: var(--muted); margin-bottom: 28px; }
+    .cal-events { display: flex; flex-direction: column; gap: 8px; }
+    .cal-event {
+      display: flex;
+      gap: 14px;
+      padding: 14px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--border);
+      border-radius: 10px;
+      transition: border-color 0.2s;
+    }
+    .cal-event:hover { border-color: var(--dimmed); }
+    .cal-event.today    { border-left-color: var(--a3); }
+    .cal-event.tomorrow { border-left-color: var(--a2); }
+    .cal-event.soon     { border-left-color: var(--a1); }
+    .cal-date-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      background: var(--s2);
+      border-radius: 6px;
+      padding: 4px 8px;
+      text-align: center;
+    }
+    .cal-day   { font-family: var(--display); font-size: 1.2rem; font-weight: 800; color: var(--a1); line-height: 1; }
+    .cal-month { font-size: 0.52rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+    .cal-info  { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+    .cal-event-title { font-size: 0.77rem; color: var(--text); font-weight: 500; margin-bottom: 3px; }
+    .cal-event-time  { font-size: 0.62rem; color: var(--muted); }
+    .cal-event-label { font-size: 0.57rem; color: var(--a3); margin-top: 4px; }
+    .cal-event.tomorrow .cal-event-label { color: var(--a2); }
+    .cal-event.soon     .cal-event-label { color: var(--a1); }
+    .cal-location { font-size: 0.6rem; color: var(--dimmed); margin-top: 2px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Navigation ──────────────────────────────────────────────── -->
+<nav>
+  <span class="nav-logo">Mnemo</span>
+  <div class="nav-tabs">
+    <div class="nav-tab active" data-tab="chat">Chat</div>
+    <div class="nav-tab" data-tab="memory">Mémoire</div>
+    <div class="nav-tab" data-tab="sessions">Sessions</div>
+    <div class="nav-tab" data-tab="calendar">Calendrier</div>
+  </div>
+  <div class="nav-status">
+    <div class="status-dot connecting" id="status-dot"></div>
+    <span id="status-text">connexion…</span>
+  </div>
+</nav>
+
+<!-- ── Panels ──────────────────────────────────────────────────── -->
+<div class="panels">
+
+  <!-- Chat ──────────────────────────────────────────────────────── -->
+  <div class="panel active" id="panel-chat">
+    <div class="chat-messages" id="chat-messages">
+      <div class="msg mnemo">
+        <div class="msg-avatar">M</div>
+        <div class="msg-bubble">Bonjour. Comment puis-je t'aider ?</div>
+      </div>
+    </div>
+    <div class="chat-input-bar">
+      <div class="session-pill" id="session-pill">session : —</div>
+      <textarea id="chat-input" placeholder="Envoie un message… (Entrée pour envoyer, Shift+Entrée pour sauter une ligne)" rows="1"></textarea>
+      <button id="send-btn">Envoyer</button>
+    </div>
+  </div>
+
+  <!-- Memory ─────────────────────────────────────────────────────── -->
+  <div class="panel" id="panel-memory">
+    <div class="mem-layout">
+      <div class="mem-sidebar">
+        <span class="sidebar-label">Sections</span>
+        <div id="mem-sections"></div>
+      </div>
+      <div class="mem-content" id="mem-content">
+        <div class="panel-empty">Sélectionne une section</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sessions ───────────────────────────────────────────────────── -->
+  <div class="panel" id="panel-sessions">
+    <div class="sessions-layout">
+      <div class="sessions-list">
+        <span class="sidebar-label">Historique</span>
+        <div id="sessions-list"></div>
+      </div>
+      <div class="session-detail" id="session-detail">
+        <div class="panel-empty">Sélectionne une session</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calendar ───────────────────────────────────────────────────── -->
+  <div class="panel" id="panel-calendar">
+    <div class="cal-content">
+      <div class="cal-page-title">Agenda</div>
+      <div class="cal-page-sub" id="cal-sub">14 prochains jours</div>
+      <div class="cal-events" id="cal-events">
+        <div class="panel-empty" style="height:auto;margin-top:60px;">Chargement…</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── État ─────────────────────────────────────────────────────────
+let sessionId    = sessionStorage.getItem('mnemo_sid') || null;
+let memoryData   = null;
+let memoryLoaded = false;
+
+// ── Tabs ─────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'memory'   && !memoryLoaded) loadMemory();
+    if (tab.dataset.tab === 'sessions')  loadSessions();
+    if (tab.dataset.tab === 'calendar')  loadCalendar();
+  });
+});
+
+// ── Health ───────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    const r = await fetch('/api/health');
+    if (r.ok) {
+      document.getElementById('status-dot').className  = 'status-dot';
+      document.getElementById('status-text').textContent = 'connecté';
+    } else throw new Error();
+  } catch {
+    document.getElementById('status-dot').className  = 'status-dot error';
+    document.getElementById('status-text').textContent = 'hors ligne';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 30_000);
+
+// ── Utils ────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatMsg(text) {
+  let h = esc(text);
+  // Blocs de code ```...```
+  h = h.replace(/```[\s\S]*?```/g, m => {
+    const inner = m.slice(3, -3).replace(/^\w+\n/, '');
+    return `<pre>${inner}</pre>`;
+  });
+  // Code inline `...`
+  h = h.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+  // Gras **...**
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  // Sauts de ligne
+  h = h.replace(/\n/g, '<br>');
+  return h;
+}
+
+// ── Chat ─────────────────────────────────────────────────────────
+const chatEl  = document.getElementById('chat-messages');
+const inputEl = document.getElementById('chat-input');
+const btnEl   = document.getElementById('send-btn');
+
+function appendMsg(role, text, isLoading = false) {
+  const wrap   = document.createElement('div');
+  wrap.className = `msg ${role}`;
+  const avatar = document.createElement('div');
+  avatar.className = 'msg-avatar';
+  avatar.textContent = role === 'user' ? 'T' : 'M';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  if (isLoading) {
+    bubble.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
+    wrap.id = 'loading-msg';
+  } else {
+    bubble.innerHTML = formatMsg(text);
+  }
+  wrap.appendChild(avatar);
+  wrap.appendChild(bubble);
+  chatEl.appendChild(wrap);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return wrap;
+}
+
+async function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text || btnEl.disabled) return;
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  btnEl.disabled = true;
+
+  appendMsg('user', text);
+  appendMsg('mnemo', '', true);
+
+  try {
+    const r = await fetch('/api/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Erreur serveur');
+
+    sessionId = data.session_id;
+    sessionStorage.setItem('mnemo_sid', sessionId);
+    document.getElementById('session-pill').textContent = `session : ${sessionId}`;
+
+    document.getElementById('loading-msg')?.remove();
+    appendMsg('mnemo', data.response);
+  } catch (err) {
+    document.getElementById('loading-msg')?.remove();
+    appendMsg('mnemo', `⚠️ ${err.message}`);
+  } finally {
+    btnEl.disabled = false;
+    inputEl.focus();
+  }
+}
+
+btnEl.addEventListener('click', sendMessage);
+inputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 110) + 'px';
+});
+
+if (sessionId) {
+  document.getElementById('session-pill').textContent = `session : ${sessionId}`;
+}
+
+// ── Memory ───────────────────────────────────────────────────────
+async function loadMemory() {
+  memoryLoaded = true;
+  try {
+    const r = await fetch('/api/memory');
+    const data = await r.json();
+    memoryData = data;
+    renderMemorySections(data.sections);
+  } catch {
+    document.getElementById('mem-sections').innerHTML =
+      '<div style="padding:16px;font-size:0.65rem;color:var(--a4);">Erreur de chargement</div>';
+  }
+}
+
+function renderMemorySections(sections) {
+  const el = document.getElementById('mem-sections');
+  if (!sections.length) {
+    el.innerHTML = '<div style="padding:16px;font-size:0.65rem;color:var(--dimmed);">Mémoire vide</div>';
+    return;
+  }
+  el.innerHTML = sections.map((s, i) =>
+    `<div class="mem-section-item" data-idx="${i}">${esc(s.title)}</div>`
+  ).join('');
+  el.querySelectorAll('.mem-section-item').forEach(item => {
+    item.addEventListener('click', () => {
+      el.querySelectorAll('.mem-section-item').forEach(x => x.classList.remove('active'));
+      item.classList.add('active');
+      showSection(parseInt(item.dataset.idx));
+    });
+  });
+}
+
+function showSection(idx) {
+  const s = memoryData.sections[idx];
+  document.getElementById('mem-content').innerHTML = `
+    <div class="mem-section-title">${esc(s.title)}</div>
+    <div class="mem-section-body">${esc(s.content.trim())}</div>
+  `;
+}
+
+// ── Sessions ─────────────────────────────────────────────────────
+async function loadSessions() {
+  try {
+    const r = await fetch('/api/sessions');
+    const data = await r.json();
+    renderSessions(data.sessions);
+  } catch {
+    document.getElementById('sessions-list').innerHTML =
+      '<div style="padding:16px;font-size:0.65rem;color:var(--a4);">Erreur de chargement</div>';
+  }
+}
+
+function renderSessions(sessions) {
+  const el = document.getElementById('sessions-list');
+  if (!sessions.length) {
+    el.innerHTML = '<div style="padding:16px;font-size:0.65rem;color:var(--dimmed);">Aucune session</div>';
+    return;
+  }
+  el.innerHTML = sessions.map(s => `
+    <div class="session-item" data-id="${esc(s.id)}">
+      <div class="session-item-id">
+        <span>${esc(s.id)}</span>
+        ${s.done ? '<span class="session-done-badge">✓ done</span>' : ''}
+      </div>
+      <div class="session-preview">${esc(s.preview || '—')}</div>
+      <div class="session-count">${s.message_count} message${s.message_count !== 1 ? 's' : ''}</div>
+    </div>
+  `).join('');
+  el.querySelectorAll('.session-item').forEach(item => {
+    item.addEventListener('click', () => {
+      el.querySelectorAll('.session-item').forEach(x => x.classList.remove('active'));
+      item.classList.add('active');
+      loadSessionDetail(item.dataset.id);
+    });
+  });
+}
+
+async function loadSessionDetail(id) {
+  const el = document.getElementById('session-detail');
+  el.innerHTML = '<div class="panel-empty">Chargement…</div>';
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+    const msgs = data.messages || [];
+    if (!msgs.length) {
+      el.innerHTML = '<div class="panel-empty">Session vide</div>';
+      return;
+    }
+    el.innerHTML = msgs.map(m => `
+      <div class="sess-msg">
+        <div class="sess-msg-role user">Utilisateur</div>
+        <div class="sess-msg-text">${esc(m.user_message || '')}</div>
+        <div class="sess-msg-role mnemo" style="margin-top:12px;">Mnemo</div>
+        <div class="sess-msg-text">${esc(m.agent_response || '')}</div>
+      </div>
+    `).join('');
+  } catch {
+    el.innerHTML = '<div class="panel-empty">Erreur de chargement</div>';
+  }
+}
+
+// ── Calendar ─────────────────────────────────────────────────────
+const MONTHS = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
+
+async function loadCalendar() {
+  const el  = document.getElementById('cal-events');
+  const sub = document.getElementById('cal-sub');
+  try {
+    const r    = await fetch('/api/calendar');
+    const data = await r.json();
+    const evts = data.events || [];
+    sub.textContent = `${evts.length} événement${evts.length !== 1 ? 's' : ''} dans les 14 prochains jours`;
+    if (!evts.length) {
+      el.innerHTML = '<div class="panel-empty" style="height:auto;margin-top:60px;">Aucun événement à venir</div>';
+      return;
+    }
+    el.innerHTML = evts.map(e => {
+      // Parsing date ISO sans décalage timezone
+      const [y, mo, d] = (e.date || '').split('-').map(Number);
+      const day   = d   || '?';
+      const month = mo  ? MONTHS[mo - 1] : '?';
+
+      const cls   = e.is_today ? 'today' : e.is_tomorrow ? 'tomorrow'
+                  : (e.days_until <= 7 ? 'soon' : '');
+      const label = e.label || '';
+
+      // Heure depuis le champ datetime ISO (si présent)
+      let timeStr = '';
+      if (e.datetime) {
+        const dt = new Date(e.datetime);
+        timeStr = dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      }
+
+      return `
+        <div class="cal-event ${cls}">
+          <div class="cal-date-block">
+            <div class="cal-day">${day}</div>
+            <div class="cal-month">${month}</div>
+          </div>
+          <div class="cal-info">
+            <div class="cal-event-title">${esc(e.title || 'Événement')}</div>
+            ${timeStr ? `<div class="cal-event-time">${esc(timeStr)}</div>` : ''}
+            ${e.location ? `<div class="cal-location">📍 ${esc(e.location)}</div>` : ''}
+            ${label ? `<div class="cal-event-label">${esc(label)}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch {
+    el.innerHTML = '<div class="panel-empty" style="height:auto;margin-top:60px;">Calendrier non disponible</div>';
+  }
+}
+</script>
+</body>
+</html>
