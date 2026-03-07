@@ -30,6 +30,7 @@ filterwarnings = [
 [project.scripts]
 Mnemo = "Mnemo.main:run"
 run_crew = "Mnemo.main:run"
+dashboard = "Mnemo.api:run"
 train = "Mnemo.main:train"
 replay = "Mnemo.main:replay"
 test = "Mnemo.main:test"
