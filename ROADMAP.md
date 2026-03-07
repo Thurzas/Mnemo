@@ -75,7 +75,7 @@ Move from an agent that responds to an agent that acts — and give it a window 
 - [x] **Action tools**
   - [x] Shell command execution (mandatory confirmation, never autonomous)
   - [x] File management (create, move, rename)
-  - [ ] Structured note-taking → direct writing into `memory.md` or project files
+  - [x] Structured note-taking → direct writing into `memory.md` or project files
 - [ ] **Local web dashboard**
   - [ ] Lightweight `localhost` interface (FastAPI + minimal frontend)
   - [ ] Visualization of `memory.md` and sessions
@@ -83,9 +83,9 @@ Move from an agent that responds to an agent that acts — and give it a window 
   - [ ] Send messages from the browser (CLI alternative)
   - [ ] *Why web over system tray: better WSL2 portability,  
     naturally prepares the Phase 4 API*
-- [ ] **Scheduler**
-  - [ ] Scheduled tasks (reminders, daily summary)
-  - [ ] Morning briefing: today’s agenda + last session + key memory highlights
+- [x] **Scheduler**
+  - [x] Scheduled tasks (reminders, daily summary)
+  - [x] Morning briefing: today’s agenda + last session + key memory highlights
 
 ---
 

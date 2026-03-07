@@ -22,6 +22,9 @@ dependencies = [
 markers = [
     "ollama: tests nécessitant Ollama + nomic-embed-text en fonctionnement",
 ]
+filterwarnings = [
+    "ignore::UserWarning:pydantic",
+]
 [project.scripts]
 Mnemo = "Mnemo.main:run"
 run_crew = "Mnemo.main:run"

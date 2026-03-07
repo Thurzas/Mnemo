@@ -577,6 +577,7 @@ def _handle_shell_confirmation(eval_json: dict) -> tuple[dict, str]:
         return eval_json, shell_command
     else:
         print("     Commande annulee - reponse depuis la memoire.")
+        eval_json["route"] = "conversation"
         return eval_json, ""
 
 

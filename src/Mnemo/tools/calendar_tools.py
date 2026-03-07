@@ -395,16 +395,23 @@ def format_events_for_prompt(events: list[dict]) -> str:
 def format_startup_banner(events: list[dict]) -> str:
     """
     Formate un résumé compact pour l'affichage au démarrage CLI.
-    N'affiche que les événements d'aujourd'hui.
+    Affiche les événements dans les 3 prochains jours, avec icônes colorées.
     """
-    today_events = [e for e in events if e["days_until"] == 0]
-    if not today_events:
+    urgent = [e for e in events if 0 <= e["days_until"] <= 3]
+    if not urgent:
         return ""
 
-    lines = ["\n📅 Aujourd'hui :"]
-    for ev in today_events:
-        time_str = f" {ev['datetime'].strftime('%H:%M')}" if ev["datetime"] else ""
-        lines.append(f"  🔴{time_str} — {ev['title']}")
+    lines = ["📅 Événements à venir :"]
+    for ev in urgent:
+        days = ev["days_until"]
+        if days == 0:
+            icon = "🔴"
+        elif days == 1:
+            icon = "🟡"
+        else:
+            icon = "🟢"
+        time_str = f" {ev['datetime'].strftime('%H:%M')}" if ev.get("datetime") else ""
+        lines.append(f"  {icon}{time_str} — {ev['title']}")
     return "\n".join(lines)
 
 

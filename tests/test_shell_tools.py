@@ -430,7 +430,7 @@ class TestExecuteCommand:
         with patch("Mnemo.tools.shell_tools.subprocess.run") as mock_run:
             mock_run.return_value = make_proc(stdout=big_output)
             result = execute_command("cat /data/big.txt")
-        assert "tronquée" in result["stdout"]
+        assert "tronque" in result["stdout"]
         assert len(result["stdout"].encode()) <= MAX_OUTPUT_BYTES + 200
 
     def test_cwd_is_data(self):
@@ -438,7 +438,7 @@ class TestExecuteCommand:
             mock_run.return_value = make_proc()
             execute_command("ls")
         call_kwargs = mock_run.call_args[1]
-        assert call_kwargs["cwd"] == str(ALLOWED_PATH_ROOT)
+        assert call_kwargs["cwd"] == str(_st.ALLOWED_PATH_ROOT)
 
     def test_timeout_value(self):
         with patch("Mnemo.tools.shell_tools.subprocess.run") as mock_run:
