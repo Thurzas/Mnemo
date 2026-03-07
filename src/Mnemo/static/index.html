@@ -391,6 +391,69 @@
     .cal-event.tomorrow .cal-event-label { color: var(--a2); }
     .cal-event.soon     .cal-event-label { color: var(--a1); }
     .cal-location { font-size: 0.6rem; color: var(--dimmed); margin-top: 2px; }
+
+    /* ── Calendar CRUD ──────────────────────────────────────────── */
+    .cal-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; }
+    .cal-header-left { display: flex; flex-direction: column; gap: 4px; }
+    .cal-add-btn {
+      display: flex; align-items: center; gap: 5px;
+      padding: 7px 14px;
+      background: var(--a1); color: var(--bg);
+      border: none; border-radius: 8px;
+      font-family: var(--mono); font-size: 0.63rem; font-weight: 700;
+      cursor: pointer; letter-spacing: 0.06em;
+      transition: opacity 0.2s; flex-shrink: 0; margin-top: 4px;
+    }
+    .cal-add-btn:hover { opacity: 0.82; }
+    .cal-event-actions { display: none; gap: 6px; align-items: center; align-self: center; flex-shrink: 0; }
+    .cal-event:hover .cal-event-actions { display: flex; }
+    .cal-action-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--muted); font-family: var(--mono); font-size: 0.65rem;
+      padding: 4px 8px; cursor: pointer; transition: color 0.2s, border-color 0.2s;
+    }
+    .cal-action-btn:hover         { color: var(--text); border-color: var(--dimmed); }
+    .cal-action-btn.delete:hover  { color: var(--a4);   border-color: var(--a4); }
+
+    /* ── Modal ──────────────────────────────────────────────────── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.72); backdrop-filter: blur(4px);
+      z-index: 100; align-items: center; justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      padding: 32px 36px; min-width: 360px; max-width: 480px; width: 100%;
+      display: flex; flex-direction: column; gap: 18px;
+    }
+    .modal-title { font-family: var(--display); font-size: 0.9rem; font-weight: 800; }
+    .form-group  { display: flex; flex-direction: column; gap: 6px; }
+    .form-label  { font-size: 0.58rem; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+    .form-row    { display: flex; gap: 12px; }
+    .form-row .form-group { flex: 1; }
+    .form-input {
+      background: var(--s2); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-family: var(--mono); font-size: 0.72rem;
+      padding: 9px 12px; outline: none; transition: border-color 0.2s; width: 100%;
+    }
+    .form-input:focus { border-color: var(--a1); }
+    /* Fix couleur du date/time picker natif sur fond sombre */
+    .form-input[type="date"]::-webkit-calendar-picker-indicator,
+    .form-input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(0.6); cursor: pointer; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+    .btn-cancel {
+      background: none; border: 1px solid var(--border); border-radius: 8px;
+      color: var(--muted); font-family: var(--mono); font-size: 0.65rem;
+      padding: 8px 16px; cursor: pointer; transition: color 0.2s, border-color 0.2s;
+    }
+    .btn-cancel:hover { color: var(--text); border-color: var(--dimmed); }
+    .btn-save {
+      background: var(--a1); border: none; border-radius: 8px;
+      color: var(--bg); font-family: var(--mono); font-size: 0.65rem; font-weight: 700;
+      padding: 8px 16px; cursor: pointer; transition: opacity 0.2s;
+    }
+    .btn-save:hover { opacity: 0.82; }
   </style>
 </head>
 <body>
@@ -457,10 +520,51 @@
   <!-- Calendar ───────────────────────────────────────────────────── -->
   <div class="panel" id="panel-calendar">
     <div class="cal-content">
-      <div class="cal-page-title">Agenda</div>
-      <div class="cal-page-sub" id="cal-sub">14 prochains jours</div>
+      <div class="cal-header">
+        <div class="cal-header-left">
+          <div class="cal-page-title">Agenda</div>
+          <div class="cal-page-sub" id="cal-sub">chargement…</div>
+        </div>
+        <button class="cal-add-btn" id="cal-add-btn" onclick="openCalendarForm()" style="display:none;">+ Ajouter</button>
+      </div>
       <div class="cal-events" id="cal-events">
         <div class="panel-empty" style="height:auto;margin-top:60px;">Chargement…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calendar modal ──────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="cal-modal" onclick="if(event.target===this)closeCalendarModal()">
+    <div class="modal">
+      <div class="modal-title" id="cal-modal-title">Ajouter un événement</div>
+      <input type="hidden" id="cal-edit-uid" value="">
+      <div class="form-group">
+        <label class="form-label">Titre *</label>
+        <input class="form-input" id="cal-f-title" type="text" placeholder="Réunion, RDV médecin…" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Date *</label>
+          <input class="form-input" id="cal-f-date" type="date" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Heure</label>
+          <input class="form-input" id="cal-f-time" type="time" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Durée (min)</label>
+          <input class="form-input" id="cal-f-dur" type="number" min="5" step="5" value="60" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Lieu</label>
+          <input class="form-input" id="cal-f-loc" type="text" placeholder="Bureau, Zoom…" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeCalendarModal()">Annuler</button>
+        <button class="btn-save" onclick="submitCalendarForm()">Enregistrer</button>
       </div>
     </div>
   </div>
@@ -703,36 +807,40 @@ async function loadSessionDetail(id) {
 
 // ── Calendar ─────────────────────────────────────────────────────
 const MONTHS = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
+let _calWritable = false;
+let _calEvents   = [];
 
 async function loadCalendar() {
-  const el  = document.getElementById('cal-events');
-  const sub = document.getElementById('cal-sub');
+  const el     = document.getElementById('cal-events');
+  const sub    = document.getElementById('cal-sub');
+  const addBtn = document.getElementById('cal-add-btn');
   try {
     const r    = await fetch('/api/calendar');
     const data = await r.json();
-    const evts = data.events || [];
-    sub.textContent = `${evts.length} événement${evts.length !== 1 ? 's' : ''} dans les 14 prochains jours`;
-    if (!evts.length) {
+    _calEvents   = data.events || [];
+    _calWritable = data.writable || false;
+    if (addBtn) addBtn.style.display = _calWritable ? '' : 'none';
+    sub.textContent = `${_calEvents.length} événement${_calEvents.length !== 1 ? 's' : ''} dans les 60 prochains jours`;
+    if (!_calEvents.length) {
       el.innerHTML = '<div class="panel-empty" style="height:auto;margin-top:60px;">Aucun événement à venir</div>';
       return;
     }
-    el.innerHTML = evts.map(e => {
-      // Parsing date ISO sans décalage timezone
-      const [y, mo, d] = (e.date || '').split('-').map(Number);
-      const day   = d   || '?';
-      const month = mo  ? MONTHS[mo - 1] : '?';
-
-      const cls   = e.is_today ? 'today' : e.is_tomorrow ? 'tomorrow'
-                  : (e.days_until <= 7 ? 'soon' : '');
+    el.innerHTML = _calEvents.map((e, i) => {
+      const [, mo, d] = (e.date || '').split('-').map(Number);
+      const day   = d  || '?';
+      const month = mo ? MONTHS[mo - 1] : '?';
+      const cls   = e.is_today ? 'today' : e.is_tomorrow ? 'tomorrow' : (e.days_until <= 7 ? 'soon' : '');
       const label = e.label || '';
-
-      // Heure depuis le champ datetime ISO (si présent)
       let timeStr = '';
       if (e.datetime) {
         const dt = new Date(e.datetime);
         timeStr = dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
       }
-
+      const actions = _calWritable ? `
+        <div class="cal-event-actions">
+          <button class="cal-action-btn"        onclick="openCalendarForm(${i})">✎</button>
+          <button class="cal-action-btn delete" onclick="deleteCalendarEvent(${i})">✕</button>
+        </div>` : '';
       return `
         <div class="cal-event ${cls}">
           <div class="cal-date-block">
@@ -741,15 +849,86 @@ async function loadCalendar() {
           </div>
           <div class="cal-info">
             <div class="cal-event-title">${esc(e.title || 'Événement')}</div>
-            ${timeStr ? `<div class="cal-event-time">${esc(timeStr)}</div>` : ''}
+            ${timeStr    ? `<div class="cal-event-time">${esc(timeStr)}</div>` : ''}
             ${e.location ? `<div class="cal-location">📍 ${esc(e.location)}</div>` : ''}
-            ${label ? `<div class="cal-event-label">${esc(label)}</div>` : ''}
+            ${label      ? `<div class="cal-event-label">${esc(label)}</div>` : ''}
           </div>
-        </div>
-      `;
+          ${actions}
+        </div>`;
     }).join('');
   } catch {
     el.innerHTML = '<div class="panel-empty" style="height:auto;margin-top:60px;">Calendrier non disponible</div>';
+  }
+}
+
+function openCalendarForm(idx) {
+  const ev  = (idx !== undefined) ? _calEvents[idx] : null;
+  const uid = ev?.uid || '';
+  document.getElementById('cal-edit-uid').value       = uid;
+  document.getElementById('cal-modal-title').textContent = uid ? 'Modifier l\'événement' : 'Ajouter un événement';
+  document.getElementById('cal-f-title').value = ev?.title    || '';
+  document.getElementById('cal-f-date').value  = ev?.date     || '';
+  document.getElementById('cal-f-loc').value   = ev?.location || '';
+  document.getElementById('cal-f-dur').value   = 60;
+  let timeVal = '';
+  if (ev?.datetime) {
+    // Extrait HH:MM depuis l'ISO local (sans offset TZ)
+    timeVal = ev.datetime.substring(11, 16);
+  }
+  document.getElementById('cal-f-time').value = timeVal;
+  document.getElementById('cal-modal').classList.add('active');
+  setTimeout(() => document.getElementById('cal-f-title').focus(), 50);
+}
+
+function closeCalendarModal() {
+  document.getElementById('cal-modal').classList.remove('active');
+}
+
+async function submitCalendarForm() {
+  const uid   = document.getElementById('cal-edit-uid').value;
+  const title = document.getElementById('cal-f-title').value.trim();
+  const date  = document.getElementById('cal-f-date').value;
+  const time  = document.getElementById('cal-f-time').value  || null;
+  const dur   = parseInt(document.getElementById('cal-f-dur').value) || 60;
+  const loc   = document.getElementById('cal-f-loc').value.trim() || null;
+
+  if (!title) { document.getElementById('cal-f-title').focus(); return; }
+  if (!date)  { document.getElementById('cal-f-date').focus();  return; }
+
+  const body = { title, date, time, duration_minutes: dur, location: loc };
+  try {
+    const r = uid
+      ? await fetch(`/api/calendar/${encodeURIComponent(uid)}`,
+          { method: 'PUT',  headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+      : await fetch('/api/calendar',
+          { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert(err.detail || 'Erreur lors de l\'enregistrement.');
+      return;
+    }
+    closeCalendarModal();
+    loadCalendar();
+  } catch {
+    alert('Erreur réseau.');
+  }
+}
+
+async function deleteCalendarEvent(idx) {
+  const ev = _calEvents[idx];
+  if (!ev) return;
+  if (!confirm(`Supprimer "${ev.title || 'cet événement'}" ?`)) return;
+  try {
+    const r = await fetch(`/api/calendar/${encodeURIComponent(ev.uid)}`, { method: 'DELETE' });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert(err.detail || 'Erreur lors de la suppression.');
+      return;
+    }
+    loadCalendar();
+  } catch {
+    alert('Erreur réseau.');
   }
 }
 </script>

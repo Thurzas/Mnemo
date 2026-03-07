@@ -79,7 +79,7 @@ Move from an agent that responds to an agent that acts — and give it a window 
 - [x] **Local web dashboard**
   - [x] Lightweight `localhost` interface (FastAPI + minimal frontend)
   - [x] Visualization of `memory.md` and sessions
-  - [ ] Agenda with CRUD backend
+  - [x] Agenda with CRUD backend
   - [x] Send messages from the browser (CLI alternative)
   - [ ] *Why web over system tray: better WSL2 portability,  
     naturally prepares the Phase 4 API*

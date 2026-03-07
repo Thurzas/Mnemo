@@ -2,19 +2,23 @@
 api.py — Dashboard web pour Mnemo (FastAPI)
 
 Routes :
-  GET  /                     → dashboard HTML
-  GET  /api/health           → {"status": "ok"}
-  POST /api/message          → {message, session_id?} → {response, session_id}
-  GET  /api/memory           → contenu de memory.md + sections parsées
-  GET  /api/sessions         → liste des sessions avec métadonnées
-  GET  /api/sessions/{id}    → messages d'une session
-  GET  /api/calendar         → événements à venir (14 jours)
+  GET    /                       → dashboard HTML
+  GET    /api/health             → {"status": "ok"}
+  POST   /api/message            → {message, session_id?} → {response, session_id}
+  GET    /api/memory             → contenu de memory.md + sections parsées
+  GET    /api/sessions           → liste des sessions avec métadonnées
+  GET    /api/sessions/{id}      → messages d'une session
+  GET    /api/calendar           → événements à venir (14 jours) avec uid
+  POST   /api/calendar           → créer un événement ICS
+  PUT    /api/calendar/{uid}     → modifier un événement ICS
+  DELETE /api/calendar/{uid}     → supprimer un événement ICS
 
 Sécurité :
   - Route shell bloquée (pas de subprocess depuis le web)
   - needs_web auto-refusé (pas de confirmation interactive)
   - needs_clarification ignoré
   - Validation des session_id contre le path traversal
+  - Écriture calendrier : lecture seule si CALENDAR_SOURCE est une URL
 """
 
 from __future__ import annotations
@@ -208,21 +212,106 @@ async def session_detail(session_id: str):
         raise HTTPException(status_code=500, detail="Corrupted session file")
 
 
+def _serialize_events(events: list) -> list:
+    """Sérialise les objets date/datetime Python en ISO string."""
+    result = []
+    for e in events:
+        s = dict(e)
+        s["date"]     = e["date"].isoformat()     if e.get("date")     else None
+        s["datetime"] = e["datetime"].isoformat() if e.get("datetime") else None
+        result.append(s)
+    return result
+
+
 @app.get("/api/calendar")
-async def calendar():
+async def calendar_list():
     try:
-        from Mnemo.tools.calendar_tools import get_upcoming_events
-        events = get_upcoming_events(days=14)
-        # Sérialisation des objets date/datetime Python → ISO string
-        serialized = []
-        for e in events:
-            s = dict(e)
-            s["date"]     = e["date"].isoformat()     if e.get("date")     else None
-            s["datetime"] = e["datetime"].isoformat() if e.get("datetime") else None
-            serialized.append(s)
-        return {"events": serialized}
+        from Mnemo.tools.calendar_tools import get_events_with_uid, calendar_is_writable
+        events = get_events_with_uid(days=60)
+        return {
+            "events": _serialize_events(events),
+            "writable": calendar_is_writable(),
+        }
     except Exception:
-        return {"events": []}
+        return {"events": [], "writable": False}
+
+
+class EventCreateRequest(BaseModel):
+    title: str
+    date: str                    # YYYY-MM-DD
+    time: str | None = None      # HH:MM
+    duration_minutes: int = 60
+    location: str | None = None
+    description: str | None = None
+
+
+class EventUpdateRequest(BaseModel):
+    title: str | None = None
+    date: str | None = None
+    time: str | None = None
+    duration_minutes: int | None = None
+    location: str | None = None
+    description: str | None = None
+
+
+@app.post("/api/calendar", status_code=201)
+def calendar_create(req: EventCreateRequest):
+    try:
+        from Mnemo.tools.calendar_tools import add_event, calendar_is_writable
+        if not calendar_is_writable():
+            raise HTTPException(status_code=403, detail="Calendrier en lecture seule (URL distante).")
+        uid = add_event(
+            title            = req.title,
+            date_iso         = req.date,
+            time_str         = req.time,
+            duration_minutes = req.duration_minutes,
+            location         = req.location,
+            description      = req.description,
+        )
+        return {"uid": uid}
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/calendar/{event_uid}")
+def calendar_update(event_uid: str, req: EventUpdateRequest):
+    if any(c in event_uid for c in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail="UID invalide.")
+    try:
+        from Mnemo.tools.calendar_tools import update_event, calendar_is_writable
+        if not calendar_is_writable():
+            raise HTTPException(status_code=403, detail="Calendrier en lecture seule (URL distante).")
+        fields = {k: v for k, v in req.model_dump().items() if v is not None}
+        ok = update_event(event_uid, **fields)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Événement introuvable.")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/calendar/{event_uid}")
+def calendar_delete(event_uid: str):
+    if any(c in event_uid for c in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail="UID invalide.")
+    try:
+        from Mnemo.tools.calendar_tools import delete_event, calendar_is_writable
+        if not calendar_is_writable():
+            raise HTTPException(status_code=403, detail="Calendrier en lecture seule (URL distante).")
+        ok = delete_event(event_uid)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Événement introuvable.")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Point d'entrée local ───────────────────────────────────────────
