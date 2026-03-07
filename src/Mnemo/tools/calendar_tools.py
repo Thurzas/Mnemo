@@ -266,15 +266,18 @@ def _make_event_dict(component, ev_date: date, today: date) -> dict:
     location    = _clean_text(str(component.get("LOCATION", ""))) or None
     description = _clean_text(str(component.get("DESCRIPTION", ""))) or None
 
-    # Durée en minutes (pour la vue semaine du dashboard)
+    # Durée en minutes (pour la vue semaine du dashboard).
+    # On calcule DTEND − DTSTART depuis le composant original :
+    # cela donne la durée intrinsèque de l'événement, correcte pour
+    # les occurrences récurrentes comme pour les événements simples.
     duration_minutes = 60
     if ev_datetime:
         dtend_raw = component.get("DTEND")
-        if dtend_raw:
-            dtend_val = _to_datetime(dtend_raw.dt)
-            if dtend_val:
-                diff = dtend_val - ev_datetime
-                duration_minutes = max(15, int(diff.total_seconds() / 60))
+        if dtend_raw and dtstart_raw:
+            orig_start = _to_datetime(dtstart_raw.dt)
+            orig_end   = _to_datetime(dtend_raw.dt)
+            if orig_start and orig_end and orig_end > orig_start:
+                duration_minutes = max(15, int((orig_end - orig_start).total_seconds() / 60))
 
     days_until = (ev_date - today).days
     if days_until == 0:
