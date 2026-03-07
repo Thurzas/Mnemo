@@ -263,16 +263,16 @@ def execute_command(command_str: str) -> dict:
 def format_result_for_agent(cmd: str, result: dict) -> str:
     lines = [f"[SHELL] `{cmd}`"]
     if result.get("error"):
-        lines.append(f"[ERREUR] {result['error']}")
+        lines.append(f"❌ {result['error']}")
         return "\n".join(lines)
-    status = "OK" if result["success"] else f"ECHEC (code {result['returncode']})"
-    lines.append(f"Statut : {status}")
-    if result["stdout"]:
-        lines.append("Sortie :")
-        lines.append(result["stdout"].rstrip())
-    if result["stderr"] and not result["success"]:
-        lines.append("Erreur :")
-        lines.append(result["stderr"].rstrip())
+    if result["success"]:
+        lines.append("✅ Succès")
+        if result["stdout"]:
+            lines.append(result["stdout"].rstrip())
+    else:
+        lines.append(f"⚠️ Échec (code {result['returncode']})")
+        if result["stderr"]:
+            lines.append(result["stderr"].rstrip())
     return "\n".join(lines)
 
 
@@ -406,6 +406,116 @@ class ReadPdfTool(BaseTool):
 
         except Exception as e:
             return f"[ERREUR] Lecture PDF : {e}"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Outil 3 — FileWriterTool
+# ══════════════════════════════════════════════════════════════════
+
+# Noms de fichiers/dossiers internes à Mnemo — protégés contre toute
+# écriture externe (memory.db est binaire, sessions/ est géré par memory_tools)
+_PROTECTED_NAMES: frozenset[str] = frozenset({"memory.db", "sessions"})
+
+
+def _is_protected(path: Path) -> bool:
+    """Retourne True si le chemin résolu pointe sur un fichier interne Mnemo."""
+    try:
+        resolved = path.resolve()
+    except (ValueError, OSError):
+        return True
+    for name in _PROTECTED_NAMES:
+        protected = (ALLOWED_PATH_ROOT / name).resolve()
+        if resolved == protected or protected in resolved.parents:
+            return True
+    return False
+
+
+class FileWriterInput(BaseModel):
+    path: str = Field(
+        description=(
+            "Chemin complet du fichier à créer ou écraser, sous /data. "
+            "Les répertoires parents sont créés automatiquement. "
+            "Exemples : '/data/notes/todo.txt', '/data/projets/plan.md'."
+        )
+    )
+    content: str = Field(
+        description=(
+            "Contenu textuel complet à écrire dans le fichier (UTF-8). "
+            f"Limité à {MAX_OUTPUT_BYTES // 1000} KB."
+        )
+    )
+    overwrite: bool = Field(
+        default=False,
+        description=(
+            "Si True, écrase le fichier s'il existe déjà. "
+            "Si False (défaut) et que le fichier existe, l'opération est refusée."
+        )
+    )
+
+
+class FileWriterTool(BaseTool):
+    """
+    Creates or overwrites a text file under /data using Python (no subprocess).
+    Parent directories are created automatically.
+    Cannot write to memory.db or sessions/. Max 50 KB.
+    For moving/renaming files use execute_shell_command with mv instead.
+    """
+    name:        str = "write_file"
+    description: str = (
+        "Creates or overwrites a text file under /data. "
+        "Parent dirs are created automatically. "
+        "Provide full path, full text content, and overwrite=true to replace existing. "
+        "Cannot touch memory.db or sessions/. Max 50 KB. "
+        "To move or rename files, use execute_shell_command with mv."
+    )
+    args_schema: Type[BaseModel] = FileWriterInput
+
+    def _run(self, path: str, content: str, overwrite: bool = False) -> str:
+        # Validation du chemin
+        if not is_path_safe(path):
+            return (
+                f"[ERREUR] Chemin interdit : {path!r} "
+                f"— opérations limitées à {ALLOWED_PATH_ROOT}"
+            )
+
+        target = Path(path).resolve()
+
+        if _is_protected(target):
+            return (
+                f"[ERREUR] Fichier protégé : {target.name!r} "
+                "— modification réservée aux outils internes Mnemo"
+            )
+
+        # Limite taille du contenu
+        encoded = content.encode("utf-8", errors="replace")
+        if len(encoded) > MAX_OUTPUT_BYTES:
+            return (
+                f"[ERREUR] Contenu trop volumineux : {len(encoded)} octets "
+                f"(limite : {MAX_OUTPUT_BYTES // 1000} KB)"
+            )
+
+        # Refus si fichier existant et overwrite=False
+        if target.exists() and not overwrite:
+            return (
+                f"[ERREUR] {target} existe déjà. "
+                "Utilise overwrite=true pour l'écraser."
+            )
+
+        # Création des répertoires parents si nécessaire
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return f"[ERREUR] Impossible de créer le répertoire parent : {e}"
+
+        # Écriture
+        try:
+            target.write_text(content, encoding="utf-8")
+        except OSError as e:
+            return f"[ERREUR] Écriture impossible : {e}"
+
+        size_kb = len(encoded) / 1000
+        action  = "écrasé" if target.exists() and overwrite else "créé"
+        return f"[OK] Fichier {action} : {target} ({size_kb:.1f} KB)"
 
 
 def _parse_page_range(spec: str, n_pages: int) -> list[int]:

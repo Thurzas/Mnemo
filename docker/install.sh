@@ -269,6 +269,19 @@ ok "Base SQLite initialisée dans ${DATA_DIR}/memory.db"
 # ══════════════════════════════════════════════════════════════════
 # 7. Scheduler (optionnel)
 # ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════
+# 7b. Raccourci mnemo.sh
+# ══════════════════════════════════════════════════════════════════
+step "Raccourci de lancement"
+chmod +x mnemo.sh 2>/dev/null || true
+ok "mnemo.sh prêt"
+info "Lance une session avec : ${BOLD}./mnemo.sh${RESET}"
+if $IS_WSL; then
+    SCRIPT_PATH="$(wslpath -m "$(pwd)/mnemo.sh" 2>/dev/null || echo "$(pwd)/mnemo.sh")"
+    info "Tip WSL2 — ajoute cet alias dans ~/.bashrc pour accéder depuis partout :"
+    echo -e "    ${BOLD}alias mnemo='$(pwd)/mnemo.sh'${RESET}"
+fi
+
 step "Scheduler — morning briefing"
 echo "  Le scheduler génère chaque matin :"
 echo "    - briefing.md  (heure : BRIEFING_TIME dans .env, défaut 07:30)"
@@ -293,13 +306,13 @@ echo ""
 echo -e "${BOLD}════════════════════════════════════════${RESET}"
 echo -e "${GREEN}${BOLD}✅ Mnemo est prêt.${RESET}"
 echo ""
-echo "  ── Sessions ──────────────────────────────"
-echo -e "  Démarrer une session    : ${BOLD}docker compose run --rm mnemo${RESET}"
+echo "  ── Sessions (via mnemo.sh) ──────────────"
+echo -e "  Démarrer une session    : ${BOLD}./mnemo.sh${RESET}"
 echo -e "  Ingérer un document     : ${BOLD}docker compose run --rm mnemo ingest /data/docs/fichier.pdf${RESET}"
 echo -e "  Questionnaire init      : ${BOLD}docker compose run --rm mnemo curiosity${RESET}"
 echo ""
 echo "  ── Scheduler ─────────────────────────────"
-echo -e "  Démarrer (daemon)       : ${BOLD}docker compose up -d mnemo-scheduler${RESET}"
+echo -e "  Démarrer (daemon)       : ${BOLD}./mnemo.sh scheduler${RESET}"
 echo -e "  Arrêter                 : ${BOLD}docker compose stop mnemo-scheduler${RESET}"
 echo -e "  Logs                    : ${BOLD}docker compose logs -f mnemo-scheduler${RESET}"
 echo -e "  Test briefing immédiat  : ${BOLD}docker compose run --rm mnemo-scheduler --now briefing${RESET}"

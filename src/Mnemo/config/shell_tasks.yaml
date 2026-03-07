@@ -6,18 +6,19 @@ execute_shell_task:
     Commande approuvee : {shell_command}
 
     Ta tache (plusieurs appels d'outils autorises si necessaire) :
-    1. Execute la commande approuvee avec execute_shell_command.
-    2. Si la sortie montre des fichiers PDF et que l'utilisateur veut lire
-       un PDF : utilise ensuite l'outil read_pdf.
-       IMPORTANT : Ne jamais utiliser cat sur un PDF, ca retourne du binaire.
-    3. Pour lire un PDF avec des espaces dans le nom, passe le chemin tel quel.
-       Exemple correct : path="/data/docs/Mathematics for game developpers.pdf"
-    4. Si plusieurs etapes sont necessaires, fais plusieurs appels d'outils.
+    1. Choisis l'outil adapte a la demande :
+       - Pour creer ou ecrire du contenu dans un fichier : utilise write_file
+         (path=chemin complet, content=contenu complet, overwrite=true si le
+         fichier existe deja). Ne jamais utiliser execute_shell_command pour ca.
+       - Pour deplacer, renommer, copier, supprimer, lister : utilise
+         execute_shell_command avec la commande shell appropriee (mv, cp, rm...).
+       - Pour lire un PDF : utilise read_pdf. JAMAIS cat sur un PDF.
+    2. Si plusieurs etapes sont necessaires, fais plusieurs appels d'outils.
 
     REGLES :
-    - N'execute la commande approuvee qu'une seule fois.
-    - Pour les PDFs : TOUJOURS read_pdf, JAMAIS cat.
-    - Ne propose pas de commandes non demandees.
+    - write_file pour toute creation/ecriture de contenu textuel.
+    - execute_shell_command pour les operations fichiers sans contenu (mv, rm...).
+    - Ne propose pas d'actions non demandees.
     - Reponds en francais, de facon concise.
   expected_output: >
     Une reponse confirmant l'execution et presentant le resultat clairement.

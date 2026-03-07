@@ -20,7 +20,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from Mnemo import main as mn
-from Mnemo.crew import ShellCrew, CalendarWriteCrew, SchedulerCrew
+from Mnemo.crew import ShellCrew, CalendarWriteCrew, SchedulerCrew, NoteWriterCrew
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -175,17 +175,19 @@ class TestRouteMessage:
         assert result == "réponse shell"
 
     def test_evaluation_result_injected_in_all_routes(self):
-        for route in ["conversation", "shell", "calendar", "scheduler"]:
+        for route in ["conversation", "shell", "calendar", "scheduler", "note"]:
             eval_json = _eval_json(route=route)
             eval_raw = json.dumps(eval_json)
             with patch.object(mn, 'ConversationCrew') as mc, \
                  patch.object(mn, 'ShellCrew') as ms, \
                  patch.object(mn, 'CalendarWriteCrew') as mca, \
-                 patch.object(mn, 'SchedulerCrew') as msc:
+                 patch.object(mn, 'SchedulerCrew') as msc, \
+                 patch.object(mn, 'NoteWriterCrew') as mnw:
                 mc.return_value.crew.return_value.kickoff.return_value = _mock_crew_result("ok")
                 ms.return_value.run.return_value = "ok"
                 mca.return_value.run.return_value = "ok"
                 msc.return_value.run.return_value = "ok"
+                mnw.return_value.run.return_value = "ok"
                 mn._route_message(eval_json, "msg", "s1", "ctx", "")
 
 
@@ -194,14 +196,10 @@ class TestRouteMessage:
 # ══════════════════════════════════════════════════════════════════
 
 class TestPhase3Stubs:
-
-    def test_shell_crew_stub_returns_string(self):
-        result = ShellCrew().run({"user_message": "crée un fichier"})
-        assert isinstance(result, str)
-
-    def test_shell_crew_stub_mentions_not_implemented(self):
-        result = ShellCrew().run({})
-        assert "non encore implémenté" in result.lower() or "ShellCrew" in result
+    """
+    CalendarWriteCrew est encore un stub (CalDAV non implémenté).
+    ShellCrew et SchedulerCrew sont des crews réels testés dans leurs propres fichiers.
+    """
 
     def test_calendar_write_crew_stub_returns_string(self):
         result = CalendarWriteCrew().run({"user_message": "crée un événement"})
@@ -211,33 +209,22 @@ class TestPhase3Stubs:
         result = CalendarWriteCrew().run({})
         assert "non encore implémenté" in result.lower() or "CalendarWriteCrew" in result
 
-    def test_scheduler_crew_stub_returns_string(self):
-        result = SchedulerCrew().run({"user_message": "rappelle-moi demain"})
-        assert isinstance(result, str)
+    def test_calendar_write_crew_accepts_empty_inputs(self):
+        """CalendarWriteCrew ne doit pas crasher si inputs est vide."""
+        try:
+            CalendarWriteCrew().run({})
+        except Exception as e:
+            pytest.fail(f"CalendarWriteCrew.run({{}}) a levé : {e}")
 
-    def test_scheduler_crew_stub_mentions_not_implemented(self):
-        result = SchedulerCrew().run({})
-        assert "non encore implémenté" in result.lower() or "SchedulerCrew" in result
-
-    def test_stubs_accept_empty_inputs(self):
-        """Les stubs ne doivent pas crasher si inputs est vide."""
-        for cls in [ShellCrew, CalendarWriteCrew, SchedulerCrew]:
-            try:
-                cls().run({})
-            except Exception as e:
-                pytest.fail(f"{cls.__name__}.run({{}}) a levé : {e}")
-
-    def test_stubs_accept_full_inputs(self):
-        """Les stubs acceptent tous les inputs du router."""
+    def test_calendar_write_crew_accepts_full_inputs(self):
         inputs = {
             "user_message": "test",
             "evaluation_result": "{}",
             "temporal_context": "2026-03-01",
             "web_context": "résultats web",
         }
-        for cls in [ShellCrew, CalendarWriteCrew, SchedulerCrew]:
-            result = cls().run(inputs)
-            assert isinstance(result, str)
+        result = CalendarWriteCrew().run(inputs)
+        assert isinstance(result, str)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -274,7 +261,9 @@ class TestHandleMessage:
              patch.object(mn, 'ShellCrew') as mock_shell_cls, \
              patch.object(mn, 'ConversationCrew') as mock_conv_cls, \
              patch.object(mn, 'get_temporal_context', return_value="ctx"), \
-             patch.object(mn, 'update_session_memory'):
+             patch.object(mn, 'update_session_memory'), \
+             patch.object(mn, '_handle_shell_confirmation',
+                          return_value=(_eval_json(route="shell", shell_command="ls /data"), "ls /data")):
             mock_eval_cls.return_value.crew.return_value.kickoff.return_value = eval_mock
             mock_shell_cls.return_value.run.return_value = "commande exécutée"
             result = mn.handle_message("crée un fichier test.txt", "session_1")
@@ -306,7 +295,7 @@ class TestHandleMessage:
              patch.object(mn, 'get_temporal_context', return_value="ctx"), \
              patch.object(mn, 'update_session_memory'), \
              patch.object(mn, '_confirm_web_search', return_value=True), \
-             patch('Mnemo.tools.web_tools.web_search', return_value=[
+             patch.object(mn, 'web_search', return_value=[
                  {"title": "Python 3.13", "url": "https://python.org", "extract": "Latest.", "source": "ddg"}
              ]):
             mock_eval_cls.return_value.crew.return_value.kickoff.return_value = eval_mock

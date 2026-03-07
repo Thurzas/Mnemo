@@ -306,7 +306,7 @@ _ACTION_MAP = {
     "briefing":       lambda p: action_briefing(),
     "weekly":         lambda p: action_weekly(),
     "deadline_alert": lambda p: action_deadline_alert(),
-    "reminder":       action_reminder,
+    "reminder":       lambda p: action_reminder(p),
 }
 
 

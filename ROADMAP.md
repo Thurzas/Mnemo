@@ -72,20 +72,20 @@ Give Mnemo the ability to perceive its environment beyond typed text.
 
 Move from an agent that responds to an agent that acts — and give it a window onto the desktop.
 
-- [ ] **Action tools**
-  - [ ] Shell command execution (mandatory confirmation, never autonomous)
-  - [ ] File management (create, move, rename)
-  - [ ] Structured note-taking → direct writing into `memory.md` or project files
-- [ ] **Local web dashboard**
-  - [ ] Lightweight `localhost` interface (FastAPI + minimal frontend)
-  - [ ] Visualization of `memory.md` and sessions
-  - [ ] Agenda with CRUD backend.
-  - [ ] Send messages from the browser (CLI alternative)
+- [x] **Action tools**
+  - [x] Shell command execution (mandatory confirmation, never autonomous)
+  - [x] File management (create, move, rename)
+  - [x] Structured note-taking → direct writing into `memory.md` or project files
+- [x] **Local web dashboard**
+  - [x] Lightweight `localhost` interface (FastAPI + minimal frontend)
+  - [x] Visualization of `memory.md` and sessions
+  - [x] Agenda with CRUD backend
+  - [x] Send messages from the browser (CLI alternative)
   - [ ] *Why web over system tray: better WSL2 portability,  
     naturally prepares the Phase 4 API*
-- [ ] **Scheduler**
-  - [ ] Scheduled tasks (reminders, daily summary)
-  - [ ] Morning briefing: today’s agenda + last session + key memory highlights
+- [x] **Scheduler**
+  - [x] Scheduled tasks (reminders, daily summary)
+  - [x] Morning briefing: today’s agenda + last session + key memory highlights
 
 ---
 
@@ -125,6 +125,12 @@ The agent takes initiative without waiting to be prompted.
 - [ ] Alerts for approaching deadlines
 - [ ] Automatic compaction of `memory.md` when it becomes too large
 - [ ] Multi-profiles (separate identities for personal vs professional use)
+- [ ] **GOAP planner for scheduler actions**
+  - [ ] Replace the current flat `_ACTION_MAP` dispatch with a Goal-Oriented Action Planning layer
+  - [ ] Actions declared with preconditions and effects (e.g. `deadline_alert` requires `briefing_fresh`)
+  - [ ] LLM expresses a *goal state*, the planner finds the optimal action sequence
+  - [ ] Enables conflict detection, dependency ordering, and extensibility without prompt changes
+  - [ ] Migration path: preconditions/effects already expressible as metadata on `_ACTION_MAP` entries
 
 ---
 

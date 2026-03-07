@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """train_router.py - Entraine TF-IDF+LR sur training_data.jsonl"""
 import argparse, json, sys
@@ -14,9 +15,10 @@ except ImportError:
     print("pip install scikit-learn joblib --break-system-packages")
     sys.exit(1)
 
-DEFAULT_DATA   = Path(__file__).parent / "training_data.jsonl"
-DEFAULT_OUTPUT = Path(__file__).parent / "router_model.joblib"
-ROUTES = ["conversation", "shell", "calendar", "scheduler"]
+_DATA          = Path(os.getenv("DATA_PATH", ".")).resolve()
+DEFAULT_DATA   = _DATA / "training_data.jsonl"
+DEFAULT_OUTPUT = _DATA / "router_model.joblib"
+ROUTES = ["conversation", "shell", "calendar", "scheduler", "note"]
 
 
 def load_data(path):
@@ -55,6 +57,11 @@ TESTS = [
     ("tous les soirs a 20h envoie un resume", "scheduler"),
     ("t aurais pas mes PDF dans data", "shell"),
     ("dans 20 minutes previens-moi de sortir le poulet", "scheduler"),
+    ("note que je prefere vim a vscode", "note"),
+    ("retiens que j habite a Bordeaux", "note"),
+    ("memorise que mon projet principal c est Mnemo", "note"),
+    ("souviens-toi que je suis allergique aux arachides", "note"),
+    ("garde en memoire que j ai decide d utiliser FastAPI", "note"),
 ]
 
 

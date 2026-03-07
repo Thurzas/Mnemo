@@ -141,7 +141,7 @@ class TestEndSession:
         """end_session sur une session inexistante ne doit pas appeler le crew."""
         from Mnemo.main import end_session, ConsolidationCrew
         result = end_session("session_qui_nexiste_pas")
-        assert result == "Session vide, rien à consolider."
+        assert result[0] == "Session vide, rien à consolider."
         ConsolidationCrew.assert_not_called()
 
     def test_session_avec_contenu_appelle_le_crew(self, sessions_dir):
@@ -194,7 +194,7 @@ class TestEndSession:
             json.dumps(session_data), encoding="utf-8"
         )
         result = end_session("sess_raw")
-        assert "Session de test" in result
+        assert "Session de test" in result[0]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -327,7 +327,7 @@ class TestSessionScenarios:
         # Consolide
         result = end_session(sid)
         assert (sessions_dir / f"{sid}.done").exists()
-        assert isinstance(result, str)
+        assert isinstance(result[0], str)
 
     def test_scenario_session_vide_exit_immediat(self, sessions_dir):
         """Scénario B : l'utilisateur quitte sans envoyer de message → rien à consolider."""
@@ -336,7 +336,7 @@ class TestSessionScenarios:
         sid = "scenario_vide"
         # Pas de handle_message → pas de fichier JSON
         result = end_session(sid)
-        assert result == "Session vide, rien à consolider."
+        assert result[0] == "Session vide, rien à consolider."
         # Pas de fichier .done non plus (session vide = session inexistante)
         assert not (sessions_dir / f"{sid}.done").exists()
 

@@ -1,0 +1,51 @@
+calendar_write_task:
+  description: >
+    Contexte temporel : {temporal_context}
+
+    Événements existants dans l'agenda (avec identifiants) :
+    {calendar_context}
+
+    Demande de l'utilisateur : {user_message}
+
+    Analyse la demande et produis UNIQUEMENT un JSON valide avec cette structure :
+    {{
+      "action": "create | update | delete",
+      "event": {{
+        "title": "titre de l'événement",
+        "date": "YYYY-MM-DD",
+        "time": "HH:MM ou null si journée entière",
+        "duration_minutes": 60,
+        "location": "lieu ou null",
+        "description": "description ou null"
+      }},
+      "target_uid": "identifiant complet de l'événement existant pour update/delete, null pour create",
+      "confirmation_message": "Une phrase confirmant l'action en français naturel."
+    }}
+
+    RÈGLES :
+
+    action="create" :
+      - Remplis tous les champs de event.
+      - target_uid = null.
+      - date au format ISO YYYY-MM-DD. Utilise le contexte temporel pour résoudre
+        "demain", "lundi prochain", "dans 3 jours", etc.
+      - time au format HH:MM (24h). null si pas d'heure précisée (événement journée entière).
+      - duration_minutes : durée en minutes. 60 par défaut si non précisée.
+
+    action="delete" :
+      - target_uid obligatoire : utilise l'identifiant entre crochets dans calendar_context.
+      - event peut être null.
+
+    action="update" :
+      - target_uid obligatoire.
+      - Dans event, renseigne uniquement les champs modifiés.
+        Les champs non mentionnés restent inchangés.
+
+    Si l'événement cible d'un update/delete est ambigu (plusieurs correspondances),
+    choisis le plus proche dans le temps et signale le doute dans confirmation_message.
+
+    Retourne UNIQUEMENT le JSON, sans balises markdown, sans explication.
+
+  expected_output: >
+    Un objet JSON valide décrivant l'opération à effectuer sur le calendrier ICS.
+  agent: calendar_writer_agent

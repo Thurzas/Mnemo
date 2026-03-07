@@ -30,6 +30,9 @@ from Mnemo.tools.shell_tools import (
     ValidationResult,
     COMMAND_TIMEOUT,
 )
+import Mnemo.tools.shell_whitelist as _wl
+import Mnemo.tools.shell_tools as _st
+
 from Mnemo.tools.shell_whitelist import (
     is_command_allowed,
     is_path_safe,
@@ -39,6 +42,17 @@ from Mnemo.tools.shell_whitelist import (
     ALLOWED_PATH_ROOT,
     MAX_OUTPUT_BYTES,
 )
+
+
+@pytest.fixture(autouse=True)
+def _patch_allowed_root_to_data(monkeypatch):
+    """
+    Fixe ALLOWED_PATH_ROOT à Path("/data") pour tous les tests.
+    Les tests hardcodent /data — DATA_PATH env var ne doit pas interférer.
+    TestFileWriterTool._patch_root surclasse cette fixture pour ses propres tests.
+    """
+    monkeypatch.setattr(_wl, "ALLOWED_PATH_ROOT", Path("/data"))
+    monkeypatch.setattr(_st, "ALLOWED_PATH_ROOT", Path("/data"))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -416,7 +430,7 @@ class TestExecuteCommand:
         with patch("Mnemo.tools.shell_tools.subprocess.run") as mock_run:
             mock_run.return_value = make_proc(stdout=big_output)
             result = execute_command("cat /data/big.txt")
-        assert "tronquée" in result["stdout"]
+        assert "tronque" in result["stdout"]
         assert len(result["stdout"].encode()) <= MAX_OUTPUT_BYTES + 200
 
     def test_cwd_is_data(self):
@@ -424,7 +438,7 @@ class TestExecuteCommand:
             mock_run.return_value = make_proc()
             execute_command("ls")
         call_kwargs = mock_run.call_args[1]
-        assert call_kwargs["cwd"] == str(ALLOWED_PATH_ROOT)
+        assert call_kwargs["cwd"] == str(_st.ALLOWED_PATH_ROOT)
 
     def test_timeout_value(self):
         with patch("Mnemo.tools.shell_tools.subprocess.run") as mock_run:
@@ -650,3 +664,156 @@ class TestHandleShellConfirmation:
         with patch("Mnemo.main._confirm_shell_command", return_value=True):
             result, cmd = fn(eval_json)
         assert cmd == "ls /data"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 8. FileWriterTool
+# ══════════════════════════════════════════════════════════════════
+
+class TestFileWriterTool:
+    """
+    Tests pour FileWriterTool (Outil 3 de shell_tools.py).
+    ALLOWED_PATH_ROOT est redirigé vers tmp_path pour isoler le filesystem.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _patch_root(self, tmp_path, monkeypatch):
+        """Redirige ALLOWED_PATH_ROOT vers tmp_path pour chaque test."""
+        monkeypatch.setattr("Mnemo.tools.shell_whitelist.ALLOWED_PATH_ROOT", tmp_path)
+        monkeypatch.setattr("Mnemo.tools.shell_tools.ALLOWED_PATH_ROOT", tmp_path)
+        self.data = tmp_path
+
+    def _tool(self):
+        from Mnemo.tools.shell_tools import FileWriterTool
+        return FileWriterTool()
+
+    # --- Validation chemin ---
+
+    def test_path_outside_data_rejected(self):
+        tool = self._tool()
+        out = tool._run(path="/etc/passwd", content="pwned", overwrite=False)
+        assert "[ERREUR]" in out
+        assert "interdit" in out.lower()
+
+    def test_path_traversal_rejected(self):
+        tool = self._tool()
+        out = tool._run(
+            path=str(self.data / ".." / "etc" / "passwd"),
+            content="x",
+            overwrite=False,
+        )
+        assert "[ERREUR]" in out
+
+    # --- Fichiers protégés ---
+
+    def test_memory_db_protected(self):
+        tool = self._tool()
+        out = tool._run(
+            path=str(self.data / "memory.db"),
+            content="corruption",
+            overwrite=True,
+        )
+        assert "[ERREUR]" in out
+        assert "protégé" in out
+
+    def test_sessions_dir_protected(self):
+        tool = self._tool()
+        (self.data / "sessions").mkdir()
+        out = tool._run(
+            path=str(self.data / "sessions" / "s.json"),
+            content="{}",
+            overwrite=True,
+        )
+        assert "[ERREUR]" in out
+        assert "protégé" in out
+
+    # --- Limite de taille ---
+
+    def test_content_too_large(self):
+        tool = self._tool()
+        big = "x" * (MAX_OUTPUT_BYTES + 1)
+        out = tool._run(path=str(self.data / "big.txt"), content=big, overwrite=False)
+        assert "[ERREUR]" in out
+        assert "volumineux" in out
+
+    # --- Refus si fichier existant et overwrite=False ---
+
+    def test_existing_file_refused_without_overwrite(self):
+        target = self.data / "existing.txt"
+        target.write_text("ancien contenu", encoding="utf-8")
+        tool = self._tool()
+        out = tool._run(path=str(target), content="nouveau", overwrite=False)
+        assert "[ERREUR]" in out
+        assert "overwrite" in out
+        # Le fichier ne doit pas avoir été modifié
+        assert target.read_text(encoding="utf-8") == "ancien contenu"
+
+    # --- Création réussie ---
+
+    def test_create_new_file(self):
+        target = self.data / "notes.txt"
+        tool = self._tool()
+        out = tool._run(path=str(target), content="Hello Mnemo", overwrite=False)
+        assert "[OK]" in out
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == "Hello Mnemo"
+
+    def test_create_in_subdir_creates_parents(self):
+        target = self.data / "projets" / "2026" / "plan.md"
+        tool = self._tool()
+        out = tool._run(path=str(target), content="# Plan", overwrite=False)
+        assert "[OK]" in out
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == "# Plan"
+
+    def test_overwrite_existing_file(self):
+        target = self.data / "notes.txt"
+        target.write_text("ancien", encoding="utf-8")
+        tool = self._tool()
+        out = tool._run(path=str(target), content="nouveau", overwrite=True)
+        assert "[OK]" in out
+        assert target.read_text(encoding="utf-8") == "nouveau"
+
+    def test_output_contains_path(self):
+        target = self.data / "rapport.md"
+        tool = self._tool()
+        out = tool._run(path=str(target), content="contenu", overwrite=False)
+        assert str(target) in out
+
+    def test_output_contains_size(self):
+        target = self.data / "rapport.md"
+        tool = self._tool()
+        out = tool._run(path=str(target), content="Hello", overwrite=False)
+        assert "KB" in out
+
+    # --- Erreurs OS ---
+
+    def test_mkdir_failure(self):
+        tool = self._tool()
+        with patch("Mnemo.tools.shell_tools.Path.mkdir", side_effect=OSError("permission denied")):
+            out = tool._run(
+                path=str(self.data / "sub" / "file.txt"),
+                content="x",
+                overwrite=False,
+            )
+        assert "[ERREUR]" in out
+        assert "répertoire" in out
+
+    def test_write_failure(self):
+        target = self.data / "file.txt"
+        tool = self._tool()
+        with patch("Mnemo.tools.shell_tools.Path.write_text", side_effect=OSError("disk full")):
+            out = tool._run(path=str(target), content="x", overwrite=False)
+        assert "[ERREUR]" in out
+        assert "Écriture" in out
+
+    # --- Interface CrewAI ---
+
+    def test_tool_name(self):
+        tool = self._tool()
+        assert tool.name == "write_file"
+
+    def test_tool_has_args_schema(self):
+        from Mnemo.tools.shell_tools import FileWriterTool, FileWriterInput
+        tool = FileWriterTool()
+        assert tool.args_schema is FileWriterInput

@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 generate_training_data.py
@@ -9,9 +10,10 @@ from pathlib import Path
 import requests
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-MODEL = os.getenv("MODEL", "ollama/qwen2.5-8k").replace("ollama/", "")
-OUTPUT      = Path(__file__).parent / "training_data.jsonl"
-ROUTES      = ["conversation", "shell", "calendar", "scheduler"]
+MODEL = os.getenv("MODEL", "ollama/mistral").replace("ollama/", "")
+_DATA  = Path(os.getenv("DATA_PATH", ".")).resolve()
+OUTPUT = _DATA / "training_data.jsonl"
+ROUTES      = ["conversation", "shell", "calendar", "scheduler", "note"]
 BATCH_SIZE  = 20
 
 ROUTE_PROMPTS = {
@@ -57,6 +59,21 @@ ROUTE_PROMPTS = {
         "- Taches recurrentes automatiques\n"
         "- Notifications differees\n"
         "- Routines automatisees\n"
+        "Reponds UNIQUEMENT avec JSON : {{\"messages\": [\"msg1\", \"msg2\", ...]}}\n"
+        "Genere exactement {n} messages varies."
+    ),
+    "note": (
+        "Tu es un utilisateur parlant a Mnemo, un assistant IA personnel.\n"
+        "Genere {n} messages DIFFERENTS de type note (ecriture immediate en memoire longue duree) :\n"
+        "- L utilisateur veut que Mnemo retienne un fait maintenant, pas en fin de session\n"
+        "- Preferences (outil prefere, style de travail, alimentation...)\n"
+        "- Informations personnelles (ville, metier, projet en cours...)\n"
+        "- Decisions prises (choix d un stack, cap professionnel...)\n"
+        "- Connaissances importantes a garder\n"
+        "Varie les formulations : 'note que', 'retiens que', 'memorise', 'n oublie pas',\n"
+        "'souviens-toi', 'garde en memoire', 'enregistre', 'je veux que tu saches'.\n"
+        "IMPORTANT : ces messages n attendent PAS de reponse, ils veulent juste etre notes.\n"
+        "Ne genere PAS de questions (ex: 'tu te souviens de X ?' = conversation, pas note).\n"
         "Reponds UNIQUEMENT avec JSON : {{\"messages\": [\"msg1\", \"msg2\", ...]}}\n"
         "Genere exactement {n} messages varies."
     ),
@@ -133,6 +150,27 @@ SEED_DATA = [
     {"text": "alerte dans 45 min fin de reunion", "route": "scheduler"},
     {"text": "tous les 1er du mois rappel backup", "route": "scheduler"},
     {"text": "notifie dans 2h d aller chercher les enfants", "route": "scheduler"},
+    # ── note ─────────────────────────────────────────────────────────
+    {"text": "note que je prefere vim a vscode", "route": "note"},
+    {"text": "retiens que je suis vegetarien", "route": "note"},
+    {"text": "memorise que mon langage prefere c est Python", "route": "note"},
+    {"text": "n oublie pas que je travaille en freelance", "route": "note"},
+    {"text": "souviens-toi que j habite a Lyon", "route": "note"},
+    {"text": "garde en memoire que je prefere les reponses courtes", "route": "note"},
+    {"text": "enregistre que mon projet principal s appelle Mnemo", "route": "note"},
+    {"text": "je veux que tu saches que j ai change de boulot", "route": "note"},
+    {"text": "note que j ai decide d utiliser FastAPI pour le backend", "route": "note"},
+    {"text": "retiens que je me leve tous les jours a 7h", "route": "note"},
+    {"text": "memorise : allergique aux arachides", "route": "note"},
+    {"text": "important a noter : je n utilise plus Windows", "route": "note"},
+    {"text": "ajoute a ma memoire que je parle anglais et espagnol", "route": "note"},
+    {"text": "garde ca en memoire : objectif terminer le cours d ici mars", "route": "note"},
+    {"text": "note que j ai commence a apprendre le Rust", "route": "note"},
+    {"text": "enregistre ceci : j ai adopte la methode pomodoro", "route": "note"},
+    {"text": "retiens bien que je prefere Docker a Podman pour ce projet", "route": "note"},
+    {"text": "souviens-toi que ma deadline projet c est le 15 mars", "route": "note"},
+    {"text": "je veux que tu retiennes que j utilise arch linux", "route": "note"},
+    {"text": "a noter : j ai decide de passer a neovim", "route": "note"},
 ]
 
 
@@ -290,7 +328,9 @@ def main():
 
     print(f"\nDataset : {len(unique)} exemples uniques")
     for r in ROUTES:
-        print(f"  {r:15s}: {sum(1 for d in unique if d['route']==r):4d}")
+        count = sum(1 for d in unique if d['route'] == r)
+        bar   = "█" * (count // 5)
+        print(f"  {r:15s}: {count:4d}  {bar}")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:

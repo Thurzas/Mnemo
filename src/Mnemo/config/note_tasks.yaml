@@ -1,0 +1,38 @@
+write_note_task:
+  description: >
+    L'utilisateur veut enregistrer quelque chose en memoire longue duree.
+
+    Message original : {user_message}
+
+    Ta tache :
+    1. Identifie ce qui doit etre note (le fait, la preference, le projet...).
+    2. Choisis la section ## et la sous-section ### les plus appropriees.
+       Sections disponibles (non exhaustif, tu peux en creer de nouvelles) :
+       - "Identite Utilisateur" / sous-sections : "Profil de base",
+         "Preferences & style", "Contexte de vie"
+       - "Projets en cours" / sous-sections : nom du projet
+       - "Connaissances persistantes" / sous-sections : domaine
+       - "Decisions & preferences" / sous-sections : domaine concerne
+       - "Identite Agent" / sous-sections : "Role & personnalite definis"
+    3. Choisis la categorie semantique :
+       - "identite"    : qui est l'utilisateur (nom, lieu, metier...)
+       - "decision"    : un choix delibere (outil choisi, cap pris...)
+       - "projet"      : un projet en cours ou futur
+       - "preference"  : ce qu'il aime, deteste, prefere
+       - "connaissance": un fait, une information apprise
+    4. Formate le contenu en Markdown court (1-3 lignes max).
+       Exemple : "- **Editeur prefere** : Vim (plutot que VSCode)"
+    5. Appelle update_markdown_memory avec section, subsection, content, category.
+    6. Appelle sync_memory_db pour re-indexer.
+
+    REGLES :
+    - N'invente rien qui ne soit pas dans le message.
+    - Contenu concis — pas de paragraphes longs.
+    - Un seul appel update_markdown_memory suffit sauf si plusieurs
+      faits distincts doivent aller dans des sections differentes.
+  expected_output: >
+    Une confirmation courte en francais : ce qui a ete note, dans quelle
+    section, et la categorie choisie.
+    Exemple : "Note : ton editeur prefere (Vim) a ete enregistre dans
+    Identite Utilisateur > Preferences & style (categorie : preference)."
+  agent: note_writer
