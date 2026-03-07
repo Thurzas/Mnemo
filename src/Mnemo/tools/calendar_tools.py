@@ -266,6 +266,16 @@ def _make_event_dict(component, ev_date: date, today: date) -> dict:
     location    = _clean_text(str(component.get("LOCATION", ""))) or None
     description = _clean_text(str(component.get("DESCRIPTION", ""))) or None
 
+    # Durée en minutes (pour la vue semaine du dashboard)
+    duration_minutes = 60
+    if ev_datetime:
+        dtend_raw = component.get("DTEND")
+        if dtend_raw:
+            dtend_val = _to_datetime(dtend_raw.dt)
+            if dtend_val:
+                diff = dtend_val - ev_datetime
+                duration_minutes = max(15, int(diff.total_seconds() / 60))
+
     days_until = (ev_date - today).days
     if days_until == 0:
         label = "Aujourd'hui"
@@ -279,15 +289,16 @@ def _make_event_dict(component, ev_date: date, today: date) -> dict:
         label = f"Il y a {abs(days_until)} jours"
 
     return {
-        "title"      : summary,
-        "date"       : ev_date,
-        "datetime"   : ev_datetime,
-        "location"   : location,
-        "description": description,
-        "days_until" : days_until,
-        "is_today"   : days_until == 0,
-        "is_tomorrow": days_until == 1,
-        "label"      : label,
+        "title"            : summary,
+        "date"             : ev_date,
+        "datetime"         : ev_datetime,
+        "duration_minutes" : duration_minutes,
+        "location"         : location,
+        "description"      : description,
+        "days_until"       : days_until,
+        "is_today"         : days_until == 0,
+        "is_tomorrow"      : days_until == 1,
+        "label"            : label,
     }
 
 

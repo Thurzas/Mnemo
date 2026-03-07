@@ -454,6 +454,50 @@
       padding: 8px 16px; cursor: pointer; transition: opacity 0.2s;
     }
     .btn-save:hover { opacity: 0.82; }
+
+    /* ── Calendar view toggle ───────────────────────────────────── */
+    .cal-view-toggle { display: flex; gap: 4px; }
+    .cal-view-btn {
+      padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px;
+      background: none; color: var(--muted); font-family: var(--mono);
+      font-size: 0.6rem; cursor: pointer; transition: all 0.2s;
+    }
+    .cal-view-btn.active { background: var(--a1); border-color: var(--a1); color: var(--bg); font-weight: 700; }
+    .cal-view-btn:not(.active):hover { color: var(--text); border-color: var(--dimmed); }
+    .cal-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-top: 4px; }
+
+    /* ── Week view nav ──────────────────────────────────────────── */
+    .cwv-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+    .cwv-nav-btn {
+      background: none; border: 1px solid var(--border); border-radius: 6px;
+      color: var(--muted); font-family: var(--mono); font-size: 0.63rem;
+      padding: 4px 10px; cursor: pointer; transition: all 0.2s;
+    }
+    .cwv-nav-btn:hover { color: var(--text); border-color: var(--dimmed); }
+    .cwv-nav-label { flex: 1; font-size: 0.65rem; color: var(--text); }
+
+    /* ── Week view grid ─────────────────────────────────────────── */
+    .cwv-outer { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+    .cwv-inner { display: flex; min-width: 540px; }
+    .cwv-gutter { width: 40px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+    .cwv-gutter-top { height: 44px; border-bottom: 1px solid var(--border); }
+    .cwv-hour { height: 44px; font-size: 0.5rem; color: var(--muted); text-align: right; padding: 3px 6px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .cwv-days { display: flex; flex: 1; }
+    .cwv-day  { flex: 1; min-width: 68px; border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+    .cwv-day-hdr { height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-bottom: 1px solid var(--border); background: var(--surface); }
+    .cwv-day-name { font-size: 0.5rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+    .cwv-day-num  { font-family: var(--display); font-size: 0.88rem; font-weight: 800; line-height: 1.1; }
+    .cwv-day-hdr.is-today .cwv-day-num { color: var(--a1); }
+    .cwv-day-hdr.is-today { border-bottom-color: var(--a1); }
+    .cwv-body { position: relative; flex: 1; }
+    .cwv-hline { position: absolute; left: 0; right: 0; height: 1px; background: var(--border); opacity: 0.45; }
+    .cwv-ev {
+      position: absolute; left: 2px; right: 2px;
+      border-radius: 4px; padding: 3px 5px; overflow: hidden;
+      cursor: default; min-height: 20px;
+    }
+    .cwv-ev-title { font-size: 0.58rem; font-weight: 500; color: var(--bg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+    .cwv-ev-time  { font-size: 0.52rem; color: rgba(0,0,0,0.5); margin-top: 1px; }
   </style>
 </head>
 <body>
@@ -525,7 +569,19 @@
           <div class="cal-page-title">Agenda</div>
           <div class="cal-page-sub" id="cal-sub">chargement…</div>
         </div>
-        <button class="cal-add-btn" id="cal-add-btn" onclick="openCalendarForm()" style="display:none;">+ Ajouter</button>
+        <div class="cal-header-right">
+          <div class="cal-view-toggle">
+            <button class="cal-view-btn active" id="cal-btn-list" onclick="setCalView('list')">≡ Liste</button>
+            <button class="cal-view-btn"         id="cal-btn-week" onclick="setCalView('week')">⊞ Semaine</button>
+          </div>
+          <button class="cal-add-btn" id="cal-add-btn" onclick="openCalendarForm()" style="display:none;">+ Ajouter</button>
+        </div>
+      </div>
+      <div class="cwv-nav" id="cwv-nav" style="display:none;">
+        <button class="cwv-nav-btn" onclick="changeCalWeek(-1)">←</button>
+        <span class="cwv-nav-label" id="cwv-nav-label"></span>
+        <button class="cwv-nav-btn" onclick="changeCalWeek(0)">Aujourd'hui</button>
+        <button class="cwv-nav-btn" onclick="changeCalWeek(1)">→</button>
       </div>
       <div class="cal-events" id="cal-events">
         <div class="panel-empty" style="height:auto;margin-top:60px;">Chargement…</div>
@@ -806,59 +862,178 @@ async function loadSessionDetail(id) {
 }
 
 // ── Calendar ─────────────────────────────────────────────────────
-const MONTHS = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
-let _calWritable = false;
-let _calEvents   = [];
+const MONTHS   = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
+const DAY_NAMES = ['dim','lun','mar','mer','jeu','ven','sam'];
+let _calWritable  = false;
+let _calEvents    = [];
+let _calView      = 'list';
+let _calWeekOff   = 0;   // offset en semaines depuis la semaine courante
 
 async function loadCalendar() {
-  const el     = document.getElementById('cal-events');
   const sub    = document.getElementById('cal-sub');
   const addBtn = document.getElementById('cal-add-btn');
   try {
-    const r    = await fetch('/api/calendar');
-    const data = await r.json();
-    _calEvents   = data.events || [];
-    _calWritable = data.writable || false;
+    const r  = await fetch('/api/calendar');
+    const d  = await r.json();
+    _calEvents   = d.events || [];
+    _calWritable = d.writable || false;
     if (addBtn) addBtn.style.display = _calWritable ? '' : 'none';
-    sub.textContent = `${_calEvents.length} événement${_calEvents.length !== 1 ? 's' : ''} dans les 60 prochains jours`;
-    if (!_calEvents.length) {
-      el.innerHTML = '<div class="panel-empty" style="height:auto;margin-top:60px;">Aucun événement à venir</div>';
-      return;
+    sub.textContent = `${_calEvents.length} événement${_calEvents.length !== 1 ? 's' : ''} · 60 prochains jours`;
+    renderCal();
+  } catch {
+    document.getElementById('cal-events').innerHTML =
+      '<div class="panel-empty" style="height:auto;margin-top:60px;">Calendrier non disponible</div>';
+  }
+}
+
+function setCalView(v) {
+  _calView = v;
+  document.getElementById('cal-btn-list').classList.toggle('active', v === 'list');
+  document.getElementById('cal-btn-week').classList.toggle('active', v === 'week');
+  document.getElementById('cwv-nav').style.display = v === 'week' ? '' : 'none';
+  renderCal();
+}
+
+function changeCalWeek(delta) {
+  _calWeekOff = delta === 0 ? 0 : _calWeekOff + delta;
+  renderCal();
+}
+
+function renderCal() {
+  if (_calView === 'list') renderCalList();
+  else                     renderCalWeek();
+}
+
+function renderCalList() {
+  const el = document.getElementById('cal-events');
+  if (!_calEvents.length) {
+    el.innerHTML = '<div class="panel-empty" style="height:auto;margin-top:60px;">Aucun événement à venir</div>';
+    return;
+  }
+  el.innerHTML = _calEvents.map((e, i) => {
+    const [, mo, d] = (e.date || '').split('-').map(Number);
+    const day   = d  || '?';
+    const month = mo ? MONTHS[mo - 1] : '?';
+    const cls   = e.is_today ? 'today' : e.is_tomorrow ? 'tomorrow' : (e.days_until <= 7 ? 'soon' : '');
+    const label = e.label || '';
+    let timeStr = '';
+    if (e.datetime) {
+      const dt = new Date(e.datetime);
+      timeStr = dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     }
-    el.innerHTML = _calEvents.map((e, i) => {
-      const [, mo, d] = (e.date || '').split('-').map(Number);
-      const day   = d  || '?';
-      const month = mo ? MONTHS[mo - 1] : '?';
-      const cls   = e.is_today ? 'today' : e.is_tomorrow ? 'tomorrow' : (e.days_until <= 7 ? 'soon' : '');
-      const label = e.label || '';
-      let timeStr = '';
-      if (e.datetime) {
-        const dt = new Date(e.datetime);
-        timeStr = dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      }
-      const actions = _calWritable ? `
-        <div class="cal-event-actions">
-          <button class="cal-action-btn"        onclick="openCalendarForm(${i})">✎</button>
-          <button class="cal-action-btn delete" onclick="deleteCalendarEvent(${i})">✕</button>
-        </div>` : '';
+    const actions = _calWritable ? `
+      <div class="cal-event-actions">
+        <button class="cal-action-btn"        onclick="openCalendarForm(${i})">✎</button>
+        <button class="cal-action-btn delete" onclick="deleteCalendarEvent(${i})">✕</button>
+      </div>` : '';
+    return `
+      <div class="cal-event ${cls}">
+        <div class="cal-date-block"><div class="cal-day">${day}</div><div class="cal-month">${month}</div></div>
+        <div class="cal-info">
+          <div class="cal-event-title">${esc(e.title || 'Événement')}</div>
+          ${timeStr    ? `<div class="cal-event-time">${esc(timeStr)}</div>` : ''}
+          ${e.location ? `<div class="cal-location">📍 ${esc(e.location)}</div>` : ''}
+          ${label      ? `<div class="cal-event-label">${esc(label)}</div>` : ''}
+        </div>
+        ${actions}
+      </div>`;
+  }).join('');
+}
+
+function renderCalWeek() {
+  const el = document.getElementById('cal-events');
+
+  // Semaine courante (lundi = jour 0)
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const todayStr = today.toISOString().slice(0,10);
+  const dow = today.getDay();                        // 0=dim … 6=sam
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + _calWeekOff * 7);
+
+  const days = Array.from({length: 7}, (_, i) => {
+    const d = new Date(monday); d.setDate(monday.getDate() + i); return d;
+  });
+
+  // Mise à jour label nav
+  const fmt = d => `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  document.getElementById('cwv-nav-label').textContent =
+    `${fmt(days[0])} — ${fmt(days[6])} ${days[0].getFullYear()}`;
+
+  const START_H   = 7;
+  const END_H     = 22;
+  const PX_H      = 44;         // pixels par heure
+  const PX_MIN    = PX_H / 60;
+  const GRID_H    = (END_H - START_H) * PX_H;
+
+  // Colonne des heures
+  const hourLabels = Array.from({length: END_H - START_H}, (_, i) =>
+    `<div class="cwv-hour">${START_H + i}h</div>`
+  ).join('');
+
+  // Lignes horizontales (injectées dans chaque colonne jour)
+  const hlines = Array.from({length: END_H - START_H + 1}, (_, i) =>
+    `<div class="cwv-hline" style="top:${i * PX_H}px;"></div>`
+  ).join('');
+
+  // Couleurs par urgence (même logique que la liste)
+  const evColors = { today: 'var(--a3)', tomorrow: 'var(--a2)', soon: 'var(--a1)', '': 'var(--dimmed)' };
+
+  const dayCols = days.map(d => {
+    const dateStr  = d.toISOString().slice(0,10);
+    const isToday  = dateStr === todayStr;
+    const dayName  = DAY_NAMES[d.getDay()];
+    const dayNum   = d.getDate();
+
+    const dayEvts = _calEvents.filter(e => e.date === dateStr && e.datetime);
+
+    const evBlocks = dayEvts.map((e, ei) => {
+      const dt = new Date(e.datetime);
+      const h  = dt.getHours(), m = dt.getMinutes();
+      if (h < START_H || h >= END_H) return '';
+      const top    = (h - START_H) * PX_H + m * PX_MIN;
+      const height = Math.max(20, (e.duration_minutes || 60) * PX_MIN);
+      const cls    = e.is_today ? 'today' : e.is_tomorrow ? 'tomorrow' : (e.days_until <= 7 ? 'soon' : '');
+      const color  = evColors[cls];
+      const tStr   = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      const idx    = _calEvents.indexOf(e);
+      const editBtns = _calWritable
+        ? `<div style="position:absolute;top:2px;right:2px;display:none;" class="cwv-ev-actions">
+             <button onclick="event.stopPropagation();openCalendarForm(${idx})" style="background:rgba(0,0,0,0.3);border:none;border-radius:3px;color:var(--bg);font-size:0.5rem;padding:1px 4px;cursor:pointer;">✎</button>
+           </div>` : '';
       return `
-        <div class="cal-event ${cls}">
-          <div class="cal-date-block">
-            <div class="cal-day">${day}</div>
-            <div class="cal-month">${month}</div>
-          </div>
-          <div class="cal-info">
-            <div class="cal-event-title">${esc(e.title || 'Événement')}</div>
-            ${timeStr    ? `<div class="cal-event-time">${esc(timeStr)}</div>` : ''}
-            ${e.location ? `<div class="cal-location">📍 ${esc(e.location)}</div>` : ''}
-            ${label      ? `<div class="cal-event-label">${esc(label)}</div>` : ''}
-          </div>
-          ${actions}
+        <div class="cwv-ev" style="top:${top}px;height:${height}px;background:${color};"
+             title="${esc(e.title)}"
+             onmouseenter="this.querySelector('.cwv-ev-actions')&&(this.querySelector('.cwv-ev-actions').style.display='')"
+             onmouseleave="this.querySelector('.cwv-ev-actions')&&(this.querySelector('.cwv-ev-actions').style.display='none')">
+          <div class="cwv-ev-title">${esc(e.title || '')}</div>
+          ${height > 30 ? `<div class="cwv-ev-time">${tStr}</div>` : ''}
+          ${editBtns}
         </div>`;
     }).join('');
-  } catch {
-    el.innerHTML = '<div class="panel-empty" style="height:auto;margin-top:60px;">Calendrier non disponible</div>';
-  }
+
+    return `
+      <div class="cwv-day">
+        <div class="cwv-day-hdr${isToday ? ' is-today' : ''}">
+          <div class="cwv-day-name">${dayName}</div>
+          <div class="cwv-day-num">${dayNum}</div>
+        </div>
+        <div class="cwv-body" style="height:${GRID_H}px;">
+          ${hlines}${evBlocks}
+        </div>
+      </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="cwv-outer">
+      <div class="cwv-inner">
+        <div class="cwv-gutter">
+          <div class="cwv-gutter-top"></div>
+          ${hourLabels}
+        </div>
+        <div class="cwv-days">${dayCols}</div>
+      </div>
+    </div>`;
 }
 
 function openCalendarForm(idx) {
