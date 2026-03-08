@@ -1,5 +1,6 @@
 calendar_write_task:
   description: >
+    Aujourd'hui (référence ISO absolue pour le calcul des dates) : {today_iso}
     Contexte temporel : {temporal_context}
 
     Événements existants dans l'agenda (avec identifiants) :
@@ -27,8 +28,10 @@ calendar_write_task:
     action="create" :
       - Remplis tous les champs de event.
       - target_uid = null.
-      - date au format ISO YYYY-MM-DD. Utilise le contexte temporel pour résoudre
-        "demain", "lundi prochain", "dans 3 jours", etc.
+      - date au format ISO YYYY-MM-DD. Prends {today_iso} comme référence absolue pour
+        résoudre "demain", "lundi prochain", "dans 3 jours", "dimanche", etc.
+        Si le jour nommé correspond à aujourd'hui, utilise {today_iso}.
+        Si le jour nommé est dans le passé cette semaine, prends l'occurrence suivante.
       - time au format HH:MM (24h). null si pas d'heure précisée (événement journée entière).
       - duration_minutes : durée en minutes. 60 par défaut si non précisée.
 

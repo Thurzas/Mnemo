@@ -349,9 +349,11 @@ class CalendarWriteCrew:
         events = get_events_with_uid(days=60)
         cal_ctx = format_events_with_uid(events) if events else "Aucun événement dans les 60 prochains jours."
 
+        from datetime import date as _date
         result = self.crew().kickoff(inputs={
             **inputs,
             "calendar_context": cal_ctx,
+            "today_iso": _date.today().isoformat(),
         })
 
         raw = result.raw.strip()

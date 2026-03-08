@@ -705,6 +705,66 @@ def _detect_scheduler_intent(msg: str) -> bool:
     return any(kw in m for kw in _SCHEDULER_KEYWORDS)
 
 
+_CALENDAR_WRITE_KEYWORDS = [
+    # Création — impératif direct
+    "ajoute un événement", "ajoute un evenement", "ajoute un rdv", "ajoute un rendez-vous",
+    "crée un événement", "cree un evenement", "crée un rdv", "crée un rendez-vous",
+    "nouveau rendez-vous", "nouvel événement", "nouvel evenement",
+    "mets un événement", "mets un evenement", "met un événement", "met un evenement",
+    "planifie un événement", "planifie un evenement", "planifie un rendez-vous",
+    # Création — vers agenda/calendrier
+    "ajoute à mon agenda", "ajoute dans mon agenda", "ajoute à l'agenda",
+    "inscris dans mon agenda", "inscris à mon agenda",
+    "bloque dans mon calendrier", "bloque le créneau", "bloque ce créneau",
+    # Suppression — impératif direct
+    "supprime l'événement", "supprime l'evenement", "supprime le rendez-vous", "supprime le rdv",
+    "annule l'événement", "annule l'evenement", "annule le rendez-vous", "annule le rdv",
+    "efface l'événement", "efface l'evenement", "efface le rendez-vous",
+    "enlève l'événement", "enleve l'evenement", "enlève le rendez-vous",
+    # Suppression — infinitif + lieu ("tu peux me le supprimer du calendrier")
+    "supprimer du calendrier", "supprimer de mon calendrier", "supprimer de l'agenda",
+    "supprimer de mon agenda", "enlever du calendrier", "enlever de l'agenda",
+    "retirer du calendrier", "retirer de l'agenda", "effacer du calendrier",
+    # Modification — impératif / infinitif
+    "décale mon rendez-vous", "decale mon rendez-vous", "décale l'événement", "decale l'evenement",
+    "modifie mon rendez-vous", "modifie l'événement", "modifie l'evenement",
+    "déplace mon rendez-vous", "deplace mon rendez-vous", "déplace l'événement",
+    "repousse le rendez-vous", "repousse l'événement", "avance le rendez-vous",
+    "change l'heure de mon rendez-vous", "change la date de mon rendez-vous",
+]
+
+# Détection par co-occurrence : verbe d'action + mot contexte calendrier
+# Couvre les formes naturelles : "tu peux supprimer cet événement ?"
+_CAL_ACTION_VERBS = [
+    # Infinitifs
+    "supprimer", "effacer", "enlever", "retirer", "annuler",
+    "ajouter", "créer", "creer", "insérer", "inserer", "planifier",
+    "modifier", "changer", "déplacer", "deplacer", "décaler", "decaler",
+    "repousser", "avancer",
+    # Formes conjuguées (impératif / présent)
+    "supprime", "efface", "enlève", "enleve", "retire", "annule",
+    "ajoute", "crée", "cree", "insère", "insere", "planifie",
+    "modifie", "déplace", "deplace", "décale", "decale",
+    "repousse", "avance", "mets",
+]
+_CAL_CONTEXT_WORDS = [
+    "calendrier", "agenda",
+    "événement", "evenement", "évènement", "evènement",
+    "rdv", "rendez-vous", "rendez vous",
+    "créneau", "creneau",
+]
+
+def _detect_calendar_write_intent(msg: str) -> bool:
+    m = msg.lower()
+    # Correspondance directe (phrases fixes)
+    if any(kw in m for kw in _CALENDAR_WRITE_KEYWORDS):
+        return True
+    # Co-occurrence : verbe d'action + mot calendrier (formes naturelles)
+    has_verb = any(v in m for v in _CAL_ACTION_VERBS)
+    has_ctx  = any(c in m for c in _CAL_CONTEXT_WORDS)
+    return has_verb and has_ctx
+
+
 _NOTE_KEYWORDS = [
     "note que", "notes que", "retiens que", "retiens bien que",
     "mémorise que", "mémorise ça", "mémorise ceci",
@@ -778,9 +838,10 @@ def handle_message(user_message: str, session_id: str) -> str:
     kw_shell      = _detect_shell_intent(user_message)
     kw_scheduler  = _detect_scheduler_intent(user_message)
     kw_note       = _detect_note_intent(user_message)
+    kw_calendar   = _detect_calendar_write_intent(user_message)
     ml_route, ml_conf = _ml_detect_intent(user_message)
 
-    _dbg(f"[Check] KW: shell={kw_shell}, sched={kw_scheduler}, note={kw_note} | ML: {ml_route} ({ml_conf:.2f})")
+    _dbg(f"[Check] KW: shell={kw_shell}, sched={kw_scheduler}, note={kw_note}, cal={kw_calendar} | ML: {ml_route} ({ml_conf:.2f})")
 
     # Route note déterministe — les formules "note que / retiens que" sont
     # non ambiguës : on bypass directement le LLM
@@ -794,12 +855,23 @@ def handle_message(user_message: str, session_id: str) -> str:
         }
         return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
+    if kw_calendar:
+        _dbg("SKIP LLM activé -> Route retenue : calendar (keyword)")
+        eval_json = {
+            "route": "calendar",
+            "needs_memory": False,
+            "needs_web": False,
+            "needs_clarification": False,
+        }
+        return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
+
     # --- 2. DÉCISION DU SKIP (Bypass LLM pour la performance) ---
     # On bypass si le ML est ultra-sûr OU si Keywords + ML concordent
     should_skip_llm = (
         (ml_conf >= 0.95) or
         (kw_shell and ml_route == "shell" and ml_conf >= 0.80) or
-        (kw_scheduler and ml_route == "scheduler" and ml_conf >= 0.80)
+        (kw_scheduler and ml_route == "scheduler" and ml_conf >= 0.80) or
+        (kw_calendar and ml_route == "calendar" and ml_conf >= 0.80)
     )
 
     if should_skip_llm:

@@ -662,6 +662,13 @@ async function checkHealth() {
 checkHealth();
 setInterval(checkHealth, 30_000);
 
+// Auto-refresh du calendrier toutes les 30s si l'onglet est actif
+// (pour voir les événements ajoutés par l'IA via CLI sans recharger manuellement)
+setInterval(() => {
+  const calPanel = document.getElementById('cal-panel');
+  if (calPanel && calPanel.style.display !== 'none') loadCalendar();
+}, 30_000);
+
 // ── Utils ────────────────────────────────────────────────────────
 function esc(str) {
   return String(str)
@@ -946,7 +953,8 @@ function renderCalWeek() {
   // Semaine courante (lundi = jour 0)
   const today = new Date();
   today.setHours(0,0,0,0);
-  const todayStr = today.toISOString().slice(0,10);
+  const _fmtDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const todayStr = _fmtDate(today);
   const dow = today.getDay();                        // 0=dim … 6=sam
   const monday = new Date(today);
   monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + _calWeekOff * 7);
@@ -980,7 +988,7 @@ function renderCalWeek() {
   const evColors = { today: 'var(--a3)', tomorrow: 'var(--a2)', soon: 'var(--a1)', '': 'var(--dimmed)' };
 
   const dayCols = days.map(d => {
-    const dateStr  = d.toISOString().slice(0,10);
+    const dateStr  = _fmtDate(d);
     const isToday  = dateStr === todayStr;
     const dayName  = DAY_NAMES[d.getDay()];
     const dayNum   = d.getDate();
@@ -998,13 +1006,14 @@ function renderCalWeek() {
       const tStr   = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
       const idx    = _calEvents.indexOf(e);
       const editBtns = _calWritable
-        ? `<div style="position:absolute;top:2px;right:2px;display:none;" class="cwv-ev-actions">
+        ? `<div style="position:absolute;top:2px;right:2px;display:none;gap:2px;" class="cwv-ev-actions">
              <button onclick="event.stopPropagation();openCalendarForm(${idx})" style="background:rgba(0,0,0,0.3);border:none;border-radius:3px;color:var(--bg);font-size:0.5rem;padding:1px 4px;cursor:pointer;">✎</button>
+             <button onclick="event.stopPropagation();deleteCalendarEvent(${idx})" style="background:rgba(180,0,0,0.5);border:none;border-radius:3px;color:#fff;font-size:0.5rem;padding:1px 4px;cursor:pointer;">✕</button>
            </div>` : '';
       return `
         <div class="cwv-ev" style="top:${top}px;height:${height}px;background:${color};"
              title="${esc(e.title)}"
-             onmouseenter="this.querySelector('.cwv-ev-actions')&&(this.querySelector('.cwv-ev-actions').style.display='')"
+             onmouseenter="this.querySelector('.cwv-ev-actions')&&(this.querySelector('.cwv-ev-actions').style.display='flex')"
              onmouseleave="this.querySelector('.cwv-ev-actions')&&(this.querySelector('.cwv-ev-actions').style.display='none')">
           <div class="cwv-ev-title">${esc(e.title || '')}</div>
           ${height > 30 ? `<div class="cwv-ev-time">${tStr}</div>` : ''}

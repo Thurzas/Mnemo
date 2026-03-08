@@ -77,12 +77,25 @@ def _fetch_ics_raw() -> Optional[bytes]:
 
 
 def _get_calendar() -> Optional["Calendar"]:
-    """Retourne l'objet Calendar en cache ou recharge si TTL expiré."""
+    """Retourne l'objet Calendar en cache ou recharge si TTL expiré ou fichier modifié."""
     global _cache
     now = datetime.now()
 
+    # Vérifie si le fichier local a été modifié depuis le dernier chargement
+    # (pour détecter les écritures faites par un autre processus, ex. CLI → FastAPI)
+    file_modified = False
+    src = CALENDAR_SOURCE.strip() if CALENDAR_SOURCE else ""
+    if src and not src.startswith("http") and _cache["fetched_at"] is not None:
+        try:
+            mtime = datetime.fromtimestamp(Path(src).stat().st_mtime)
+            if mtime > _cache["fetched_at"]:
+                file_modified = True
+        except OSError:
+            pass
+
     if (
-        _cache["data"] is not None
+        not file_modified
+        and _cache["data"] is not None
         and _cache["fetched_at"] is not None
         and (now - _cache["fetched_at"]).seconds < CACHE_TTL_SECONDS
     ):
