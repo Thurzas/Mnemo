@@ -423,8 +423,7 @@ def format_events_for_prompt(events: list[dict]) -> str:
         label    = ev["label"]
         lines.append(f"- [{day_name} - {label}]{time_str} {ev['title']}{loc_str}")
 
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 def format_startup_banner(events: list[dict]) -> str:
     """
