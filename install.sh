@@ -73,9 +73,9 @@ fi
 step "Initialisation du dossier data/"
 
 info "Répertoire cible : $DATA"
-mkdir -p "$DATA"
-mkdir -p "$DATA/docs"
-mkdir -p "$DATA/sessions"
+[ -d "$DATA" ]         || mkdir "$DATA"
+[ -d "$DATA/docs" ]    || mkdir "$DATA/docs"
+[ -d "$DATA/sessions" ] || mkdir "$DATA/sessions"
 ok "data/docs/ et data/sessions/ créés."
 
 if [ ! -f "$DATA/memory.md" ]; then
