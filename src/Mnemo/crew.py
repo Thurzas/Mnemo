@@ -333,6 +333,7 @@ class CalendarWriteCrew:
             calendar_is_writable,
             get_events_with_uid,
             format_events_with_uid,
+            get_week_dates_for_prompt,
             add_event,
             update_event,
             delete_event,
@@ -354,6 +355,7 @@ class CalendarWriteCrew:
             **inputs,
             "calendar_context": cal_ctx,
             "today_iso": _date.today().isoformat(),
+            "week_dates": get_week_dates_for_prompt(),
         })
 
         raw = result.raw.strip()
@@ -370,9 +372,18 @@ class CalendarWriteCrew:
         event_fields = plan.get("event") or {}
         target_uid   = plan.get("target_uid") or ""
         confirmation = plan.get("confirmation_message", "")
+        web_mode     = inputs.get("_web_mode", False)
 
-        # Confirmation obligatoire pour les opérations destructives
-        if action in ("update", "delete"):
+        # Résoudre l'index numérique #N → UID complet
+        if target_uid and _re.match(r'^#\d+$', target_uid):
+            idx = int(target_uid[1:])
+            if 0 <= idx < len(events):
+                target_uid = events[idx]["uid"]
+            else:
+                return f"Événement introuvable : index {target_uid} hors limites ({len(events)} événements)."
+
+        # Confirmation obligatoire pour les opérations destructives (CLI uniquement)
+        if action in ("update", "delete") and not web_mode:
             target = next((e for e in events if e.get("uid") == target_uid), None)
             print()
             print(f"  📅 Modification agenda — {action.upper()}")

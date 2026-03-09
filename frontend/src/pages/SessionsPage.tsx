@@ -80,21 +80,13 @@ export function SessionsPage({ active }: Props) {
         {selected && !loadingDetail && messages.length === 0 && (
           <div className={styles.placeholder}>Session vide</div>
         )}
-        {/* Each entry has user_message + response */}
-        {messages.flatMap((m, i) => {
-          const bubbles = []
-          if (m.user_message) {
-            bubbles.push(
-              <MessageBubble key={`u-${i}`} role="user" content={m.user_message} />
-            )
-          }
-          if (m.response) {
-            bubbles.push(
-              <MessageBubble key={`r-${i}`} role="mnemo" content={m.response} />
-            )
-          }
-          return bubbles
-        })}
+        {messages.map((m, i) => (
+          <MessageBubble
+            key={i}
+            role={m.role === 'user' ? 'user' : 'mnemo'}
+            content={m.content}
+          />
+        ))}
       </div>
     </div>
   )

@@ -628,6 +628,7 @@ def _route_message(
         "temporal_context":  temporal_ctx,
         "web_context":       web_context,
         "calendar_context":  calendar_context,
+        "_web_mode":         eval_json.get("_web_mode", False),
     }
 
     if route == "shell":
@@ -750,6 +751,7 @@ _CAL_ACTION_VERBS = [
 _CAL_CONTEXT_WORDS = [
     "calendrier", "agenda",
     "événement", "evenement", "évènement", "evènement",
+    "event", "l'event", "cet event",
     "rdv", "rendez-vous", "rendez vous",
     "créneau", "creneau",
 ]

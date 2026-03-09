@@ -30,6 +30,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 DATA_PATH    = Path(os.getenv("DATA_PATH", "/data")).resolve()
@@ -38,6 +39,10 @@ SESSIONS_DIR = DATA_PATH / "sessions"
 STATIC_DIR   = Path(__file__).parent / "static"
 
 app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
+
+# Serve React build — mounted last so /api/* routes take priority
+if STATIC_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
 
 
 # ── Modèles ────────────────────────────────────────────────────────
@@ -74,6 +79,7 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
         _parse_eval_json,
         _route_message,
         _detect_shell_intent,
+        _detect_calendar_write_intent,
         _ml_detect_intent,
     )
     from Mnemo.crew import EvaluationCrew
@@ -91,6 +97,22 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
     if ml_route == "shell" and ml_conf >= 0.80:
         return _SHELL_BLOCKED
 
+    # Pre-check calendar : keywords → force route=calendar sans passer par le LLM
+    kw_calendar = _detect_calendar_write_intent(user_message)
+    ml_calendar  = ml_route == "calendar" and ml_conf >= 0.92
+
+    if kw_calendar or ml_calendar:
+        eval_json = {
+            "route": "calendar",
+            "needs_memory": False,
+            "needs_web": False,
+            "needs_clarification": False,
+            "_web_mode": True,
+        }
+        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
+        update_session_memory(session_id, user_message, response)
+        return response
+
     # EvaluationCrew (LLM) — analyse sémantique complète
     eval_result = EvaluationCrew().crew().kickoff(inputs={
         "user_message": user_message,
@@ -105,6 +127,7 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
     # Désactiver les flux interactifs non disponibles en mode web
     eval_json["needs_web"] = False
     eval_json["needs_clarification"] = False
+    eval_json["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
 
     response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
     update_session_memory(session_id, user_message, response)
@@ -112,14 +135,6 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
 
 
 # ── Routes ─────────────────────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse)
-async def dashboard():
-    html_file = STATIC_DIR / "index.html"
-    if html_file.exists():
-        return HTMLResponse(html_file.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Dashboard unavailable</h1>", status_code=404)
-
 
 @app.get("/api/health")
 async def health():
@@ -187,7 +202,10 @@ async def sessions():
                 "done": (SESSIONS_DIR / f"{f.stem}.done").exists(),
                 "modified": f.stat().st_mtime,
                 "preview": (
-                    messages[0].get("user_message", "")[:100]
+                    next(
+                        (m.get("content", "")[:100] for m in messages if m.get("role") == "user"),
+                        ""
+                    )
                     if messages else ""
                 ),
             })
@@ -312,6 +330,20 @@ def calendar_delete(event_uid: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──
+# FastAPI matche les routes dans l'ordre de définition.
+# Ce catch-all doit être après toutes les routes /api/*.
+
+@app.get("/", response_class=HTMLResponse)
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa(full_path: str = ""):
+    """Serve React SPA — catch-all for client-side routing."""
+    html_file = STATIC_DIR / "index.html"
+    if html_file.exists():
+        return HTMLResponse(html_file.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Dashboard unavailable — run: cd frontend && npm run build</h1>", status_code=503)
 
 
 # ── Point d'entrée local ───────────────────────────────────────────

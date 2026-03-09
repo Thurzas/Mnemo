@@ -28,10 +28,17 @@ function urgencyClass(d: Date): string {
 }
 
 function urgencyLabel(d: Date): string {
-  const diff = (d.getTime() - new Date().getTime()) / 86400000
+  const now = new Date()
+  const diff = (d.getTime() - now.getTime()) / 86400000
+  if (diff < 0) return ''
   if (diff < 1) return "Aujourd'hui"
   if (diff < 2) return 'Demain'
-  if (diff < 7) return 'Cette semaine'
+  // Dimanche de la semaine courante à 23:59:59 (semaine lun–dim)
+  const daysUntilSunday = (7 - ((now.getDay() + 6) % 7)) % 7 || 7
+  const sunday = new Date(now)
+  sunday.setDate(now.getDate() + daysUntilSunday)
+  sunday.setHours(23, 59, 59, 999)
+  if (d <= sunday) return 'Cette semaine'
   return ''
 }
 

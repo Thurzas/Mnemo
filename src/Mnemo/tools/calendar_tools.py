@@ -477,17 +477,48 @@ def get_yesterday_date_str() -> str:
     return f"{human} ({iso})"
 
 
+def get_week_dates_for_prompt() -> str:
+    """
+    Retourne un mapping explicite nom-de-jour -> date ISO pour les 14 prochains jours.
+    Injecte comme variable dedicee dans CalendarWriteCrew pour une resolution de date fiable.
+    """
+    _jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
+    today  = date.today()
+    monday = today - timedelta(days=today.weekday())
+    parts  = []
+    for i in range(14):
+        d     = monday + timedelta(days=i)
+        label = _jours[i % 7] + (" prochain" if i >= 7 else "")
+        suffix = " <- aujourd'hui" if d == today else ""
+        parts.append(f"{label} = {d.isoformat()}{suffix}")
+    return ", ".join(parts)
+
+
 def get_temporal_context() -> str:
     """
     Construit le bloc temporel complet à injecter dans les prompts.
 
     Structure claire :
-      - Date et heure actuelles
+      - Date et heure actuelles + mapping semaine (lundi 9 → dimanche 15)
       - Hier (pour résoudre les requêtes "qu'est-ce que j'ai fait hier")
-      - Événements calendrier : AUJOURD'HUI ET FUTUR UNIQUEMENT
+      - Deadlines urgentes (<=3j)
+      - Agenda de la semaine courante (7 jours) — le LLM utilise get_calendar_events
+        pour toute requête au-delà de cette fenêtre
     """
+    _jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
+    _mois  = ["janvier","février","mars","avril","mai","juin",
+              "juillet","août","septembre","octobre","novembre","décembre"]
+
+    today   = date.today()
+    monday  = today - timedelta(days=today.weekday())
+    week_parts = []
+    for i in range(7):
+        d = monday + timedelta(days=i)
+        week_parts.append(f"{_jours[i]} {d.day} {_mois[d.month - 1]}")
+
     lines = [
         f"Date et heure actuelles : {get_current_datetime_str()}",
+        f"Semaine en cours : {' · '.join(week_parts)}",
         f"Hier : {get_yesterday_date_str()}",
     ]
 
@@ -497,11 +528,12 @@ def get_temporal_context() -> str:
         lines.append("")
         lines.append(deadline_block)
 
-    # Agenda complet dans la fenetre lookahead
-    events = get_upcoming_events(days=LOOKAHEAD_DAYS)
+    # Agenda 7 jours (semaine courante) — fenêtre réduite pour limiter le bruit.
+    # Pour les requêtes au-delà, le LLM dispose de get_calendar_events(reference_date=...).
+    events = get_upcoming_events(days=7)
     if events:
         lines.append("")
-        lines.append(f"Agenda complet - aujourd'hui et {LOOKAHEAD_DAYS} prochains jours :")
+        lines.append("Agenda - 7 prochains jours :")
         lines.append(format_events_for_prompt(events))
     elif not deadline_block:
         lines.append("Aucun evenement calendrier disponible.")
@@ -643,17 +675,18 @@ def get_events_with_uid(days: int = 30) -> list[dict]:
 
 def format_events_with_uid(events: list[dict]) -> str:
     """
-    Formate les événements avec leur UID tronqué pour CalendarWriteCrew.
-    Format : - [uid12car] [label] HH:MM Titre — Lieu
+    Formate les événements avec un index numérique (#N) pour CalendarWriteCrew.
+    Format : - [#N] [label] HH:MM Titre — Lieu
+    L'index est résolu en UID complet par CalendarWriteCrew.run() avant toute opération.
+    Les UIDs bruts (parfois 60+ caractères pour Google Calendar) ne sont jamais exposés au LLM.
     """
     if not events:
         return "Aucun événement à venir dans les 30 prochains jours."
     lines = []
-    for ev in events:
-        time_str  = f" à {ev['datetime'].strftime('%H:%M')}" if ev.get("datetime") else ""
-        loc_str   = f" — {ev['location']}" if ev.get("location") else ""
-        uid_short = ev.get("uid", "")[:12]
-        lines.append(f"- [{uid_short}] [{ev['label']}]{time_str} {ev['title']}{loc_str}")
+    for i, ev in enumerate(events):
+        time_str = f" à {ev['datetime'].strftime('%H:%M')}" if ev.get("datetime") else ""
+        loc_str  = f" — {ev['location']}" if ev.get("location") else ""
+        lines.append(f"- [#{i}] [{ev['label']}]{time_str} {ev['title']}{loc_str}")
     return "\n".join(lines)
 
 
@@ -708,16 +741,40 @@ def add_event(
     return uid
 
 
+def _resolve_uid(components: list, uid: str) -> Optional[str]:
+    """
+    Résout un UID partiel vers l'UID complet d'un VEVENT.
+    Essaie d'abord une correspondance exacte, puis par préfixe (min 8 chars).
+    Retourne l'UID complet trouvé, ou None.
+    """
+    vevents = [c for c in components if getattr(c, "name", "") == "VEVENT"]
+    # Correspondance exacte
+    for c in vevents:
+        if str(c.get("UID", "")) == uid:
+            return uid
+    # Correspondance par préfixe (LLM peut tronquer les longs UIDs)
+    if len(uid) >= 8:
+        for c in vevents:
+            full = str(c.get("UID", ""))
+            if full.startswith(uid):
+                return full
+    return None
+
+
 def delete_event(uid: str) -> bool:
     """
     Supprime un VEVENT par UID dans le fichier ICS local.
+    Accepte un UID partiel (préfixe) si le LLM l'a tronqué.
     Retourne True si trouvé et supprimé, False sinon.
     """
     cal = _load_writable_calendar()
+    resolved = _resolve_uid(cal.subcomponents, uid)
+    if resolved is None:
+        return False
     before = len(cal.subcomponents)
     cal.subcomponents = [
         c for c in cal.subcomponents
-        if not (getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == uid)
+        if not (getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == resolved)
     ]
     if len(cal.subcomponents) == before:
         return False
@@ -733,9 +790,13 @@ def update_event(uid: str, **fields) -> bool:
     """
     cal = _load_writable_calendar()
 
+    resolved = _resolve_uid(cal.subcomponents, uid)
+    if resolved is None:
+        return False
+
     target = None
     for c in cal.subcomponents:
-        if getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == uid:
+        if getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == resolved:
             target = c
             break
 

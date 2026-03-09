@@ -40,9 +40,8 @@ export interface SessionsResponse {
 }
 
 export interface SessionMessage {
-  user_message: string
-  response: string
-  timestamp?: string
+  role: 'user' | 'agent'
+  content: string
 }
 
 export interface SessionDetail {

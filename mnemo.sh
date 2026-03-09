@@ -4,11 +4,14 @@
 #
 # Usage :
 #   ./mnemo.sh              # démarre une session interactive
-#   ./mnemo.sh scheduler    # démarre le scheduler en arrière-plan
-#   ./mnemo.sh stop         # arrête le scheduler
+#   ./mnemo.sh services     # démarre scheduler + API en arrière-plan
+#   ./mnemo.sh scheduler    # démarre le scheduler seul
+#   ./mnemo.sh api          # démarre l'API seule
+#   ./mnemo.sh stop         # arrête scheduler + API
 #   ./mnemo.sh briefing     # génère le briefing maintenant
 #   ./mnemo.sh weekly       # génère le weekly maintenant
 #   ./mnemo.sh logs         # logs du scheduler en temps réel
+#   ./mnemo.sh logs-api     # logs de l'API en temps réel
 #   ./mnemo.sh ingest <f>   # ingère un fichier dans la mémoire
 #   ./mnemo.sh status       # état des containers
 #
@@ -36,6 +39,14 @@ case "$CMD" in
     docker compose run --rm mnemo 
     ;;
 
+  services)
+    info "Démarrage du scheduler + API en arrière-plan..."
+    docker compose up -d mnemo-scheduler mnemo-api
+    ok "Scheduler et API démarrés."
+    echo -e "  Logs scheduler : ${BOLD}./mnemo.sh logs${RESET}"
+    echo -e "  Logs API       : ${BOLD}./mnemo.sh logs-api${RESET}"
+    ;;
+
   scheduler)
     info "Démarrage du scheduler en arrière-plan..."
     docker compose up -d mnemo-scheduler
@@ -43,10 +54,27 @@ case "$CMD" in
     echo -e "  Logs : ${BOLD}./mnemo.sh logs${RESET}"
     ;;
 
+  api)
+    info "Démarrage de l'API en arrière-plan..."
+    docker compose up -d mnemo-api
+    ok "API démarrée."
+    echo -e "  Logs : ${BOLD}./mnemo.sh logs-api${RESET}"
+    ;;
+
   stop)
-    info "Arrêt du scheduler..."
-    docker compose stop mnemo-scheduler
-    ok "Scheduler arrêté."
+    info "Arrêt du scheduler et de l'API..."
+    docker compose stop mnemo-scheduler mnemo-api
+    ok "Services arrêtés."
+    ;;
+
+  rebuild)
+    info "Arrêt des services..."
+    docker compose stop mnemo mnemo-scheduler mnemo-api
+    info "Rebuild des images..."
+    docker compose build mnemo mnemo-scheduler
+    info "Redémarrage du scheduler et de l'API..."
+    docker compose up -d mnemo-scheduler mnemo-api
+    ok "Rebuild terminé. Scheduler et API redémarrés."
     ;;
 
   briefing)
@@ -70,6 +98,11 @@ case "$CMD" in
   logs)
     info "Logs du scheduler (Ctrl+C pour quitter)..."
     docker compose logs -f mnemo-scheduler
+    ;;
+
+  logs-api)
+    info "Logs de l'API (Ctrl+C pour quitter)..."
+    docker compose logs -f mnemo-api
     ;;
 
   ingest)
@@ -99,12 +132,16 @@ case "$CMD" in
     echo -e "\n${BOLD}mnemo.sh — Raccourci Mnemo${RESET}"
     echo ""
     echo -e "  ${BOLD}./mnemo.sh${RESET}               Session interactive"
-    echo -e "  ${BOLD}./mnemo.sh scheduler${RESET}     Démarre le scheduler (daemon)"
-    echo -e "  ${BOLD}./mnemo.sh stop${RESET}          Arrête le scheduler"
+    echo -e "  ${BOLD}./mnemo.sh services${RESET}      Démarre scheduler + API (daemon)"
+    echo -e "  ${BOLD}./mnemo.sh scheduler${RESET}     Démarre le scheduler seul (daemon)"
+    echo -e "  ${BOLD}./mnemo.sh api${RESET}           Démarre l'API seule (daemon)"
+    echo -e "  ${BOLD}./mnemo.sh stop${RESET}          Arrête scheduler + API"
+    echo -e "  ${BOLD}./mnemo.sh rebuild${RESET}       Stop → build → redémarre scheduler + API"
     echo -e "  ${BOLD}./mnemo.sh briefing${RESET}      Génère briefing.md maintenant"
     echo -e "  ${BOLD}./mnemo.sh weekly${RESET}        Génère weekly.md maintenant"
     echo -e "  ${BOLD}./mnemo.sh deadline${RESET}      Scanne les deadlines J-1/J-3"
     echo -e "  ${BOLD}./mnemo.sh logs${RESET}          Logs scheduler en temps réel"
+    echo -e "  ${BOLD}./mnemo.sh logs-api${RESET}      Logs API en temps réel"
     echo -e "  ${BOLD}./mnemo.sh ingest <f>${RESET}    Ingère un fichier en mémoire"
     echo -e "  ${BOLD}./mnemo.sh status${RESET}        État des containers"
     echo ""
