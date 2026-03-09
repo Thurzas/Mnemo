@@ -16,6 +16,8 @@
 
 set -e
 cd "$(dirname "${BASH_SOURCE[0]}")"
+ROOT="$(pwd)"
+DATA="$ROOT/data"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
 BLUE='\033[0;34m'; BOLD='\033[1m'; RESET='\033[0m'
@@ -57,10 +59,10 @@ fi
 
 step "Configuration .env"
 
-if [ -f ".env" ]; then
+if [ -f "$ROOT/.env" ]; then
   ok ".env déjà présent — conservé tel quel."
 else
-  cp .env.template .env
+  cp "$ROOT/.env.template" "$ROOT/.env"
   ok ".env créé depuis .env.template"
   warn "Ouvre .env et ajuste les valeurs si besoin (MODEL, CALENDAR_SOURCE, etc.)"
 fi
@@ -70,12 +72,15 @@ fi
 
 step "Initialisation du dossier data/"
 
-mkdir -p data/docs data/sessions
+info "Répertoire cible : $DATA"
+mkdir -p "$DATA"
+mkdir -p "$DATA/docs"
+mkdir -p "$DATA/sessions"
 ok "data/docs/ et data/sessions/ créés."
 
-if [ ! -f "data/memory.md" ]; then
-  if [ -f "memory.md.template" ]; then
-    cp memory.md.template data/memory.md
+if [ ! -f "$DATA/memory.md" ]; then
+  if [ -f "$ROOT/memory.md.template" ]; then
+    cp "$ROOT/memory.md.template" "$DATA/memory.md"
     ok "data/memory.md initialisé depuis le template."
   else
     warn "memory.md.template introuvable — data/memory.md sera créé au premier lancement."
@@ -85,8 +90,8 @@ else
 fi
 
 # Copie le modèle ML de routing s'il n'est pas encore dans data/
-if [ ! -f "data/router_model.joblib" ] && [ -f "router_model.joblib" ]; then
-  cp router_model.joblib data/router_model.joblib
+if [ ! -f "$DATA/router_model.joblib" ] && [ -f "$ROOT/router_model.joblib" ]; then
+  cp "$ROOT/router_model.joblib" "$DATA/router_model.joblib"
   ok "router_model.joblib copié dans data/"
 fi
 
@@ -97,7 +102,7 @@ step "Téléchargement des modèles Ollama"
 
 if [ "$OLLAMA_AVAILABLE" = true ]; then
   # Lit le modèle configuré dans .env (sans le préfixe ollama/)
-  CONFIGURED_MODEL=$(grep "^MODEL=" .env | cut -d'=' -f2 | sed 's|ollama/||')
+  CONFIGURED_MODEL=$(grep "^MODEL=" "$ROOT/.env" | cut -d'=' -f2 | sed 's|ollama/||')
   LLM_MODEL="${CONFIGURED_MODEL:-mistral}"
 
   info "Modèle LLM : $LLM_MODEL"
@@ -145,8 +150,8 @@ echo -e "  Lance une session :       ${BOLD}./mnemo.sh${RESET}"
 echo -e "  Démarre les services :    ${BOLD}./mnemo.sh services${RESET}"
 echo -e "  Aide :                    ${BOLD}./mnemo.sh help${RESET}"
 echo ""
-if [ -f ".env" ]; then
-  CALENDAR=$(grep "^CALENDAR_SOURCE=" .env | cut -d'=' -f2-)
+if [ -f "$ROOT/.env" ]; then
+  CALENDAR=$(grep "^CALENDAR_SOURCE=" "$ROOT/.env" | cut -d'=' -f2-)
   if [ -z "$CALENDAR" ]; then
     warn "Calendrier non configuré. Ajoute CALENDAR_SOURCE dans .env pour activer l'agenda."
   fi
