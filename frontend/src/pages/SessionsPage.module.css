@@ -1,0 +1,104 @@
+.page {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px 0;
+}
+
+.sidebarLabel {
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 16px 10px;
+}
+
+.sessionItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sessionItem:hover {
+  background: var(--s2);
+}
+
+.sessionItem.active {
+  background: color-mix(in srgb, var(--a1) 8%, var(--surface));
+  border-left: 2px solid var(--a1);
+}
+
+.sessionTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sessionId {
+  font-size: 0.75rem;
+  color: var(--a2);
+  font-weight: 500;
+}
+
+.doneBadge {
+  font-size: 0.65rem;
+  background: color-mix(in srgb, var(--a5) 20%, transparent);
+  color: var(--a5);
+  border: 1px solid color-mix(in srgb, var(--a5) 40%, transparent);
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+.sessionPreview {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.sessionMeta {
+  font-size: 0.7rem;
+  color: var(--dimmed);
+}
+
+.empty, .error {
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 12px 16px;
+}
+
+.error { color: var(--a4); }
+
+.detail {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.placeholder {
+  color: var(--dimmed);
+  text-align: center;
+  margin-top: 80px;
+  align-self: center;
+}
