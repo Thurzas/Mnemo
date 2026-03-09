@@ -11,6 +11,27 @@
 # Run   :  docker compose run --rm mnemo
 # ══════════════════════════════════════════════════════════════════
 
+
+# ── Étape 1 : build du frontend React ────────────────────────────
+# Une image Node temporaire compile le frontend.
+# Le résultat (src/Mnemo/static/) est copié dans l'image finale.
+# L'utilisateur n'a pas besoin de Node.js sur sa machine.
+FROM node:22-slim AS frontend-builder
+
+WORKDIR /build
+
+# Installe les dépendances (layer mis en cache si package.json inchangé)
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --prefer-offline
+
+# Copie les sources et compile
+# outDir est configuré dans vite.config.ts → ../src/Mnemo/static
+# (depuis /build, ça donne /src/Mnemo/static dans le container builder)
+COPY frontend/ ./
+RUN npm run build
+
+
+# ── Étape 2 : image Python finale ────────────────────────────────
 FROM python:3.12-slim
 
 # ── Métadonnées ───────────────────────────────────────────────────
@@ -28,7 +49,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Crée un utilisateur dédié (uid/gid 1000) sans shell de login.
 # Le conteneur ne tourne JAMAIS en root — même en cas d'exploitation.
 RUN groupadd --gid 1000 mnemo \
- && useradd  --uid 1000 --gid 1000 --create-home --shell /bin/false mnemo  && mkdir -p /home/mnemo/.local/share  && chown -R mnemo:mnemo /home/mnemo
+ && useradd  --uid 1000 --gid 1000 --create-home --shell /bin/false mnemo \
+ && mkdir -p /home/mnemo/.local/share \
+ && chown -R mnemo:mnemo /home/mnemo
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
@@ -40,6 +63,11 @@ RUN python3 /tmp/patch_crewai_tracing.py
 
 # ── Code source (lecture seule dans le conteneur) ────────────────
 COPY src/ /app/src/
+
+# ── Frontend compilé (depuis l'étape builder) ────────────────────
+# Remplace le contenu de static/ par le build Vite frais.
+COPY --from=frontend-builder /src/Mnemo/static/ /app/src/Mnemo/static/
+
 RUN chown -R mnemo:mnemo /app
 
 # ── Répertoire de travail = données utilisateur ──────────────────

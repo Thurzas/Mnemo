@@ -26,6 +26,10 @@ tests/
 test_*.py
 *.terrain.py
 
+# ── Frontend ──────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.vite/
+
 # ── IDE & OS ──────────────────────────────────────────────────────
 .vscode/
 .idea/
