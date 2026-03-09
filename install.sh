@@ -17,7 +17,19 @@
 set -e
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$(pwd)"
-DATA="$ROOT/data"
+
+# Lit DATA_DIR depuis .env si présent, sinon défaut ./data
+# Résout le chemin relatif depuis ROOT pour gérer DATA_DIR=./custom
+_RAW_DATA_DIR=$(grep "^DATA_DIR=" "$ROOT/.env" 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "")
+if [ -n "$_RAW_DATA_DIR" ]; then
+  # Chemin absolu : garder tel quel ; chemin relatif : résoudre depuis ROOT
+  case "$_RAW_DATA_DIR" in
+    /*) DATA="$_RAW_DATA_DIR" ;;
+    *)  DATA="$ROOT/${_RAW_DATA_DIR#./}" ;;
+  esac
+else
+  DATA="$ROOT/data"
+fi
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'
 BLUE='\033[0;34m'; BOLD='\033[1m'; RESET='\033[0m'
