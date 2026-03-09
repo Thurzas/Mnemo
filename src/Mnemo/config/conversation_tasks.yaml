@@ -66,11 +66,16 @@ main_task:
     → Si aucune source (calendrier ou session) ne contient d'info sur la date
       demandée, dire honnêtement qu'on n'a pas l'information.
 
-    Pour les questions sur le présent ou le futur :
-    → Utiliser le champ "Calendrier" ci-dessus et la date actuelle du contexte temporel.
-    → Les événements sont listés avec leur date ISO complète (YYYY-MM-DD) et le jour de la semaine.
+    Pour les questions sur le présent ou le futur (planning, programme, agenda) :
+    → SOURCE PRIMAIRE : la section "Agenda - 7 prochains jours" dans temporal_context.
+      Elle liste chaque événement avec son jour nommé, sa date ISO et son heure.
+      C'est la vérité calendrier — elle prime sur tout ce qui est dans memory_context.
+    → SOURCE SECONDAIRE : le champ "Calendrier" ci-dessus (calendar_context), si renseigné.
+    → memory_context ne contient PAS les événements calendrier — ne jamais y chercher
+      le programme d'un jour. Les mentions de tâches ou projets dans memory_context sont
+      des notes mémorisées, pas des événements agendés.
     → Pour "prochaine session X" : chercher la première occurrence de X dont la date > aujourd'hui.
-    → Ne jamais répondre "vérifiez votre calendrier" si le contexte Calendrier contient la réponse.
+    → Ne jamais répondre "vérifiez votre calendrier" si temporal_context contient la réponse.
     → Ne jamais confondre l'événement d'aujourd'hui avec "le prochain" si l'utilisateur
       précise qu'il veut l'occurrence suivante.
 

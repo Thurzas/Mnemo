@@ -1,8 +1,13 @@
 calendar_write_task:
   description: >
+    Aujourd'hui : {today_iso}
+
+    Correspondance jours → dates ISO (semaine courante + suivante) :
+    {week_dates}
+
     Contexte temporel : {temporal_context}
 
-    Événements existants dans l'agenda (avec identifiants) :
+    Événements existants dans l'agenda (avec indices) :
     {calendar_context}
 
     Demande de l'utilisateur : {user_message}
@@ -18,7 +23,7 @@ calendar_write_task:
         "location": "lieu ou null",
         "description": "description ou null"
       }},
-      "target_uid": "identifiant complet de l'événement existant pour update/delete, null pour create",
+      "target_uid": "index de l'événement (#0, #1, #2...) pour update/delete, null pour create",
       "confirmation_message": "Une phrase confirmant l'action en français naturel."
     }}
 
@@ -27,17 +32,24 @@ calendar_write_task:
     action="create" :
       - Remplis tous les champs de event.
       - target_uid = null.
-      - date au format ISO YYYY-MM-DD. Utilise le contexte temporel pour résoudre
-        "demain", "lundi prochain", "dans 3 jours", etc.
+      - RÉSOLUTION DES DATES — utilise UNIQUEMENT la table {week_dates} ci-dessus :
+          "samedi" → cherche "samedi = XXXX-XX-XX" dans la table → utilise cette date ISO.
+          "lundi prochain" → cherche "lundi prochain = XXXX-XX-XX" dans la table.
+          "demain" → date ISO du jour marqué "demain" dans la table (aujourd'hui + 1).
+          "dans N jours" → {today_iso} + N jours.
+          "aujourd'hui" → {today_iso}.
+          Date explicite (ex: "le 20 mars") → convertis directement en ISO.
+        NE PAS inventer une date. NE PAS utiliser {today_iso} pour un autre jour que "aujourd'hui".
       - time au format HH:MM (24h). null si pas d'heure précisée (événement journée entière).
-      - duration_minutes : durée en minutes. 60 par défaut si non précisée.
+      - duration_minutes : si l'utilisateur donne une plage horaire (ex: "de 9h à 16h"),
+        calcule la durée exacte (ex: 7h = 420 min). 60 par défaut sinon.
 
     action="delete" :
-      - target_uid obligatoire : utilise l'identifiant entre crochets dans calendar_context.
+      - target_uid obligatoire : utilise l'index entre crochets dans calendar_context (#0, #1...).
       - event peut être null.
 
     action="update" :
-      - target_uid obligatoire.
+      - target_uid obligatoire : utilise l'index entre crochets dans calendar_context (#0, #1...).
       - Dans event, renseigne uniquement les champs modifiés.
         Les champs non mentionnés restent inchangés.
 

@@ -24,7 +24,7 @@ The core of the project. Everything else builds on top of it.
 
 ---
 
-## ✅ Phase 1 — Stabilization *(in progress)*
+## ✅ Phase 1 — Stabilization *(completed)*
 
 Make the system reliable over time before adding new features.
 
@@ -48,7 +48,7 @@ Make the system reliable over time before adding new features.
 
 ---
 
-## 🔧 Phase 2 — Perception *(upcoming)*
+## 🔧 Phase 2 — Perception *(completed)*
 
 Give Mnemo the ability to perceive its environment beyond typed text.
 
@@ -68,7 +68,7 @@ Give Mnemo the ability to perceive its environment beyond typed text.
 
 ---
 
-## ⚡ Phase 3 — Action & Local Interface *(upcoming)*
+## ⚡ Phase 3 — Action & Local Interface *(completed)*
 
 Move from an agent that responds to an agent that acts — and give it a window onto the desktop.
 
@@ -81,7 +81,7 @@ Move from an agent that responds to an agent that acts — and give it a window 
   - [x] Visualization of `memory.md` and sessions
   - [x] Agenda with CRUD backend
   - [x] Send messages from the browser (CLI alternative)
-  - [ ] *Why web over system tray: better WSL2 portability,  
+  - [x] *Why web over system tray: better WSL2 portability,  
     naturally prepares the Phase 4 API*
 - [x] **Scheduler**
   - [x] Scheduled tasks (reminders, daily summary)
@@ -89,14 +89,14 @@ Move from an agent that responds to an agent that acts — and give it a window 
 
 ---
 
-## 🌐 Phase 4 — API & External Interfaces *(vision)*
+## 🌐 Phase 4 — API & External Interfaces *(In progress)*
 
 Turn Mnemo into a headless brain callable from any interface.
 
-- [ ] **REST API (FastAPI)**
-  - [ ] `POST /message` — send a message, receive a response
-  - [ ] `GET /memory` — read long-term memory
-  - [ ] `POST /memory` — write a fact directly into memory
+- [x] **REST API (FastAPI)**
+  - [x] `POST /message` — send a message, receive a response
+  - [x] `GET /memory` — read long-term memory
+  - [x] `POST /memory` — write a fact directly into memory
   - [ ] `GET /session/{id}` — session history
   - [ ] Lightweight authentication (local token, no public exposure)
   - [ ] WebSocket for token-by-token response streaming

@@ -1,0 +1,403 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.pageTitle {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.pageSub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.viewToggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.viewBtn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.viewBtn:hover { color: var(--text); }
+.viewBtn.active { background: var(--a1); color: #fff; }
+
+.addBtn {
+  background: none;
+  border: 1px solid var(--a2);
+  color: var(--a2);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.addBtn:hover { background: color-mix(in srgb, var(--a2) 15%, transparent); }
+
+/* ── Week nav ───────────────────────────────────────────── */
+.weekNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.weekNavBtn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.weekNavBtn:hover { color: var(--text); border-color: var(--a1); }
+
+.weekNavLabel {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-left: 4px;
+}
+
+/* ── Content ────────────────────────────────────────────── */
+.content {
+  flex: 1;
+  overflow: auto;
+}
+
+.empty {
+  color: var(--dimmed);
+  text-align: center;
+  padding: 60px 24px;
+}
+
+/* ── List view ──────────────────────────────────────────── */
+.listEvents {
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calEvent {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  transition: background 0.15s;
+  position: relative;
+}
+
+.calEvent:hover { background: var(--s2); }
+.calEvent:hover .calActions { opacity: 1; }
+
+.calEvent.today    { border-left: 3px solid var(--a4); }
+.calEvent.tomorrow { border-left: 3px solid var(--a3); }
+.calEvent.soon     { border-left: 3px solid var(--a2); }
+
+.dateBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 36px;
+}
+
+.dayNum {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+
+.monthStr {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+}
+
+.calInfo { flex: 1; }
+
+.calTitle {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.calTime, .calLocation {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.calLabel {
+  display: inline-block;
+  font-size: 0.65rem;
+  border-radius: 10px;
+  padding: 1px 7px;
+  margin-top: 4px;
+  background: color-mix(in srgb, var(--a3) 15%, transparent);
+  color: var(--a3);
+  border: 1px solid color-mix(in srgb, var(--a3) 30%, transparent);
+}
+
+.calActions {
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.calActionBtn {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.calActionBtn:hover { color: var(--text); border-color: var(--a1); }
+.calActionBtn.delete:hover { color: var(--a4); border-color: var(--a4); }
+
+/* ── Week view ──────────────────────────────────────────── */
+.weekOuter { overflow: auto; width: 100%; height: 100%; }
+
+.weekInner {
+  display: flex;
+  min-width: 640px;
+}
+
+.weekGutter {
+  width: 44px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.hourLabel {
+  font-size: 0.65rem;
+  color: var(--dimmed);
+  display: flex;
+  align-items: flex-start;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.weekDays {
+  display: flex;
+  flex: 1;
+}
+
+.weekDay {
+  flex: 1;
+  border-right: 1px solid var(--border);
+  min-width: 80px;
+}
+
+.weekDayHdr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 4px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.weekDayHdr.todayHdr { background: color-mix(in srgb, var(--a1) 10%, var(--surface)); }
+
+.dayName { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
+.dayNum2 { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+
+.weekBody { position: relative; }
+
+.hLine {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: var(--border);
+}
+
+.weekEv {
+  position: absolute;
+  left: 2px; right: 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--a1) 30%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--a1) 50%, transparent);
+  padding: 2px 5px;
+  overflow: hidden;
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.weekEv.today    { background: color-mix(in srgb, var(--a4) 25%, var(--surface)); border-color: color-mix(in srgb, var(--a4) 50%, transparent); }
+.weekEv.tomorrow { background: color-mix(in srgb, var(--a3) 25%, var(--surface)); border-color: color-mix(in srgb, var(--a3) 50%, transparent); }
+.weekEv.soon     { background: color-mix(in srgb, var(--a2) 25%, var(--surface)); border-color: color-mix(in srgb, var(--a2) 50%, transparent); }
+
+.weekEvTitle { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.weekEvTime  { display: block; color: var(--muted); font-size: 0.65rem; }
+
+.weekEvActions {
+  display: none;
+  gap: 4px;
+  position: absolute;
+  top: 2px; right: 2px;
+}
+
+.weekEv:hover .weekEvActions { display: flex; }
+
+.weekEvActions button {
+  background: var(--bg);
+  border: none;
+  color: var(--muted);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+/* ── Modal ──────────────────────────────────────────────── */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 7, 13, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 420px;
+  max-width: 95vw;
+}
+
+.modalTitle {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 20px;
+  color: var(--text);
+}
+
+.formGroup {
+  margin-bottom: 14px;
+}
+
+.formRow {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.formRow .formGroup {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.formLabel {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 5px;
+  letter-spacing: 0.04em;
+}
+
+.formInput {
+  width: 100%;
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.formInput:focus { border-color: var(--a1); }
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btnCancel {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.btnCancel:hover { color: var(--text); }
+
+.btnSave {
+  background: var(--a1);
+  border: none;
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.btnSave:hover:not(:disabled) { opacity: 0.85; }
+.btnSave:disabled { opacity: 0.4; cursor: not-allowed; }
