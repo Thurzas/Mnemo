@@ -403,21 +403,28 @@ def get_upcoming_events(
 def format_events_for_prompt(events: list[dict]) -> str:
     """
     Formate les événements pour injection dans un prompt LLM.
-    Format compact lisible, avec indication temporelle claire.
+    Format : [mardi 10 mars - Demain] HH:MM Titre - Lieu
+    Le nom du jour et la date sont inclus pour eviter que le LLM
+    ait a recalculer "dans 2 jours = quel jour ?".
     """
     if not events:
         return "Aucun événement à venir dans les prochains jours."
 
+    _jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
+    _mois  = ["janvier","février","mars","avril","mai","juin",
+              "juillet","août","septembre","octobre","novembre","décembre"]
+
     lines = []
     for ev in events:
-        time_str = ""
-        if ev["datetime"]:
-            time_str = f" à {ev['datetime'].strftime('%H:%M')}"
-        loc_str = f" — {ev['location']}" if ev["location"] else ""
-        lines.append(f"- [{ev['label']}]{time_str} {ev['title']}{loc_str}")
+        d        = ev["date"]
+        day_name = f"{_jours[d.weekday()]} {d.day} {_mois[d.month - 1]}"
+        time_str = f" à {ev['datetime'].strftime('%H:%M')}" if ev["datetime"] else ""
+        loc_str  = f" — {ev['location']}" if ev["location"] else ""
+        label    = ev["label"]
+        lines.append(f"- [{day_name} - {label}]{time_str} {ev['title']}{loc_str}")
 
-    return "\n".join(lines)
-
+    return "
+".join(lines)
 
 def format_startup_banner(events: list[dict]) -> str:
     """
