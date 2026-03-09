@@ -687,7 +687,10 @@ def _detect_shell_intent(msg: str) -> bool:
 
 _SCHEDULER_KEYWORDS = [
     "rappelle-moi", "rappelle moi",
-    "planifie", "planifier", "programme", "programmer",
+    "planifie", "planifier",
+    "programme un ", "programme une ", "programme ce ", "programme cette ",
+    "programme mon ", "programme ma ", "programme le rappel",
+    "programmer un ", "programmer une ", "programmer ce ", "programmer cette ",
     "chaque lundi", "chaque mardi", "chaque mercredi", "chaque jeudi",
     "chaque vendredi", "chaque samedi", "chaque dimanche",
     "tous les lundis", "tous les mardis", "tous les mercredis",
