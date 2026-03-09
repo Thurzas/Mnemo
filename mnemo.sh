@@ -3,6 +3,7 @@
 # mnemo.sh — Raccourci de lancement Mnemo
 #
 # Usage :
+#   ./mnemo.sh setup        # installation initiale (première fois)
 #   ./mnemo.sh              # démarre une session interactive
 #   ./mnemo.sh services     # démarre scheduler + API en arrière-plan
 #   ./mnemo.sh scheduler    # démarre le scheduler seul
@@ -34,9 +35,14 @@ CMD="${1:-run}"
 
 case "$CMD" in
 
+  setup|install)
+    info "Lancement de l'installeur Mnemo..."
+    bash install.sh
+    ;;
+
   run|"")
     info "Démarrage de la session Mnemo..."
-    docker compose run --rm mnemo 
+    docker compose run --rm mnemo
     ;;
 
   services)
@@ -131,6 +137,7 @@ case "$CMD" in
   help|--help|-h)
     echo -e "\n${BOLD}mnemo.sh — Raccourci Mnemo${RESET}"
     echo ""
+    echo -e "  ${BOLD}./mnemo.sh setup${RESET}         Installation initiale (première fois)"
     echo -e "  ${BOLD}./mnemo.sh${RESET}               Session interactive"
     echo -e "  ${BOLD}./mnemo.sh services${RESET}      Démarre scheduler + API (daemon)"
     echo -e "  ${BOLD}./mnemo.sh scheduler${RESET}     Démarre le scheduler seul (daemon)"

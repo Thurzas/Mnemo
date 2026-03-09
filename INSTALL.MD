@@ -12,44 +12,46 @@
 | Docker Compose | ≥ 2 | inclus dans Docker Desktop |
 | Ollama | ≥ 0.4 | [ollama.com](https://ollama.com) |
 
-> **WSL2** : Docker Desktop avec intégration WSL2 activée est recommandé.
+> **WSL2** : Docker Desktop avec intégration WSL2 activée est recommandé sous Windows.
 
 ---
 
 ## Installation en 3 étapes
 
-### 1. Clone & configure
+### 1. Clone & prépare
 
 ```bash
 git clone https://github.com/thurzas/mnemo.git
 cd mnemo
-chmod +x install.sh
+chmod +x mnemo.sh install.sh
 ```
 
 ### 2. Lance l'installeur
 
 ```bash
-./install.sh
+./mnemo.sh setup
 ```
 
-L'installeur :
-- Crée `.env` depuis `.env.example`
-- Crée `data/` avec `memory.md`, `sessions/`
-- Tire les modèles Ollama (`mistral` + `nomic-embed-text`)
-- Build l'image Docker `mnemo:latest`
-- Initialise la base SQLite
+L'installeur (`install.sh`) fait tout automatiquement :
 
-### 3. Démarre Mnemo
+- Vérifie que Docker et Ollama sont installés
+- Crée `.env` depuis `.env.template` (si absent)
+- Crée `data/` avec `memory.md`, `docs/`, `sessions/`
+- Tire les modèles Ollama (`mistral` + `nomic-embed-text`)
+- Build les images Docker (`mnemo:latest` + `mnemo-scheduler:latest`)
+- Initialise la base SQLite (`data/memory.db`)
+
+### 3. Lance Mnemo
 
 ```bash
-docker compose run --rm mnemo
+./mnemo.sh
 ```
 
 ---
 
 ## Configuration
 
-Toute la configuration est dans `.env` :
+Toute la configuration est dans `.env` (créé automatiquement depuis `.env.template`) :
 
 ```bash
 # Modèle LLM (ollama/<nom>)
@@ -65,9 +67,30 @@ DATA_DIR=./data
 CALENDAR_SOURCE=/data/agenda.ics
 ```
 
+Les autres options (scheduler, SearXNG, limites ressources) sont documentées dans `.env.template`.
+
 ---
 
 ## Commandes disponibles
+
+```bash
+./mnemo.sh                   # Session de conversation
+./mnemo.sh setup             # Installation initiale / réinstallation
+./mnemo.sh services          # Démarre scheduler + API (daemon)
+./mnemo.sh scheduler         # Démarre le scheduler seul (daemon)
+./mnemo.sh api               # Démarre l'API seule (daemon)
+./mnemo.sh stop              # Arrête les services background
+./mnemo.sh rebuild           # Stop → build → redémarre les services
+./mnemo.sh briefing          # Génère le briefing maintenant
+./mnemo.sh weekly            # Génère le résumé hebdomadaire
+./mnemo.sh logs              # Logs scheduler en temps réel
+./mnemo.sh logs-api          # Logs API en temps réel
+./mnemo.sh ingest <fichier>  # Ingère un fichier en mémoire
+./mnemo.sh status            # État des containers
+./mnemo.sh help              # Aide
+```
+
+Commandes directes Docker (si besoin) :
 
 ```bash
 # Session de conversation
@@ -96,8 +119,11 @@ data/                   ← monté dans le conteneur comme /data
 ├── memory.db           ← index SQLite (FTS5 + vecteurs)
 ├── sessions/           ← sessions JSON en attente de consolidation
 │   └── session_*.json
-└── docs/               ← documents à ingérer (PDF, DOCX, TXT...)
-    └── rapport.pdf
+├── docs/               ← documents à ingérer (PDF, DOCX, TXT...)
+│   └── rapport.pdf
+├── briefing.md         ← briefing matinal (généré par le scheduler)
+├── weekly.md           ← résumé hebdomadaire (généré par le scheduler)
+└── tasks.md            ← tâches planifiées (généré par SchedulerCrew)
 ```
 
 > `memory.md` et `memory.db` ne vivent **jamais** dans l'image Docker.
@@ -107,7 +133,7 @@ data/                   ← monté dans le conteneur comme /data
 
 ## Calendrier ICS
 
-Mnemo peut lire ton agenda pour te rappeler les événements proches.
+Mnemo peut lire ton agenda pour contextualiser les réponses et gérer les deadlines.
 
 **Fichier local** : place ton `.ics` dans `data/` et configure :
 ```
@@ -130,13 +156,33 @@ CALENDAR_SOURCE=https://nextcloud.local/remote.php/dav/calendars/user/default/
 
 ```bash
 git pull
-docker compose build   # rebuild l'image avec le nouveau code
-docker compose run --rm mnemo init_db   # applique les migrations DB si besoin
+./mnemo.sh rebuild       # rebuild les images Docker avec le nouveau code
+```
+
+Si la DB a évolué :
+```bash
+docker compose run --rm mnemo init_db   # applique les migrations (idempotent)
+```
+
+---
+
+## Ré-entraîner le modèle de routing (optionnel)
+
+Le routeur ML est pré-entraîné (`router_model.joblib`).
+Si tu modifies `training_data.jsonl`, relance l'entraînement :
+
+```bash
+# Depuis l'hôte (avec Python + scikit-learn installé)
+python agent_memory/train_router.py
+
+# Le modèle est rechargé automatiquement au prochain lancement de Mnemo
 ```
 
 ---
 
 ## Troubleshooting
+
+Consulte [TROUBLESHOOTING.MD](TROUBLESHOOTING.MD) pour les problèmes courants.
 
 **`Connection refused` sur Ollama**
 Vérifie qu'Ollama tourne : `ollama list`
@@ -146,4 +192,7 @@ Sur Linux, `host.docker.internal` nécessite Docker ≥ 20.10.
 Rebuild l'image : `docker compose build --no-cache`
 
 **Mémoire réinitialisée à chaque session**
-`DATA_DIR` dans `.env` doit pointer vers un dossier persistant sur ta machine, pas vers un chemin dans le conteneur.
+`DATA_DIR` dans `.env` doit pointer vers un dossier persistant sur ta machine.
+
+**Le modèle ML n'est pas chargé**
+Vérifie que `data/router_model.joblib` existe. Si absent : `cp router_model.joblib data/`
