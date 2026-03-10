@@ -374,10 +374,12 @@ function WeekView({ events, days, writable, onEdit, onDelete }: WeekProps) {
         {/* Day columns */}
         <div className={styles.weekDays}>
           {days.map((day, di) => {
-            const isToday = day.toDateString() === new Date().toDateString()
+            const now = new Date()
+            const isToday = day.toDateString() === now.toDateString()
+            const isPast = day < now && !isToday
             return (
-              <div key={di} className={styles.weekDay}>
-                <div className={`${styles.weekDayHdr} ${isToday ? styles.todayHdr : ''}`}>
+              <div key={di} className={`${styles.weekDay} ${isPast ? styles.pastDay : ''}`}>
+                <div className={`${styles.weekDayHdr} ${isToday ? styles.todayHdr : ''} ${isPast ? styles.pastHdr : ''}`}>
                   <span className={styles.dayName}>{DAY_NAMES[di]}</span>
                   <span className={styles.dayNum2}>{day.getDate()}</span>
                 </div>

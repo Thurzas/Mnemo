@@ -634,16 +634,18 @@ def _load_writable_calendar() -> "Calendar":
     return cal
 
 
-def get_events_with_uid(days: int = 30) -> list[dict]:
+def get_events_with_uid(days: int = 30, from_date: date | None = None) -> list[dict]:
     """
     Comme get_upcoming_events() mais inclut le champ 'uid' dans chaque événement.
     Utilisé par CalendarWriteCrew pour cibler un événement par UID.
+    from_date permet de démarrer avant aujourd'hui (ex: début de semaine courante).
     """
     cal = _get_calendar()
     if cal is None:
         return []
 
     today = date.today()
+    start = from_date if from_date is not None else today
     end   = today + timedelta(days=days)
     seen  = set()
     events: list[dict] = []
@@ -654,7 +656,7 @@ def get_events_with_uid(days: int = 30) -> list[dict]:
         uid = str(component.get("UID", ""))
 
         if component.get("RRULE"):
-            for occ_date in _expand_rrule(component, today, end):
+            for occ_date in _expand_rrule(component, start, end):
                 key = (uid, occ_date)
                 if key not in seen:
                     seen.add(key)
@@ -666,7 +668,7 @@ def get_events_with_uid(days: int = 30) -> list[dict]:
             if dtstart is None:
                 continue
             ev_date = _to_date(dtstart.dt)
-            if ev_date is None or not (today <= ev_date <= end):
+            if ev_date is None or not (start <= ev_date <= end):
                 continue
             key = (uid, ev_date)
             if key not in seen:

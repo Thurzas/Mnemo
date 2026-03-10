@@ -252,6 +252,10 @@
 }
 
 .weekDayHdr.todayHdr { background: color-mix(in srgb, var(--a1) 10%, var(--surface)); }
+.weekDayHdr.pastHdr  { opacity: 0.45; }
+
+.weekDay.pastDay .weekBody { opacity: 0.35; }
+.weekDay.pastDay .weekEv   { filter: saturate(0.3); }
 
 .dayName { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
 .dayNum2 { font-size: 0.95rem; font-weight: 700; color: var(--text); }
