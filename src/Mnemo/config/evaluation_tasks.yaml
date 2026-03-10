@@ -99,8 +99,15 @@ evaluate_task:
           IMPORTANT : la LECTURE de l'agenda reste route "conversation" (needs_calendar=true).
           Seule l'ÉCRITURE → route "calendar".
       - "scheduler"    : l'utilisateur demande de planifier une tâche différée ou récurrente.
-          Exemples : "rappelle-moi demain matin", "fais ça tous les lundis",
-          "envoie-moi un résumé à 8h".
+          Signaux clés : présence d'une heure future + intention de rappel/automatisation.
+          Exemples :
+            "rappelle-moi ce matin à 11h de fermer le garage"  → scheduler
+            "rappelle-moi demain à 9h de relire mes notes"      → scheduler
+            "dans 3 jours, pense à appeler le médecin"          → scheduler
+            "fais ça tous les lundis à 8h"                      → scheduler
+            "envoie-moi un résumé à 8h"                         → scheduler
+            "demain matin, rappel pour le dentiste"             → scheduler
+          IMPORTANT : "rappelle-moi" + heure/date → TOUJOURS scheduler, jamais conversation.
       En cas de doute : "conversation".
 
     shell_command : si route est "shell", la commande EXACTE à exécuter,

@@ -92,3 +92,16 @@ CREATE TABLE curiosity_skipped (
             question    TEXT NOT NULL,      -- texte original de la question
             skipped_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+CREATE TABLE scheduled_tasks (
+            id          TEXT PRIMARY KEY,
+            type        TEXT NOT NULL,
+            action      TEXT NOT NULL,
+            payload     TEXT DEFAULT '{}',
+            trigger_at  DATETIME,
+            cron_expr   TEXT,
+            status      TEXT DEFAULT 'pending',
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_run    DATETIME,
+            next_run    DATETIME,
+            error_msg   TEXT
+        );
