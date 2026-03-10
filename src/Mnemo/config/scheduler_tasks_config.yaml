@@ -44,8 +44,15 @@ schedule_task:
        → Mentionne dans confirmation_message : "J'ai supposé le lundi, tu peux me demander de modifier."
 
     One-shot sans date ("rappelle-moi de...") :
-       → Utilise demain à 09:00 par défaut.
-       → Mentionne dans confirmation_message : "J'ai planifié pour demain à 9h, précise une date si besoin."
+       RÈGLE : regarde si le message contient une heure précise (ex: "à 14h", "à 13h01").
+       → Si UNE HEURE EST PRÉCISÉE dans le message (et pas de date) :
+          → trigger_at = AUJOURD'HUI à cette heure. Pas demain. Aujourd'hui.
+          → Utilise la date d'aujourd'hui du contexte temporel + l'heure extraite du message.
+          → Exemple : contexte = "mardi 10 mars 2026, 11:30" + message "à 14h" → trigger_at = "2026-03-10T14:00:00"
+          → Mentionne dans confirmation_message : "J'ai planifié pour aujourd'hui à HH:MM."
+       → Si AUCUNE HEURE n'est précisée dans le message :
+          → trigger_at = DEMAIN à 09:00.
+          → Mentionne dans confirmation_message : "J'ai planifié pour demain à 9h, précise une date si besoin."
 
     ── RÈGLES POUR LA MODIFICATION ──────────────────────────────────
 
@@ -80,6 +87,20 @@ schedule_task:
        → Mentionne dans confirmation_message : "J'ai créé une tâche pour chaque jour ouvré (lun–ven)."
 
     ── EXEMPLES ─────────────────────────────────────────────────────
+
+    Contexte temporel : "mardi 10 mars 2026, 11:30"
+    "rappelle-moi à 14h d'aller chercher les enfants"
+      → trigger_at = "2026-03-10T14:00:00"  ← AUJOURD'HUI (pas demain)
+      → [{{ "action": "create", "task_type": "one_shot", "task_action": "reminder",
+             "trigger_at": "2026-03-10T14:00:00", "cron_expr": null,
+             "payload": {{"message": "Aller chercher les enfants"}}, "task_id_to_cancel": null }}]
+
+    Contexte temporel : "mardi 10 mars 2026, 11:30"
+    "rappelle-moi de rappeler le médecin" (pas d'heure)
+      → trigger_at = "2026-03-11T09:00:00"  ← DEMAIN à 09h (pas d'heure → demain)
+      → [{{ "action": "create", "task_type": "one_shot", "task_action": "reminder",
+             "trigger_at": "2026-03-11T09:00:00", "cron_expr": null,
+             "payload": {{"message": "Rappeler le médecin"}}, "task_id_to_cancel": null }}]
 
     "rappelle-moi tous les lundis de faire mon point projets"
       → [{{ "action": "create", "task_type": "recurring", "task_action": "reminder",

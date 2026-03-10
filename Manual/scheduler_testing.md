@@ -121,9 +121,10 @@ Le prompt gère désormais ces cas avec des valeurs par défaut explicites et un
 | # | Message à envoyer | Attendu |
 |---|-------------------|---------|
 | 6.1 | `rappelle-moi de prendre mes médicaments` *(sans heure)* | one_shot demain 09:00 + confirmation "J'ai supposé demain à 9h" |
-| 6.2 | `rappelle-moi demain` *(sans contenu)* | one_shot demain 09:00, payload.message = résumé de l'intent + signalement |
-| 6.3 | `tous les lundis, rappel` *(message non précisé)* | recurring weekly lundi 09:00, payload.message extrait de l'intent |
-| 6.4 | `chaque semaine, briefing` *(pas de jour)* | recurring weekly lundi (défaut) + confirmation "J'ai supposé le lundi" |
+| 6.2 | `rappelle-moi à 15h de prendre mes médicaments` *(heure future)* | one_shot **aujourd'hui** 15:00 + confirmation "J'ai planifié pour aujourd'hui à 15h" |
+| 6.3 | `rappelle-moi demain` *(sans contenu)* | one_shot demain 09:00, payload.message = résumé de l'intent + signalement |
+| 6.4 | `tous les lundis, rappel` *(message non précisé)* | recurring weekly lundi 09:00, payload.message extrait de l'intent |
+| 6.5 | `chaque semaine, briefing` *(pas de jour)* | recurring weekly lundi (défaut) + confirmation "J'ai supposé le lundi" |
 
 ---
 
@@ -168,6 +169,7 @@ Le prompt gère ces cas avec des comportements définis (refus explicite ou canc
 | 6.2 | | | | |
 | 6.3 | | | | |
 | 6.4 | | | | |
+| 6.5 | | | | |
 | 7.1 | | | | |
 | 7.2 | | | | |
 | 7.3 | | | | |
