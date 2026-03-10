@@ -23,8 +23,10 @@ Sécurité :
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -36,6 +38,7 @@ from pydantic import BaseModel
 DATA_PATH    = Path(os.getenv("DATA_PATH", "/data")).resolve()
 MEMORY_FILE  = DATA_PATH / "memory.md"
 SESSIONS_DIR = DATA_PATH / "sessions"
+BRIEFING_FILE = DATA_PATH / "briefing.md"
 STATIC_DIR   = Path(__file__).parent / "static"
 
 app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
@@ -80,6 +83,8 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
         _route_message,
         _detect_shell_intent,
         _detect_calendar_write_intent,
+        _detect_note_intent,
+        _detect_scheduler_intent,
         _ml_detect_intent,
     )
     from Mnemo.crew import EvaluationCrew
@@ -96,6 +101,33 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
     ml_route, ml_conf = _ml_detect_intent(user_message)
     if ml_route == "shell" and ml_conf >= 0.80:
         return _SHELL_BLOCKED
+
+    # Pre-check note : keywords forts → bypass LLM
+    if _detect_note_intent(user_message):
+        eval_json = {
+            "route": "note",
+            "needs_memory": False,
+            "needs_web": False,
+            "needs_clarification": False,
+            "_web_mode": True,
+        }
+        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
+        update_session_memory(session_id, user_message, response)
+        return response
+
+    # Pre-check scheduler : keywords forts → bypass LLM
+    kw_scheduler_strong, kw_scheduler_weak = _detect_scheduler_intent(user_message)
+    if kw_scheduler_strong:
+        eval_json = {
+            "route": "scheduler",
+            "needs_memory": False,
+            "needs_web": False,
+            "needs_clarification": False,
+            "_web_mode": True,
+        }
+        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
+        update_session_memory(session_id, user_message, response)
+        return response
 
     # Pre-check calendar : keywords → force route=calendar sans passer par le LLM
     kw_calendar = _detect_calendar_write_intent(user_message)
@@ -330,6 +362,30 @@ def calendar_delete(event_uid: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/reminders")
+async def reminders():
+    """
+    Retourne les rappels présents dans briefing.md (sections ## 🔔 Rappel).
+    Chaque rappel a un `id` (MD5 du message) pour dédupliquer côté client.
+    """
+    if not BRIEFING_FILE.exists():
+        return {"reminders": []}
+
+    content = BRIEFING_FILE.read_text(encoding="utf-8")
+    items: list[dict] = []
+
+    # Découpe sur chaque en-tête ## 🔔 Rappel
+    parts = re.split(r"^## 🔔 Rappel\s*$", content, flags=re.MULTILINE)
+    for part in parts[1:]:
+        # Prend le texte jusqu'au prochain ## ou fin de fichier
+        body = re.split(r"^##", part, maxsplit=1, flags=re.MULTILINE)[0].strip()
+        if body:
+            rid = hashlib.md5(body.encode()).hexdigest()[:12]
+            items.append({"id": rid, "message": body})
+
+    return {"reminders": items}
 
 
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──

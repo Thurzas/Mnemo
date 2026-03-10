@@ -68,14 +68,16 @@ case "$CMD" in
     ;;
 
   stop)
-    info "Arrêt du scheduler et de l'API..."
-    docker compose stop mnemo-scheduler mnemo-api
+    info "Arrêt et suppression des containers..."
+    docker compose down --remove-orphans 2>/dev/null || true
+    docker container prune -f >/dev/null 2>&1 || true
     ok "Services arrêtés."
     ;;
 
   rebuild)
-    info "Arrêt des services..."
-    docker compose stop mnemo mnemo-scheduler mnemo-api
+    info "Arrêt et suppression des containers..."
+    docker compose down --remove-orphans 2>/dev/null || true
+    docker container prune -f >/dev/null 2>&1 || true
     info "Rebuild des images..."
     docker compose build mnemo mnemo-scheduler
     info "Redémarrage du scheduler et de l'API..."

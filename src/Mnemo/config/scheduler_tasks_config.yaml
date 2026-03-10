@@ -30,29 +30,108 @@ schedule_task:
                      Exemples : "weekly lundi 08:00", "daily 07:30", "weekly vendredi 18:00"
 
     PAYLOAD :
-       - "message" : texte exact du rappel ou description de la tâche (extrait du message utilisateur)
+       - "message" : texte du rappel. Si absent du message utilisateur, résume l'intent en une phrase courte.
+                     Ne jamais laisser "message" vide pour un reminder.
 
-    EXEMPLES DE DÉCOMPOSITION :
-       "rappelle-moi tous les lundis de faire mon point projets"
-         → [{{ task_action: "reminder", task_type: "recurring", cron_expr: "weekly lundi 09:00",
-               payload: {{"message": "Faire le point projets"}} }}]
+    ── RÈGLES POUR LES CAS AMBIGUS ──────────────────────────────────
 
-       "chaque lundi matin, génère un résumé de ma semaine"
-         → [{{ task_action: "weekly", task_type: "recurring", cron_expr: "weekly lundi 08:00",
-               payload: {{"message": "Résumé hebdomadaire"}} }}]
+    Heure manquante :
+       → Utilise 09:00 par défaut.
+       → Mentionne l'hypothèse dans confirmation_message : "J'ai supposé 9h, tu peux me demander de modifier."
 
-       "tous les jours à 7h, briefing + rappel de boire de l'eau"
-         → [{{ task_action: "briefing",  task_type: "recurring", cron_expr: "daily 07:00", payload: {{}} }},
-            {{ task_action: "reminder",  task_type: "recurring", cron_expr: "daily 07:00",
-               payload: {{"message": "Boire de l'eau"}} }}]
+    Jour manquant pour une récurrence ("chaque semaine", "toutes les semaines") :
+       → Utilise lundi par défaut.
+       → Mentionne dans confirmation_message : "J'ai supposé le lundi, tu peux me demander de modifier."
 
-    Si la demande est ambiguë (pas d'heure précise, pas de jour clair) :
-    → Utilise des valeurs par défaut raisonnables (09:00 si pas d'heure, demain si pas de date)
-    → Signale l'hypothèse dans confirmation_message
+    One-shot sans date ("rappelle-moi de...") :
+       RÈGLE : regarde si le message contient une heure précise (ex: "à 14h", "à 13h01").
+       → Si UNE HEURE EST PRÉCISÉE dans le message (et pas de date) :
+          → trigger_at = AUJOURD'HUI à cette heure. Pas demain. Aujourd'hui.
+          → Utilise la date d'aujourd'hui du contexte temporel + l'heure extraite du message.
+          → Exemple : contexte = "mardi 10 mars 2026, 11:30" + message "à 14h" → trigger_at = "2026-03-10T14:00:00"
+          → Mentionne dans confirmation_message : "J'ai planifié pour aujourd'hui à HH:MM."
+       → Si AUCUNE HEURE n'est précisée dans le message :
+          → trigger_at = DEMAIN à 09:00.
+          → Mentionne dans confirmation_message : "J'ai planifié pour demain à 9h, précise une date si besoin."
 
-    Si la demande est une annulation ("annule le rappel...", "supprime la tâche...") :
-    → Identifie la tâche dans existing_tasks
-    → Retourne une tâche avec action="cancel" et task_id_to_cancel renseigné
+    ── RÈGLES POUR LA MODIFICATION ──────────────────────────────────
+
+    Si la demande est une modification ("modifie", "change", "décale", "passe à") :
+       → Décompose en DEUX tâches :
+          1. action="cancel" sur la tâche existante (identifie dans existing_tasks)
+          2. action="create" avec les nouvelles valeurs
+       → confirmation_message : "J'ai annulé l'ancienne tâche et créé la nouvelle."
+       → Si la tâche à modifier n'est pas trouvée dans existing_tasks :
+          → tasks=[] et confirmation_message expliquant que la tâche est introuvable.
+
+    ── RÈGLES POUR L'ANNULATION ─────────────────────────────────────
+
+    Si la demande est une annulation ("annule", "supprime", "arrête") :
+       → Identifie la tâche dans existing_tasks par son action + payload.message + cron_expr.
+       → Retourne action="cancel" avec task_id_to_cancel renseigné.
+       → Si plusieurs tâches correspondent : annule toutes celles qui correspondent.
+       → Si aucune tâche ne correspond : tasks=[] et confirmation_message expliquant que rien n'a été trouvé.
+
+    ── RÈGLES POUR LES FRÉQUENCES NON SUPPORTÉES ────────────────────
+
+    Fréquences NON supportées (ne pas inventer une approximation silencieuse) :
+       - mensuel ("le 1er de chaque mois", "tous les mois")
+       - bimensuel ("toutes les 2 semaines", "tous les 15 jours")
+       - sous-journalier récurrent ("toutes les 2 heures", "toutes les 30 minutes")
+       → Pour ces cas : tasks=[] et confirmation_message expliquant clairement la limitation,
+         par exemple : "Je ne peux planifier qu'en quotidien ou hebdomadaire pour l'instant."
+
+    Jours ouvrés ("du lundi au vendredi", "les jours ouvrés") :
+       → Crée 5 tâches weekly distinctes : weekly lundi, weekly mardi, weekly mercredi,
+         weekly jeudi, weekly vendredi — toutes à la même heure.
+       → Mentionne dans confirmation_message : "J'ai créé une tâche pour chaque jour ouvré (lun–ven)."
+
+    ── EXEMPLES ─────────────────────────────────────────────────────
+
+    Contexte temporel : "mardi 10 mars 2026, 11:30"
+    "rappelle-moi à 14h d'aller chercher les enfants"
+      → trigger_at = "2026-03-10T14:00:00"  ← AUJOURD'HUI (pas demain)
+      → [{{ "action": "create", "task_type": "one_shot", "task_action": "reminder",
+             "trigger_at": "2026-03-10T14:00:00", "cron_expr": null,
+             "payload": {{"message": "Aller chercher les enfants"}}, "task_id_to_cancel": null }}]
+
+    Contexte temporel : "mardi 10 mars 2026, 11:30"
+    "rappelle-moi de rappeler le médecin" (pas d'heure)
+      → trigger_at = "2026-03-11T09:00:00"  ← DEMAIN à 09h (pas d'heure → demain)
+      → [{{ "action": "create", "task_type": "one_shot", "task_action": "reminder",
+             "trigger_at": "2026-03-11T09:00:00", "cron_expr": null,
+             "payload": {{"message": "Rappeler le médecin"}}, "task_id_to_cancel": null }}]
+
+    "rappelle-moi tous les lundis de faire mon point projets"
+      → [{{ "action": "create", "task_type": "recurring", "task_action": "reminder",
+             "cron_expr": "weekly lundi 09:00", "trigger_at": null,
+             "payload": {{"message": "Faire le point projets"}}, "task_id_to_cancel": null }}]
+
+    "chaque lundi matin, génère un résumé de ma semaine"
+      → [{{ "action": "create", "task_type": "recurring", "task_action": "weekly",
+             "cron_expr": "weekly lundi 08:00", "trigger_at": null,
+             "payload": {{"message": "Résumé hebdomadaire"}}, "task_id_to_cancel": null }}]
+
+    "tous les jours à 7h, briefing + rappel de boire de l'eau"
+      → [{{ "action": "create", "task_type": "recurring", "task_action": "briefing",
+             "cron_expr": "daily 07:00", "trigger_at": null, "payload": {{}}, "task_id_to_cancel": null }},
+         {{ "action": "create", "task_type": "recurring", "task_action": "reminder",
+             "cron_expr": "daily 07:00", "trigger_at": null,
+             "payload": {{"message": "Boire de l'eau"}}, "task_id_to_cancel": null }}]
+
+    "décale le rappel médicaments à 8h au lieu de 7h30"
+      → [{{ "action": "cancel", "task_id_to_cancel": "<id_trouvé_dans_existing_tasks>", ... }},
+         {{ "action": "create", "task_type": "recurring", "task_action": "reminder",
+             "cron_expr": "daily 08:00", "trigger_at": null,
+             "payload": {{"message": "Prendre mes médicaments"}}, "task_id_to_cancel": null }}]
+
+    "tous les jours ouvrés à 8h, rappel standup"
+      → 5 tâches : weekly lundi 08:00, weekly mardi 08:00, weekly mercredi 08:00,
+                   weekly jeudi 08:00, weekly vendredi 08:00 — toutes reminder "Standup"
+
+    "tous les mois, rappel loyer"
+      → tasks=[] + confirmation_message: "Je ne peux pas planifier en mensuel pour l'instant.
+         Je peux créer un rappel hebdomadaire ou quotidien à la place."
 
     Retourne UNIQUEMENT un objet JSON valide :
     {{
@@ -72,4 +151,3 @@ schedule_task:
   expected_output: >
     Un objet JSON valide avec une liste de tâches à créer ou annuler.
   agent: scheduler_agent
-  

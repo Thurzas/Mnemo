@@ -66,7 +66,21 @@ cd mnemo && chmod +x mnemo.sh install.sh
 | `SchedulerCrew` | Planification en langage naturel |
 | `BriefingCrew` | Génère le briefing matinal et le résumé hebdomadaire |
 
-Pour plus de détails, consulte [CLAUDE.md](CLAUDE.md) (architecture complète).
+Pour plus de détails, consulte le [Manuel](Manual/README.md).
+
+---
+
+## Documentation
+
+| Document | Contenu |
+|----------|---------|
+| [INSTALL.MD](INSTALL.MD) | Guide d'installation complet |
+| [Manual/memory.md](Manual/memory.md) | Système de mémoire (3 couches, retrieval, consolidation) |
+| [Manual/calendar.md](Manual/calendar.md) | Calendrier ICS — lecture et écriture par le chat |
+| [Manual/crews.md](Manual/crews.md) | Les 8 crews : rôle, agents, sécurité |
+| [Manual/scheduler.md](Manual/scheduler.md) | Scheduler : planification et service background |
+| [Manual/routing.md](Manual/routing.md) | Pipeline de routing : keywords, ML, LLM |
+| [TROUBLESHOOTING.MD](TROUBLESHOOTING.MD) | Problèmes courants et solutions |
 
 ---
 

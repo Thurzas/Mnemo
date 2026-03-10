@@ -685,28 +685,38 @@ def _detect_shell_intent(msg: str) -> bool:
     return any(kw in m for kw in _SHELL_KEYWORDS)
 
 
-_SCHEDULER_KEYWORDS = [
+# Keywords forts → bypass LLM déterministe (non ambigus)
+_SCHEDULER_KEYWORDS_STRONG = [
     "rappelle-moi", "rappelle moi",
     "planifie", "planifier",
-    "programme un ", "programme une ", "programme ce ", "programme cette ",
-    "programme mon ", "programme ma ", "programme le rappel",
-    "programmer un ", "programmer une ", "programmer ce ", "programmer cette ",
     "chaque lundi", "chaque mardi", "chaque mercredi", "chaque jeudi",
     "chaque vendredi", "chaque samedi", "chaque dimanche",
     "tous les lundis", "tous les mardis", "tous les mercredis",
     "tous les jeudis", "tous les vendredis",
     "chaque semaine", "chaque jour", "tous les jours",
     "tous les matins", "chaque matin",
-    "dans 1 jour", "dans 2 jours", "dans 3 jours",
-    "demain matin", "demain soir",
-    "annule le rappel", "annule la tache", "supprime le rappel",
-    "liste mes rappels", "liste mes taches planifiees",
+    "annule le rappel", "annule la tâche", "supprime le rappel",
+    "liste mes rappels", "liste mes tâches planifiées",
     "quels sont mes rappels",
+    "programme le rappel",
+    "programmer un rappel", "programmer une tâche",
 ]
 
-def _detect_scheduler_intent(msg: str) -> bool:
+# Keywords faibles → hint pour le ML uniquement (restent ambigus sans ML)
+_SCHEDULER_KEYWORDS_WEAK = [
+    "programme un ", "programme une ", "programme ce ", "programme cette ",
+    "programme mon ", "programme ma ",
+    "programmer un ", "programmer une ", "programmer ce ", "programmer cette ",
+    "dans 1 jour", "dans 2 jours", "dans 3 jours",
+    "demain matin", "demain soir",
+]
+
+def _detect_scheduler_intent(msg: str) -> tuple[bool, bool]:
+    """Retourne (strong, weak) — strong = bypass LLM, weak = hint ML."""
     m = msg.lower()
-    return any(kw in m for kw in _SCHEDULER_KEYWORDS)
+    strong = any(kw in m for kw in _SCHEDULER_KEYWORDS_STRONG)
+    weak   = any(kw in m for kw in _SCHEDULER_KEYWORDS_WEAK)
+    return strong, weak
 
 
 _CALENDAR_WRITE_KEYWORDS = [
@@ -840,16 +850,15 @@ def handle_message(user_message: str, session_id: str) -> str:
     temporal_ctx = get_temporal_context()
     
     # --- 1. PRE-CHECK : Keywords & ML ---
-    kw_shell      = _detect_shell_intent(user_message)
-    kw_scheduler  = _detect_scheduler_intent(user_message)
-    kw_note       = _detect_note_intent(user_message)
-    kw_calendar   = _detect_calendar_write_intent(user_message)
+    kw_shell                    = _detect_shell_intent(user_message)
+    kw_scheduler_strong, kw_scheduler_weak = _detect_scheduler_intent(user_message)
+    kw_note                     = _detect_note_intent(user_message)
+    kw_calendar                 = _detect_calendar_write_intent(user_message)
     ml_route, ml_conf = _ml_detect_intent(user_message)
 
-    _dbg(f"[Check] KW: shell={kw_shell}, sched={kw_scheduler}, note={kw_note}, cal={kw_calendar} | ML: {ml_route} ({ml_conf:.2f})")
+    _dbg(f"[Check] KW: shell={kw_shell}, sched_strong={kw_scheduler_strong}, sched_weak={kw_scheduler_weak}, note={kw_note}, cal={kw_calendar} | ML: {ml_route} ({ml_conf:.2f})")
 
-    # Route note déterministe — les formules "note que / retiens que" sont
-    # non ambiguës : on bypass directement le LLM
+    # Routes déterministes — bypass LLM direct pour les signaux non ambigus
     if kw_note:
         _dbg("SKIP LLM activé -> Route retenue : note (keyword)")
         eval_json = {
@@ -870,12 +879,22 @@ def handle_message(user_message: str, session_id: str) -> str:
         }
         return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
+    if kw_scheduler_strong:
+        _dbg("SKIP LLM activé -> Route retenue : scheduler (keyword fort)")
+        eval_json = {
+            "route": "scheduler",
+            "needs_memory": False,
+            "needs_web": False,
+            "needs_clarification": False,
+        }
+        return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
+
     # --- 2. DÉCISION DU SKIP (Bypass LLM pour la performance) ---
-    # On bypass si le ML est ultra-sûr OU si Keywords + ML concordent
+    # On bypass si le ML est ultra-sûr OU si Keywords faibles + ML concordent
     should_skip_llm = (
         (ml_conf >= 0.95) or
         (kw_shell and ml_route == "shell" and ml_conf >= 0.80) or
-        (kw_scheduler and ml_route == "scheduler" and ml_conf >= 0.80) or
+        (kw_scheduler_weak and ml_route == "scheduler" and ml_conf >= 0.80) or
         (kw_calendar and ml_route == "calendar" and ml_conf >= 0.80)
     )
 

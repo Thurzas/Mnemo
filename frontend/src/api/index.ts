@@ -82,6 +82,15 @@ export interface EventUpdateRequest {
   description?: string
 }
 
+export interface ReminderItem {
+  id: string
+  message: string
+}
+
+export interface RemindersResponse {
+  reminders: ReminderItem[]
+}
+
 // ── Fetch helper ─────────────────────────────────────────────────
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -142,4 +151,7 @@ export const api = {
     request<{ ok: boolean }>(`/api/calendar/${encodeURIComponent(uid)}`, {
       method: 'DELETE',
     }),
+
+  getReminders: () =>
+    request<RemindersResponse>('/api/reminders'),
 }
