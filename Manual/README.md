@@ -13,6 +13,7 @@ Documentation technique du projet, organisée par thème.
 | [calendar.md](calendar.md) | Calendrier : configuration ICS, contexte temporel, lecture, écriture par le chat |
 | [crews.md](crews.md) | Les 8 crews : rôle, agents, outils, température, déclenchement |
 | [scheduler.md](scheduler.md) | Scheduler : SchedulerCrew, service background, tâches système, cron, CRUD |
+| [scheduler_testing.md](scheduler_testing.md) | Capacités, limites et protocole de test utilisateur du scheduler |
 
 ---
 
