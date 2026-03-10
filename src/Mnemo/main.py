@@ -861,32 +861,20 @@ def handle_message(user_message: str, session_id: str) -> str:
     # Routes déterministes — bypass LLM direct pour les signaux non ambigus
     if kw_note:
         _dbg("SKIP LLM activé -> Route retenue : note (keyword)")
-        eval_json = {
-            "route": "note",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-        }
+        eval_json = {"route": "note", "needs_memory": False, "needs_web": False, "needs_clarification": False}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
     if kw_calendar:
         _dbg("SKIP LLM activé -> Route retenue : calendar (keyword)")
-        eval_json = {
-            "route": "calendar",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-        }
+        eval_json = {"route": "calendar", "needs_memory": False, "needs_web": False, "needs_clarification": False}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
     if kw_scheduler_strong:
         _dbg("SKIP LLM activé -> Route retenue : scheduler (keyword fort)")
-        eval_json = {
-            "route": "scheduler",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-        }
+        eval_json = {"route": "scheduler", "needs_memory": False, "needs_web": False, "needs_clarification": False}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
     # --- 2. DÉCISION DU SKIP (Bypass LLM pour la performance) ---
@@ -907,6 +895,7 @@ def handle_message(user_message: str, session_id: str) -> str:
             "needs_clarification": False,
             "shell_command": None # Sera extrait plus tard si besoin
         }
+        print(f"[EVAL] (bypass ML) {json.dumps(eval_json, ensure_ascii=False)}")
     else:
         # --- 3. EVALUATION LLM (Le juge sémantique) ---
         _dbg("Lancement de l'EvaluationCrew (LLM)...")
@@ -935,6 +924,12 @@ def handle_message(user_message: str, session_id: str) -> str:
                 _dbg("ARBITRAGE : Keyword Shell prioritaire sur LLM Conversation")
                 
         eval_json["route"] = final_route
+
+        # Coercion : web_query non-null implique needs_web = True
+        if eval_json.get("web_query") and not eval_json.get("needs_web"):
+            eval_json["needs_web"] = True
+
+        print(f"[EVAL] (LLM) {json.dumps(eval_json, ensure_ascii=False)}")
 
     # --- 5. POST-TRAITEMENT (Clarification / Web / Shell) ---
     # Clarification si besoin (ex: "quel fichier ?")

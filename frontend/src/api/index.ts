@@ -10,11 +10,15 @@ export interface HealthResponse {
 export interface MessageRequest {
   message: string
   session_id?: string
+  web_confirmed?: boolean
+  web_query?: string
 }
 
 export interface MessageResponse {
   response: string
   session_id: string
+  needs_web_confirm?: boolean
+  web_query?: string
 }
 
 export interface MemorySection {

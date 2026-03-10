@@ -53,11 +53,15 @@ if STATIC_DIR.exists():
 class MessageRequest(BaseModel):
     message: str
     session_id: str | None = None
+    web_confirmed: bool | None = None   # None=premier appel, True=confirmé, False=refusé
+    web_query: str | None = None        # query confirmée (renvoyée par le client)
 
 
 class MessageResponse(BaseModel):
     response: str
     session_id: str
+    needs_web_confirm: bool = False
+    web_query: str | None = None
 
 
 # ── Pipeline web (sans confirmation interactive) ───────────────────
@@ -68,15 +72,22 @@ _SHELL_BLOCKED = (
 )
 
 
-def _handle_message_web(user_message: str, session_id: str) -> str:
+def _handle_message_web(
+    user_message: str,
+    session_id: str,
+    web_confirmed: bool | None = None,
+    confirmed_web_query: str | None = None,
+) -> str | dict:
     """
     Variante de handle_message sans stdin — destinée à l'API web.
 
     Différences vs handle_message() :
-    - route=shell → refus explicite (sécurité)
-    - needs_web   → auto-refusé (pas de confirmation interactive)
-    - needs_clarification → ignoré (pas d'input utilisateur possible)
-    - conversation / note / scheduler / calendar : pipeline normal
+    - route=shell          → refus explicite (sécurité)
+    - needs_clarification  → ignoré (pas d'input utilisateur possible)
+    - needs_web=True       → retourne {"__web_confirm__": True, "web_query": ...}
+                             si web_confirmed is None (premier appel).
+                             Si web_confirmed=True  → lance la recherche.
+                             Si web_confirmed=False → skip la recherche.
     """
     from Mnemo.main import (
         _parse_eval_json,
@@ -104,13 +115,9 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
 
     # Pre-check note : keywords forts → bypass LLM
     if _detect_note_intent(user_message):
-        eval_json = {
-            "route": "note",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-            "_web_mode": True,
-        }
+        eval_json = {"route": "note", "needs_memory": False, "needs_web": False,
+                     "needs_clarification": False, "_web_mode": True}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
         update_session_memory(session_id, user_message, response)
         return response
@@ -118,13 +125,9 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
     # Pre-check scheduler : keywords forts → bypass LLM
     kw_scheduler_strong, kw_scheduler_weak = _detect_scheduler_intent(user_message)
     if kw_scheduler_strong:
-        eval_json = {
-            "route": "scheduler",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-            "_web_mode": True,
-        }
+        eval_json = {"route": "scheduler", "needs_memory": False, "needs_web": False,
+                     "needs_clarification": False, "_web_mode": True}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
         update_session_memory(session_id, user_message, response)
         return response
@@ -134,13 +137,9 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
     ml_calendar  = ml_route == "calendar" and ml_conf >= 0.92
 
     if kw_calendar or ml_calendar:
-        eval_json = {
-            "route": "calendar",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-            "_web_mode": True,
-        }
+        eval_json = {"route": "calendar", "needs_memory": False, "needs_web": False,
+                     "needs_clarification": False, "_web_mode": True}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
         update_session_memory(session_id, user_message, response)
         return response
@@ -156,12 +155,31 @@ def _handle_message_web(user_message: str, session_id: str) -> str:
     if eval_json.get("route") == "shell":
         return _SHELL_BLOCKED
 
-    # Désactiver les flux interactifs non disponibles en mode web
-    eval_json["needs_web"] = False
+    # Coercion : web_query non-null implique needs_web = True
+    if eval_json.get("web_query") and not eval_json.get("needs_web"):
+        eval_json["needs_web"] = True
+
+    # Gestion de la recherche web interactive
+    web_context = ""
+    if eval_json.get("needs_web") and eval_json.get("web_query"):
+        if web_confirmed is None:
+            # Premier appel : demander confirmation au client
+            return {"__web_confirm__": True, "web_query": eval_json["web_query"]}
+        elif web_confirmed:
+            # Confirmé : lancer la recherche
+            from Mnemo.tools.web_tools import web_search, format_results_for_prompt
+            results = web_search(confirmed_web_query or eval_json["web_query"])
+            web_context = format_results_for_prompt(results) if results else ""
+        else:
+            # Refusé : désactiver la recherche
+            eval_json["needs_web"] = False
+            eval_json["web_query"] = None
+
     eval_json["needs_clarification"] = False
     eval_json["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
 
-    response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
+    print(f"[EVAL] (LLM) {json.dumps(eval_json, ensure_ascii=False)}")
+    response = _route_message(eval_json, user_message, session_id, temporal_ctx, web_context)
     update_session_memory(session_id, user_message, response)
     return response
 
@@ -186,10 +204,13 @@ def message(req: MessageRequest):
     """
     sid = req.session_id or f"web_{uuid.uuid4().hex[:12]}"
     try:
-        response = _handle_message_web(req.message, sid)
+        result = _handle_message_web(req.message, sid, req.web_confirmed, req.web_query)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return {"response": response, "session_id": sid}
+    if isinstance(result, dict) and result.get("__web_confirm__"):
+        return {"response": "", "session_id": sid,
+                "needs_web_confirm": True, "web_query": result["web_query"]}
+    return {"response": result, "session_id": sid}
 
 
 @app.get("/api/memory")

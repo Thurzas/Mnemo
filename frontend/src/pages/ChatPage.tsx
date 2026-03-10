@@ -1,11 +1,18 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { MessageBubble } from '@/components/MessageBubble'
+import { ConfirmModal } from '@/components/ConfirmModal'
 import { api } from '@/api'
 import styles from './ChatPage.module.css'
 
 interface Message {
   role: 'user' | 'mnemo'
   content: string
+}
+
+interface WebConfirmState {
+  query: string
+  sessionId: string
+  originalMessage: string
 }
 
 const SID_KEY = 'mnemo_sid'
@@ -19,12 +26,40 @@ export function ChatPage() {
   const [sessionId, setSessionId] = useState<string | undefined>(
     sessionStorage.getItem(SID_KEY) ?? undefined
   )
+  const [webConfirm, setWebConfirm] = useState<WebConfirmState | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  const handleWebResult = useCallback(async (
+    originalMessage: string,
+    sid: string,
+    confirmed: boolean,
+    query: string,
+  ) => {
+    setWebConfirm(null)
+    setLoading(true)
+    try {
+      const res = await api.sendMessage({
+        message: originalMessage,
+        session_id: sid,
+        web_confirmed: confirmed,
+        web_query: confirmed ? query : undefined,
+      })
+      setSessionId(res.session_id)
+      sessionStorage.setItem(SID_KEY, res.session_id)
+      setMessages(prev => [...prev, { role: 'mnemo', content: res.response }])
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
+      setMessages(prev => [...prev, { role: 'mnemo', content: `⚠ ${msg}` }])
+    } finally {
+      setLoading(false)
+      textareaRef.current?.focus()
+    }
+  }, [])
 
   const send = useCallback(async () => {
     const text = input.trim()
@@ -38,6 +73,11 @@ export function ChatPage() {
       const res = await api.sendMessage({ message: text, session_id: sessionId })
       setSessionId(res.session_id)
       sessionStorage.setItem(SID_KEY, res.session_id)
+      if (res.needs_web_confirm && res.web_query) {
+        setWebConfirm({ query: res.web_query, sessionId: res.session_id, originalMessage: text })
+        setLoading(false)
+        return
+      }
       setMessages(prev => [...prev, { role: 'mnemo', content: res.response }])
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Erreur inconnue'
@@ -94,6 +134,15 @@ export function ChatPage() {
           {loading ? '…' : '↑'}
         </button>
       </div>
+
+      {webConfirm && (
+        <ConfirmModal
+          message={`Lancer une recherche web pour :\n« ${webConfirm.query} » ?`}
+          confirmLabel="Rechercher"
+          onConfirm={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, true, webConfirm.query)}
+          onCancel={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, false, webConfirm.query)}
+        />
+      )}
     </div>
   )
 }
