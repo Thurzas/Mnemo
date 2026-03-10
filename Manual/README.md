@@ -22,4 +22,3 @@ Documentation technique du projet, organisée par thème.
 |----------|---------|
 | [../INSTALL.MD](../INSTALL.MD) | Installation pas à pas pour un nouvel utilisateur |
 | [../TROUBLESHOOTING.MD](../TROUBLESHOOTING.MD) | Problèmes courants et solutions |
-| [../CLAUDE.md](../CLAUDE.md) | Architecture complète (référence développeur) |
