@@ -195,23 +195,54 @@ def message(req: MessageRequest):
 @app.get("/api/memory")
 async def memory():
     if not MEMORY_FILE.exists():
-        return {"content": "", "sections": []}
+        return {"content": "", "sections": [], "preamble": ""}
 
     content = MEMORY_FILE.read_text(encoding="utf-8")
 
     sections: list[dict] = []
+    preamble_lines: list[str] = []
+    preamble_done = False
     current: dict | None = None
+
     for line in content.splitlines():
         if line.startswith("## "):
+            preamble_done = True
             if current is not None:
                 sections.append(current)
             current = {"title": line[3:].strip(), "content": ""}
         elif current is not None:
             current["content"] += line + "\n"
+        elif not preamble_done:
+            preamble_lines.append(line)
+
     if current is not None:
         sections.append(current)
 
-    return {"content": content, "sections": sections}
+    # Trim trailing newlines from section content for cleaner editing
+    for s in sections:
+        s["content"] = s["content"].rstrip("\n")
+
+    preamble = "\n".join(preamble_lines).rstrip("\n")
+    return {"content": content, "sections": sections, "preamble": preamble}
+
+
+class MemoryWriteRequest(BaseModel):
+    content: str
+
+
+@app.post("/api/memory")
+def memory_write(req: MemoryWriteRequest):
+    """
+    Écrit le contenu dans memory.md puis synchronise la DB SQLite.
+    Exécuté en thread pool (def, pas async) car sync_markdown_to_db peut être lent.
+    """
+    try:
+        from Mnemo.tools.memory_tools import sync_markdown_to_db
+        MEMORY_FILE.write_text(req.content, encoding="utf-8")
+        sync_markdown_to_db()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/sessions")

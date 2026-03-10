@@ -25,6 +25,7 @@ export interface MemorySection {
 export interface MemoryResponse {
   content: string
   sections: MemorySection[]
+  preamble: string
 }
 
 export interface SessionMeta {

@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { toast } from 'react-toastify'
 import { api, type CalendarEvent, type EventCreateRequest, type EventUpdateRequest } from '@/api'
+import { ConfirmModal } from '@/components/ConfirmModal'
 import styles from './CalendarPage.module.css'
 
 interface Props { active: boolean }
@@ -58,6 +60,8 @@ interface ModalState {
 
 const EMPTY_MODAL: ModalState = { uid: '', title: '', date: '', time: '', duration: 60, location: '' }
 
+type ConfirmState = { message: string; onConfirm: () => void } | null
+
 export function CalendarPage({ active }: Props) {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [writable, setWritable] = useState(false)
@@ -67,6 +71,19 @@ export function CalendarPage({ active }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [modal, setModal] = useState<ModalState | null>(null)
   const [saving, setSaving] = useState(false)
+  const [confirmState, setConfirmState] = useState<ConfirmState>(null)
+  const confirmResolve = useRef<((v: boolean) => void) | null>(null)
+
+  const askConfirm = (message: string): Promise<boolean> =>
+    new Promise(resolve => {
+      confirmResolve.current = resolve
+      setConfirmState({ message, onConfirm: () => { setConfirmState(null); resolve(true) } })
+    })
+
+  const handleConfirmNo = () => {
+    setConfirmState(null)
+    confirmResolve.current?.(false)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -129,19 +146,20 @@ export function CalendarPage({ active }: Props) {
       closeModal()
       await load()
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Erreur')
+      toast.error(e instanceof Error ? e.message : 'Erreur')
     } finally {
       setSaving(false)
     }
   }
 
   const deleteEv = async (e: CalendarEvent) => {
-    if (!confirm(`Supprimer "${e.title}" ?`)) return
+    const ok = await askConfirm(`Supprimer "${e.title}" ?`)
+    if (!ok) return
     try {
       await api.deleteEvent(e.uid)
       await load()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Erreur')
+      toast.error(err instanceof Error ? err.message : 'Erreur')
     }
   }
 
@@ -278,6 +296,16 @@ export function CalendarPage({ active }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {confirmState && (
+        <ConfirmModal
+          message={confirmState.message}
+          confirmLabel="Supprimer"
+          danger
+          onConfirm={confirmState.onConfirm}
+          onCancel={handleConfirmNo}
+        />
       )}
     </div>
   )
