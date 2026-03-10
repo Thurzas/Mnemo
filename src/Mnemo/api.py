@@ -276,8 +276,11 @@ def _serialize_events(events: list) -> list:
 @app.get("/api/calendar")
 async def calendar_list():
     try:
+        from datetime import date, timedelta
         from Mnemo.tools.calendar_tools import get_events_with_uid, calendar_is_writable
-        events = get_events_with_uid(days=60)
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())  # lundi de la semaine courante
+        events = get_events_with_uid(days=60, from_date=week_start)
         return {
             "events": _serialize_events(events),
             "writable": calendar_is_writable(),
