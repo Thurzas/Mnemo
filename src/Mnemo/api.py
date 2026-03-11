@@ -16,6 +16,7 @@ Routes :
   GET    /api/reminders          → rappels depuis briefing.md
   POST   /api/users              → créer un utilisateur (MNEMO_ADMIN_TOKEN requis)
   GET    /api/auth/whoami        → infos de l'utilisateur courant
+  WS     /ws/message             → streaming token par token (auth + message loop)
 
 Authentification :
   - Toutes les routes /api/* (sauf health) requièrent : Authorization: Bearer <token>
@@ -31,6 +32,8 @@ Sécurité :
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import hashlib
 import json
 import os
@@ -41,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -517,6 +520,61 @@ def calendar_delete(event_uid: str, _: Auth):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/calendar/import", status_code=200)
+async def calendar_import(file: UploadFile, _: Auth):
+    """
+    Importe un fichier ICS : fusionne les VEVENTs dans le calendrier local.
+    Les événements dont l'UID existe déjà sont ignorés (pas de doublon).
+    Retourne {"imported": N, "skipped": M}.
+    """
+    try:
+        from Mnemo.tools.calendar_tools import (
+            calendar_is_writable, _load_writable_calendar, _save_calendar
+        )
+        from icalendar import Calendar as _Calendar
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"icalendar non disponible : {e}")
+
+    if not calendar_is_writable():
+        raise HTTPException(status_code=403, detail="Calendrier en lecture seule (URL distante).")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+
+    try:
+        imported_cal = _Calendar.from_ical(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Fichier ICS invalide.")
+
+    local_cal = _load_writable_calendar()
+
+    # Collecte les UIDs déjà présents
+    existing_uids: set[str] = {
+        str(c.get("UID", ""))
+        for c in local_cal.walk()
+        if c.name == "VEVENT"
+    }
+
+    imported = 0
+    skipped = 0
+    for component in imported_cal.walk():
+        if component.name != "VEVENT":
+            continue
+        uid = str(component.get("UID", ""))
+        if uid and uid in existing_uids:
+            skipped += 1
+            continue
+        local_cal.add_component(component)
+        existing_uids.add(uid)
+        imported += 1
+
+    if imported > 0:
+        _save_calendar(local_cal)
+
+    return {"imported": imported, "skipped": skipped}
+
+
 @app.get("/api/reminders")
 async def reminders(_: Auth):
     """
@@ -582,6 +640,79 @@ async def create_user(
     return {"username": username, "token": token}
 
 
+_ONBOARDING_QUESTIONS = [
+    {"id": "name",     "question": "Comment tu t'appelles ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Nom/Pseudo"},
+    {"id": "job",      "question": "Quelle est ta profession ou ton domaine d'activité ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Métier"},
+    {"id": "location", "question": "Dans quelle ville ou pays tu te trouves ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Localisation"},
+    {"id": "style",    "question": "Tu préfères des réponses courtes et directes, ou détaillées ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Préférences & style",  "label": "Style de communication"},
+    {"id": "agent",    "question": "Comment tu veux appeler l'agent ? Il a un nom ?",
+     "section": "🧑 Identité Agent",       "subsection": "Rôle & personnalité définis", "label": "Nom de l'agent"},
+]
+
+
+@app.get("/api/onboarding/status")
+async def onboarding_status(_: Auth):
+    """
+    Première connexion = memory.md absent ou vide.
+    Dans ce cas, retourne les 5 questions d'initialisation.
+    """
+    from Mnemo.context import get_data_dir
+
+    memory_file = get_data_dir() / "memory.md"
+    is_empty    = (
+        not memory_file.exists()
+        or not memory_file.read_text(encoding="utf-8", errors="ignore").strip()
+    )
+
+    return {
+        "needed":    is_empty,
+        "questions": _ONBOARDING_QUESTIONS if is_empty else [],
+    }
+
+
+class OnboardingAnswerItem(BaseModel):
+    id: str
+    answer: str
+    section: str
+    subsection: str
+    label: str
+
+
+class OnboardingSubmitRequest(BaseModel):
+    answers: list[OnboardingAnswerItem]
+
+
+@app.post("/api/onboarding")
+def onboarding_submit(req: OnboardingSubmitRequest, _: Auth):
+    """
+    Écrit les réponses non vides dans memory.md et synchronise la DB.
+    """
+    from Mnemo.tools.memory_tools import update_markdown_section, sync_markdown_to_db
+
+    written = 0
+    for ans in req.answers:
+        text = ans.answer.strip()
+        if not text:
+            continue
+        content = f"- **{ans.label}** : {text}" if ans.label else text
+        update_markdown_section(
+            section    = ans.section,
+            subsection = ans.subsection,
+            content    = content,
+            category   = "identité",
+        )
+        written += 1
+
+    if written:
+        sync_markdown_to_db()
+
+    return {"ok": True, "written": written}
+
+
 @app.get("/api/auth/whoami")
 async def whoami(username: Auth):
     users = _load_users()
@@ -591,6 +722,127 @@ async def whoami(username: Auth):
         "calendar_source": info.get("calendar_source", ""),
         "created_at": info.get("created_at"),
     }
+
+
+# ── WebSocket streaming ────────────────────────────────────────────
+
+@app.websocket("/ws/message")
+async def ws_message(websocket: WebSocket):
+    """
+    WebSocket endpoint pour le streaming de réponses token par token.
+
+    Protocole client → serveur :
+      {"type": "auth",       "token": "mnemo_..."}
+      {"type": "message",    "message": "...", "session_id": "..."}
+      {"type": "web_answer", "confirmed": bool, "web_query": "...",
+                             "session_id": "...", "original_message": "..."}
+
+    Protocole serveur → client :
+      {"type": "auth_ok",    "username": "..."}
+      {"type": "thinking"}
+      {"type": "token",      "text": "word "}
+      {"type": "done",       "session_id": "..."}
+      {"type": "web_confirm","web_query": "...", "session_id": "...", "original_message": "..."}
+      {"type": "error",      "detail": "..."}
+    """
+    from Mnemo.context import set_data_dir, set_calendar_source
+
+    await websocket.accept()
+
+    # Auth handshake
+    try:
+        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+    except Exception:
+        await websocket.close(code=4001)
+        return
+
+    if auth_msg.get("type") != "auth":
+        await websocket.send_json({"type": "error", "detail": "Authentification requise"})
+        await websocket.close(code=4001)
+        return
+
+    token = auth_msg.get("token", "")
+    token_hash = _hash_token(token)
+    users = _load_users()
+    username: str | None = None
+    user_info: dict | None = None
+    for u, info in users.items():
+        if info.get("token_hash") == token_hash:
+            username = u
+            user_info = info
+            break
+
+    if not username or user_info is None:
+        await websocket.send_json({"type": "error", "detail": "Token invalide"})
+        await websocket.close(code=4003)
+        return
+
+    user_dir = _init_user_dir(username, user_info)
+    set_data_dir(user_dir)
+    if user_info.get("calendar_source"):
+        set_calendar_source(user_info["calendar_source"])
+
+    # Capture context après set_data_dir — propagé dans run_in_executor
+    user_context = contextvars.copy_context()
+
+    await websocket.send_json({"type": "auth_ok", "username": username})
+
+    loop = asyncio.get_event_loop()
+
+    async def _run_and_stream(
+        text: str,
+        sid: str,
+        web_confirmed: bool | None = None,
+        web_query: str | None = None,
+    ) -> None:
+        await websocket.send_json({"type": "thinking"})
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: user_context.run(
+                    _handle_message_web, text, sid, web_confirmed, web_query
+                ),
+            )
+        except Exception as e:
+            await websocket.send_json({"type": "error", "detail": str(e)})
+            return
+
+        if isinstance(result, dict) and result.get("__web_confirm__"):
+            await websocket.send_json({
+                "type": "web_confirm",
+                "web_query": result["web_query"],
+                "session_id": sid,
+                "original_message": text,
+            })
+            return
+
+        words = (result or "").split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == len(words) - 1 else word + " "
+            await websocket.send_json({"type": "token", "text": chunk})
+            await asyncio.sleep(0.012)
+
+        await websocket.send_json({"type": "done", "session_id": sid})
+
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            msg_type = msg.get("type")
+
+            if msg_type == "message":
+                text = msg.get("message", "")
+                sid  = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+                await _run_and_stream(text, sid)
+
+            elif msg_type == "web_answer":
+                original  = msg.get("original_message", "")
+                sid       = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+                confirmed = bool(msg.get("confirmed", False))
+                wq        = msg.get("web_query") if confirmed else None
+                await _run_and_stream(original, sid, confirmed, wq)
+
+    except WebSocketDisconnect:
+        pass
 
 
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──

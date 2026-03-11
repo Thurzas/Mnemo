@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { MessageBubble } from '@/components/MessageBubble'
 import { ConfirmModal } from '@/components/ConfirmModal'
-import { api } from '@/api'
+import { auth } from '@/api'
 import styles from './ChatPage.module.css'
 
 interface Message {
@@ -15,78 +15,157 @@ interface WebConfirmState {
   originalMessage: string
 }
 
+type WsStatus = 'connecting' | 'ready' | 'error'
+
 const SID_KEY = 'mnemo_sid'
+const WS_URL  = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/message`
 
 export function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages, setMessages]       = useState<Message[]>([
     { role: 'mnemo', content: 'Bonjour. Comment puis-je t\'aider ?' },
   ])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [sessionId, setSessionId] = useState<string | undefined>(
+  const [input, setInput]             = useState('')
+  const [loading, setLoading]         = useState(false)
+  const [streamBuffer, setStreamBuffer] = useState('')
+  const [sessionId, setSessionId]     = useState<string | undefined>(
     sessionStorage.getItem(SID_KEY) ?? undefined
   )
-  const [webConfirm, setWebConfirm] = useState<WebConfirmState | null>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [webConfirm, setWebConfirm]   = useState<WebConfirmState | null>(null)
+  const [wsStatus, setWsStatus]       = useState<WsStatus>('connecting')
+
+  const bottomRef    = useRef<HTMLDivElement>(null)
+  const textareaRef  = useRef<HTMLTextAreaElement>(null)
+  const wsRef        = useRef<WebSocket | null>(null)
+  const streamBufRef = useRef('')
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+  }, [messages, loading, streamBuffer])
 
-  const handleWebResult = useCallback(async (
+  // ── WebSocket lifecycle ──────────────────────────────────────────
+
+  const connect = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return
+
+    const token = auth.getToken()
+    if (!token) return
+
+    setWsStatus('connecting')
+    const ws = new WebSocket(WS_URL)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'auth', token }))
+    }
+
+    ws.onmessage = (ev) => {
+      let data: Record<string, unknown>
+      try { data = JSON.parse(ev.data) } catch { return }
+
+      switch (data.type) {
+        case 'auth_ok':
+          setWsStatus('ready')
+          break
+
+        case 'thinking':
+          setLoading(true)
+          streamBufRef.current = ''
+          setStreamBuffer('')
+          break
+
+        case 'token': {
+          const chunk = String(data.text ?? '')
+          streamBufRef.current += chunk
+          setStreamBuffer(streamBufRef.current)
+          break
+        }
+
+        case 'done': {
+          const sid = String(data.session_id ?? '')
+          setMessages(prev => [...prev, { role: 'mnemo', content: streamBufRef.current }])
+          streamBufRef.current = ''
+          setStreamBuffer('')
+          setLoading(false)
+          setSessionId(sid)
+          sessionStorage.setItem(SID_KEY, sid)
+          textareaRef.current?.focus()
+          break
+        }
+
+        case 'web_confirm':
+          setWebConfirm({
+            query: String(data.web_query ?? ''),
+            sessionId: String(data.session_id ?? ''),
+            originalMessage: String(data.original_message ?? ''),
+          })
+          setLoading(false)
+          streamBufRef.current = ''
+          setStreamBuffer('')
+          break
+
+        case 'error':
+          setMessages(prev => [
+            ...prev, { role: 'mnemo', content: `⚠ ${data.detail ?? 'Erreur inconnue'}` },
+          ])
+          setLoading(false)
+          streamBufRef.current = ''
+          setStreamBuffer('')
+          break
+      }
+    }
+
+    ws.onerror = () => {
+      setWsStatus('error')
+    }
+
+    ws.onclose = () => {
+      setWsStatus('error')
+      // auto-reconnect after 2 s
+      reconnectRef.current = setTimeout(connect, 2000)
+    }
+  }, [])
+
+  useEffect(() => {
+    connect()
+    return () => {
+      reconnectRef.current && clearTimeout(reconnectRef.current)
+      wsRef.current?.close()
+    }
+  }, [connect])
+
+  // ── Send helpers ─────────────────────────────────────────────────
+
+  const sendWs = (payload: Record<string, unknown>) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(payload))
+    }
+  }
+
+  const send = useCallback(() => {
+    const text = input.trim()
+    if (!text || loading || wsStatus !== 'ready') return
+
+    setInput('')
+    setMessages(prev => [...prev, { role: 'user', content: text }])
+    sendWs({ type: 'message', message: text, session_id: sessionId })
+  }, [input, loading, sessionId, wsStatus])
+
+  const handleWebResult = useCallback((
     originalMessage: string,
     sid: string,
     confirmed: boolean,
     query: string,
   ) => {
     setWebConfirm(null)
-    setLoading(true)
-    try {
-      const res = await api.sendMessage({
-        message: originalMessage,
-        session_id: sid,
-        web_confirmed: confirmed,
-        web_query: confirmed ? query : undefined,
-      })
-      setSessionId(res.session_id)
-      sessionStorage.setItem(SID_KEY, res.session_id)
-      setMessages(prev => [...prev, { role: 'mnemo', content: res.response }])
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
-      setMessages(prev => [...prev, { role: 'mnemo', content: `⚠ ${msg}` }])
-    } finally {
-      setLoading(false)
-      textareaRef.current?.focus()
-    }
+    sendWs({
+      type: 'web_answer',
+      confirmed,
+      web_query: query,
+      session_id: sid,
+      original_message: originalMessage,
+    })
   }, [])
-
-  const send = useCallback(async () => {
-    const text = input.trim()
-    if (!text || loading) return
-
-    setInput('')
-    setLoading(true)
-    setMessages(prev => [...prev, { role: 'user', content: text }])
-
-    try {
-      const res = await api.sendMessage({ message: text, session_id: sessionId })
-      setSessionId(res.session_id)
-      sessionStorage.setItem(SID_KEY, res.session_id)
-      if (res.needs_web_confirm && res.web_query) {
-        setWebConfirm({ query: res.web_query, sessionId: res.session_id, originalMessage: text })
-        setLoading(false)
-        return
-      }
-      setMessages(prev => [...prev, { role: 'mnemo', content: res.response }])
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Erreur inconnue'
-      setMessages(prev => [...prev, { role: 'mnemo', content: `⚠ ${msg}` }])
-    } finally {
-      setLoading(false)
-      textareaRef.current?.focus()
-    }
-  }, [input, loading, sessionId])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -102,13 +181,16 @@ export function ChatPage() {
     el.style.height = Math.min(el.scrollHeight, 110) + 'px'
   }
 
+  const isDisabled = loading || wsStatus !== 'ready'
+
   return (
     <div className={styles.page}>
       <div className={styles.messages}>
         {messages.map((m, i) => (
           <MessageBubble key={i} role={m.role} content={m.content} />
         ))}
-        {loading && <MessageBubble role="mnemo" content="" loading />}
+        {loading && !streamBuffer && <MessageBubble role="mnemo" content="" loading />}
+        {streamBuffer && <MessageBubble role="mnemo" content={streamBuffer} streaming />}
         <div ref={bottomRef} />
       </div>
 
@@ -124,12 +206,12 @@ export function ChatPage() {
           onKeyDown={onKeyDown}
           placeholder="Envoie un message… (Entrée pour envoyer, Maj+Entrée pour sauter une ligne)"
           rows={1}
-          disabled={loading}
+          disabled={isDisabled}
         />
         <button
           className={styles.sendBtn}
           onClick={send}
-          disabled={loading || !input.trim()}
+          disabled={isDisabled || !input.trim()}
         >
           {loading ? '…' : '↑'}
         </button>

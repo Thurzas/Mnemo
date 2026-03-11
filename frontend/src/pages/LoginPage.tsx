@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react'
+import { useState } from 'react'
 import { api, auth } from '@/api'
 import styles from './LoginPage.module.css'
 
@@ -11,7 +11,7 @@ export function LoginPage({ onLogin }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault()
     const t = token.trim()
     if (!t) return

@@ -54,11 +54,23 @@ interface ModalState {
   title: string
   date: string
   time: string
-  duration: number
+  endTime: string
   location: string
 }
 
-const EMPTY_MODAL: ModalState = { uid: '', title: '', date: '', time: '', duration: 60, location: '' }
+const EMPTY_MODAL: ModalState = { uid: '', title: '', date: '', time: '', endTime: '', location: '' }
+
+function timeDiffMinutes(start: string, end: string): number {
+  const [sh, sm] = start.split(':').map(Number)
+  const [eh, em] = end.split(':').map(Number)
+  return Math.max((eh * 60 + em) - (sh * 60 + sm), 15)
+}
+
+function addMinutes(time: string, mins: number): string {
+  const [h, m] = time.split(':').map(Number)
+  const total = h * 60 + m + mins
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
 
 type ConfirmState = { message: string; onConfirm: () => void } | null
 
@@ -73,6 +85,20 @@ export function CalendarPage({ active }: Props) {
   const [saving, setSaving] = useState(false)
   const [confirmState, setConfirmState] = useState<ConfirmState>(null)
   const confirmResolve = useRef<((v: boolean) => void) | null>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    try {
+      const { imported, skipped } = await api.importCalendar(file)
+      toast.success(`${imported} événement(s) importé(s)${skipped ? `, ${skipped} ignoré(s)` : ''}`)
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erreur import')
+    }
+  }
 
   const askConfirm = (message: string): Promise<boolean> =>
     new Promise(resolve => {
@@ -113,7 +139,7 @@ export function CalendarPage({ active }: Props) {
       title: e.title,
       date: e.date ?? (d ? d.toISOString().slice(0, 10) : ''),
       time: e.datetime ? fmtTime(e.datetime) : '',
-      duration: 60,
+      endTime: e.datetime ? addMinutes(fmtTime(e.datetime), e.duration_minutes ?? 60) : '',
       location: e.location ?? '',
     })
   }
@@ -129,7 +155,7 @@ export function CalendarPage({ active }: Props) {
           title: modal.title,
           date: modal.date,
           ...(modal.time && { time: modal.time }),
-          duration_minutes: modal.duration,
+          duration_minutes: (modal.time && modal.endTime) ? timeDiffMinutes(modal.time, modal.endTime) : 60,
           ...(modal.location && { location: modal.location }),
         }
         await api.updateEvent(modal.uid, body)
@@ -138,7 +164,7 @@ export function CalendarPage({ active }: Props) {
           title: modal.title,
           date: modal.date,
           ...(modal.time && { time: modal.time }),
-          duration_minutes: modal.duration,
+          duration_minutes: (modal.time && modal.endTime) ? timeDiffMinutes(modal.time, modal.endTime) : 60,
           ...(modal.location && { location: modal.location }),
         }
         await api.createEvent(body)
@@ -206,9 +232,17 @@ export function CalendarPage({ active }: Props) {
               onClick={() => setView('week')}
             >Semaine</button>
           </div>
-          {writable && (
+          {writable && (<>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".ics"
+              style={{ display: 'none' }}
+              onChange={handleImport}
+            />
+            <button className={styles.importBtn} onClick={() => importInputRef.current?.click()}>↑ ICS</button>
             <button className={styles.addBtn} onClick={openCreate}>+ Ajouter</button>
-          )}
+          </>)}
         </div>
       </div>
 
@@ -267,14 +301,12 @@ export function CalendarPage({ active }: Props) {
                 />
               </div>
               <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Durée (min)</label>
+                <label className={styles.formLabel}>Heure de fin</label>
                 <input
                   className={styles.formInput}
-                  type="number"
-                  min={5}
-                  step={5}
-                  value={modal.duration}
-                  onChange={e => setModal(m => m && ({ ...m, duration: Number(e.target.value) }))}
+                  type="time"
+                  value={modal.endTime}
+                  onChange={e => setModal(m => m && ({ ...m, endTime: e.target.value }))}
                 />
               </div>
             </div>
@@ -392,6 +424,7 @@ function WeekView({ events, days, writable, onEdit, onDelete }: WeekProps) {
       <div className={styles.weekInner}>
         {/* Hour gutter */}
         <div className={styles.weekGutter}>
+          <div className={styles.weekGutterSpacer} />
           {hours.map(h => (
             <div key={h} className={styles.hourLabel} style={{ height: PX_H }}>
               {String(h).padStart(2, '0')}:00

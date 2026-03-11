@@ -96,6 +96,27 @@ export interface RemindersResponse {
   reminders: ReminderItem[]
 }
 
+export interface OnboardingQuestion {
+  id: string
+  question: string
+  section: string
+  subsection: string
+  label: string
+}
+
+export interface OnboardingStatusResponse {
+  needed: boolean
+  questions: OnboardingQuestion[]
+}
+
+export interface OnboardingAnswerItem {
+  id: string
+  answer: string
+  section: string
+  subsection: string
+  label: string
+}
+
 // ── Auth token ───────────────────────────────────────────────────
 
 const TOKEN_KEY = 'mnemo_token'
@@ -120,7 +141,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, headers })
   if (res.status === 401) {
     auth.clear()
-    window.location.href = '/login'
     throw new Error('Non authentifié')
   }
   if (!res.ok) {
@@ -177,9 +197,33 @@ export const api = {
       method: 'DELETE',
     }),
 
+  importCalendar: async (file: File): Promise<{ imported: number; skipped: number }> => {
+    const token = auth.getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch('/api/calendar/import', { method: 'POST', headers, body })
+    if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(detail?.detail ?? res.statusText)
+    }
+    return res.json()
+  },
+
   getReminders: () =>
     request<RemindersResponse>('/api/reminders'),
 
   whoami: () =>
     request<{ username: string; calendar_source: string; created_at: string | null }>('/api/auth/whoami'),
+
+  onboardingStatus: () =>
+    request<OnboardingStatusResponse>('/api/onboarding/status'),
+
+  onboardingSubmit: (answers: OnboardingAnswerItem[]) =>
+    request<{ ok: boolean; written: number }>('/api/onboarding', {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    }),
 }
