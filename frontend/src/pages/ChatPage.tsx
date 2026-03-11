@@ -83,8 +83,9 @@ export function ChatPage() {
 
         case 'done': {
           const sid = String(data.session_id ?? '')
-          setMessages(prev => [...prev, { role: 'mnemo', content: streamBufRef.current }])
+          const finalContent = streamBufRef.current
           streamBufRef.current = ''
+          setMessages(prev => [...prev, { role: 'mnemo', content: finalContent }])
           setStreamBuffer('')
           setLoading(false)
           setSessionId(sid)
