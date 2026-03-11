@@ -49,6 +49,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# Import anticipé de main.py — son code module-level appelle _set_data_dir("/data")
+# ce qui est inoffensif ici (contexte startup = root context, isolé des contextes
+# utilisateurs). Sans ça, l'import se déclencherait à l'intérieur de
+# user_context.run(...) et écraserait le user_dir avec /data.
+import Mnemo.main as _mnemo_main  # noqa: F401
+
 DATA_PATH  = Path(os.getenv("DATA_PATH", "/data")).resolve()
 USERS_FILE = DATA_PATH / "users.json"
 USERS_DIR  = DATA_PATH / "users"
