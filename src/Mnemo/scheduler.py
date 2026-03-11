@@ -24,6 +24,9 @@ import os
 import sys
 import time
 import json
+
+# Permissions restrictives dès le démarrage — nouveau fichier 600, répertoire 700
+os.umask(0o077)
 import re
 import logging
 from datetime import datetime, date, timedelta

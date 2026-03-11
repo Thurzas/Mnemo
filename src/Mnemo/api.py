@@ -51,6 +51,11 @@ USERS_FILE = DATA_PATH / "users.json"
 USERS_DIR  = DATA_PATH / "users"
 STATIC_DIR = Path(__file__).parent / "static"
 
+# ── Restrictions de permissions ────────────────────────────────────
+# Nouveau fichier → 600 (rw-------), nouveau répertoire → 700 (rwx------)
+# Protège les données utilisateurs contre les autres comptes OS sur l'hôte.
+os.umask(0o077)
+
 app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
 
 # Serve React build — mounted last so /api/* routes take priority
@@ -73,6 +78,11 @@ def _load_users() -> dict:
 def _save_users(users: dict) -> None:
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     USERS_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        USERS_FILE.chmod(0o600)         # rw------- : hash des tokens, sensible
+        USERS_FILE.parent.chmod(0o700)  # rwx------ : répertoire /data
+    except OSError:
+        pass
 
 
 def _hash_token(token: str) -> str:
@@ -84,11 +94,23 @@ def _init_user_dir(username: str, user_info: dict) -> Path:
     from Mnemo.init_db import init_db, migrate_db
     user_dir = USERS_DIR / username
     user_dir.mkdir(parents=True, exist_ok=True)
-    (user_dir / "sessions").mkdir(exist_ok=True)
+    sessions_dir = user_dir / "sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    # chmod explicite — couvre les répertoires créés avant l'ajout de umask(077)
+    try:
+        USERS_DIR.chmod(0o700)
+        user_dir.chmod(0o700)
+        sessions_dir.chmod(0o700)
+    except OSError:
+        pass
     db_path = user_dir / "memory.db"
     if not db_path.exists():
         init_db(db_path=db_path)
         migrate_db(db_path=db_path)
+        try:
+            db_path.chmod(0o600)
+        except OSError:
+            pass
     return user_dir
 
 

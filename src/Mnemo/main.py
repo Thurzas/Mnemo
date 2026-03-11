@@ -1073,6 +1073,9 @@ def run():
     Point d'entrée principal — appelé par `crewai run`.
     Lance une session de conversation interactive en CLI.
     """
+    import os as _os_run
+    _os_run.umask(0o077)  # nouveau fichier → 600, nouveau répertoire → 700
+
     # 1. Vérifie la cohérence de memory.md avec la DB
     check_and_sync()
 
