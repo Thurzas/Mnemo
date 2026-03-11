@@ -15,6 +15,7 @@
 #   ./mnemo.sh logs-api     # logs de l'API en temps réel
 #   ./mnemo.sh ingest <f>   # ingère un fichier dans la mémoire
 #   ./mnemo.sh adduser <n>  # crée un utilisateur et affiche son token
+#   ./mnemo.sh fix-perms    # chmod 600/700 sur /data (migration données existantes)
 #   ./mnemo.sh status       # état des containers
 #
 # Tip WSL2 : ajoute un alias dans ~/.bashrc pour lancer depuis n'importe où :
@@ -131,6 +132,26 @@ case "$CMD" in
     fi
     ;;
 
+  fix-perms)
+    DATA_DIR="${DATA_PATH:-./data}"
+    info "Correction des permissions sur $DATA_DIR..."
+    # Données globales
+    [ -f "$DATA_DIR/users.json" ] && chmod 600 "$DATA_DIR/users.json"
+    [ -d "$DATA_DIR/users" ]     && chmod 700 "$DATA_DIR/users"
+    [ -d "$DATA_DIR/sessions" ]  && chmod 700 "$DATA_DIR/sessions"
+    # Fichiers globaux
+    for f in "$DATA_DIR"/briefing.md "$DATA_DIR"/weekly.md \
+             "$DATA_DIR"/memory.md "$DATA_DIR"/tasks.md; do
+      [ -f "$f" ] && chmod 600 "$f"
+    done
+    # Répertoires et fichiers par utilisateur
+    if [ -d "$DATA_DIR/users" ]; then
+      find "$DATA_DIR/users" -type d -exec chmod 700 {} +
+      find "$DATA_DIR/users" -type f -exec chmod 600 {} +
+    fi
+    ok "Permissions corrigées."
+    ;;
+
   adduser)
     USERNAME="${2:-}"
     if [ -z "$USERNAME" ]; then
@@ -223,6 +244,7 @@ print(token)
     echo -e "  ${BOLD}./mnemo.sh logs-api${RESET}      Logs API en temps réel"
     echo -e "  ${BOLD}./mnemo.sh ingest <f>${RESET}    Ingère un fichier en mémoire"
     echo -e "  ${BOLD}./mnemo.sh adduser <n>${RESET}   Crée un utilisateur, affiche son token"
+    echo -e "  ${BOLD}./mnemo.sh fix-perms${RESET}     Corrige chmod 600/700 sur /data (migration)"
     echo -e "  ${BOLD}./mnemo.sh status${RESET}        État des containers"
     echo ""
     ;;
