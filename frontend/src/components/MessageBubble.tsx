@@ -4,6 +4,7 @@ interface Props {
   role: 'user' | 'mnemo'
   content: string
   loading?: boolean
+  streaming?: boolean
 }
 
 function formatMsg(text: string): string {
@@ -24,7 +25,7 @@ function formatMsg(text: string): string {
   return out
 }
 
-export function MessageBubble({ role, content, loading }: Props) {
+export function MessageBubble({ role, content, loading, streaming }: Props) {
   const avatar = role === 'user' ? 'T' : 'M'
 
   return (
@@ -36,7 +37,10 @@ export function MessageBubble({ role, content, loading }: Props) {
             <span /><span /><span />
           </span>
         ) : (
-          <span dangerouslySetInnerHTML={{ __html: formatMsg(content) }} />
+          <>
+            <span dangerouslySetInnerHTML={{ __html: formatMsg(content) }} />
+            {streaming && <span className={styles.cursor} />}
+          </>
         )}
       </div>
     </div>
