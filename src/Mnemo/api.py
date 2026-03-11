@@ -732,31 +732,47 @@ async def whoami(username: Auth):
 
 async def _consolidate_on_disconnect(sid: str, user_context: contextvars.Context) -> None:
     """
-    Lance end_session() en background après déconnexion WebSocket.
-    Ignoré si la session est vide ou déjà consolidée (.done).
+    Reproduit le pipeline de fin de session CLI après déconnexion WebSocket :
+      1. end_session()       → ConsolidationCrew → memory.md + sync DB + .done marker
+      2. curiosity_session() → détection des lacunes mémoire (phases 1a + 1b)
+                               La phase 3 (collecte interactive) est ignorée en web :
+                               stdin fermé → EOFError capturé → _collect_answers retourne [].
+    Ignoré si la session est vide ou déjà consolidée.
     """
     def _run() -> None:
-        from Mnemo.main import end_session
+        from Mnemo.main import end_session, curiosity_session
         from Mnemo.tools.memory_tools import load_session_json
         from Mnemo.context import get_data_dir
 
         session = load_session_json(sid)
         if not session.get("messages"):
-            return  # session vide — rien à consolider
+            return
 
         done_marker = get_data_dir() / "sessions" / f"{sid}.done"
         if done_marker.exists():
-            return  # déjà consolidée
+            return
 
-        print(f"[WS] Consolidation on disconnect : {sid}")
-        end_session(sid)
-        print(f"[WS] Consolidation terminée : {sid}")
+        # ── Étape 1 : consolidation + ingestion mémoire ──────────
+        print(f"[WS] Consolidation session {sid}…")
+        session_summary = ""
+        session_text = ""
+        try:
+            session_summary, session_text = end_session(sid)
+            print(f"[WS] Consolidation terminée : {sid}")
+        except Exception as e:
+            print(f"[WS] Consolidation échouée ({sid}) : {e}")
+
+        # ── Étape 2 : détection des lacunes mémoire ──────────────
+        try:
+            curiosity_session(session_text or session_summary or "")
+        except Exception as e:
+            print(f"[WS] Curiosity ignoré ({sid}) : {e}")
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: user_context.run(_run))
     except Exception as e:
-        print(f"[WS] Consolidation {sid} échouée : {e}")
+        print(f"[WS] Pipeline fin de session échoué ({sid}) : {e}")
 
 
 # ── WebSocket streaming ────────────────────────────────────────────
@@ -880,7 +896,7 @@ async def ws_message(websocket: WebSocket):
 
     except WebSocketDisconnect:
         if last_sid:
-            asyncio.create_task(_consolidate_on_disconnect(last_sid, user_context))
+            await _consolidate_on_disconnect(last_sid, user_context)
 
 
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──
