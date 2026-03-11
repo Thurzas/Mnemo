@@ -98,8 +98,8 @@ Turn Mnemo into a headless brain callable from any interface.
   - [x] `GET /memory` — read long-term memory
   - [x] `POST /memory` — write a fact directly into memory
   - [x] `GET /session/{id}` — session history
-  - [ ] Lightweight authentication (local token, no public exposure)
-  - [ ] WebSocket for token-by-token response streaming
+  - [x] Lightweight authentication (local token, no public exposure)
+  - [x] WebSocket for token-by-token response streaming
 - [ ] **Local TTS / STT**
   - [ ] Speech-to-Text via Whisper.cpp (offline, WSL compatible)
   - [ ] Text-to-Speech via Piper TTS (lightweight local voice)

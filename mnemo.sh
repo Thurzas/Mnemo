@@ -158,6 +158,10 @@ case "$CMD" in
       warn "Usage : ./mnemo.sh adduser <nom_utilisateur>"
       exit 1
     fi
+    # Charger MNEMO_ADMIN_TOKEN depuis .env si pas déjà dans le shell
+    if [ -z "${MNEMO_ADMIN_TOKEN:-}" ] && [ -f ".env" ]; then
+      MNEMO_ADMIN_TOKEN=$(grep -E '^MNEMO_ADMIN_TOKEN\s*=' .env | cut -d'=' -f2- | tr -d '\r"' | xargs)
+    fi
     ADMIN_TOKEN="${MNEMO_ADMIN_TOKEN:-}"
     if [ -z "$ADMIN_TOKEN" ]; then
       warn "MNEMO_ADMIN_TOKEN n'est pas défini."

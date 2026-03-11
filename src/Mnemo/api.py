@@ -16,6 +16,7 @@ Routes :
   GET    /api/reminders          → rappels depuis briefing.md
   POST   /api/users              → créer un utilisateur (MNEMO_ADMIN_TOKEN requis)
   GET    /api/auth/whoami        → infos de l'utilisateur courant
+  WS     /ws/message             → streaming token par token (auth + message loop)
 
 Authentification :
   - Toutes les routes /api/* (sauf health) requièrent : Authorization: Bearer <token>
@@ -31,6 +32,8 @@ Sécurité :
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import hashlib
 import json
 import os
@@ -41,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -591,6 +594,127 @@ async def whoami(username: Auth):
         "calendar_source": info.get("calendar_source", ""),
         "created_at": info.get("created_at"),
     }
+
+
+# ── WebSocket streaming ────────────────────────────────────────────
+
+@app.websocket("/ws/message")
+async def ws_message(websocket: WebSocket):
+    """
+    WebSocket endpoint pour le streaming de réponses token par token.
+
+    Protocole client → serveur :
+      {"type": "auth",       "token": "mnemo_..."}
+      {"type": "message",    "message": "...", "session_id": "..."}
+      {"type": "web_answer", "confirmed": bool, "web_query": "...",
+                             "session_id": "...", "original_message": "..."}
+
+    Protocole serveur → client :
+      {"type": "auth_ok",    "username": "..."}
+      {"type": "thinking"}
+      {"type": "token",      "text": "word "}
+      {"type": "done",       "session_id": "..."}
+      {"type": "web_confirm","web_query": "...", "session_id": "...", "original_message": "..."}
+      {"type": "error",      "detail": "..."}
+    """
+    from Mnemo.context import set_data_dir, set_calendar_source
+
+    await websocket.accept()
+
+    # Auth handshake
+    try:
+        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+    except Exception:
+        await websocket.close(code=4001)
+        return
+
+    if auth_msg.get("type") != "auth":
+        await websocket.send_json({"type": "error", "detail": "Authentification requise"})
+        await websocket.close(code=4001)
+        return
+
+    token = auth_msg.get("token", "")
+    token_hash = _hash_token(token)
+    users = _load_users()
+    username: str | None = None
+    user_info: dict | None = None
+    for u, info in users.items():
+        if info.get("token_hash") == token_hash:
+            username = u
+            user_info = info
+            break
+
+    if not username or user_info is None:
+        await websocket.send_json({"type": "error", "detail": "Token invalide"})
+        await websocket.close(code=4003)
+        return
+
+    user_dir = _init_user_dir(username, user_info)
+    set_data_dir(user_dir)
+    if user_info.get("calendar_source"):
+        set_calendar_source(user_info["calendar_source"])
+
+    # Capture context après set_data_dir — propagé dans run_in_executor
+    user_context = contextvars.copy_context()
+
+    await websocket.send_json({"type": "auth_ok", "username": username})
+
+    loop = asyncio.get_event_loop()
+
+    async def _run_and_stream(
+        text: str,
+        sid: str,
+        web_confirmed: bool | None = None,
+        web_query: str | None = None,
+    ) -> None:
+        await websocket.send_json({"type": "thinking"})
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: user_context.run(
+                    _handle_message_web, text, sid, web_confirmed, web_query
+                ),
+            )
+        except Exception as e:
+            await websocket.send_json({"type": "error", "detail": str(e)})
+            return
+
+        if isinstance(result, dict) and result.get("__web_confirm__"):
+            await websocket.send_json({
+                "type": "web_confirm",
+                "web_query": result["web_query"],
+                "session_id": sid,
+                "original_message": text,
+            })
+            return
+
+        words = (result or "").split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == len(words) - 1 else word + " "
+            await websocket.send_json({"type": "token", "text": chunk})
+            await asyncio.sleep(0.012)
+
+        await websocket.send_json({"type": "done", "session_id": sid})
+
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            msg_type = msg.get("type")
+
+            if msg_type == "message":
+                text = msg.get("message", "")
+                sid  = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+                await _run_and_stream(text, sid)
+
+            elif msg_type == "web_answer":
+                original  = msg.get("original_message", "")
+                sid       = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+                confirmed = bool(msg.get("confirmed", False))
+                wq        = msg.get("web_query") if confirmed else None
+                await _run_and_stream(original, sid, confirmed, wq)
+
+    except WebSocketDisconnect:
+        pass
 
 
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──

@@ -120,7 +120,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, headers })
   if (res.status === 401) {
     auth.clear()
-    window.location.href = '/login'
     throw new Error('Non authentifié')
   }
   if (!res.ok) {
