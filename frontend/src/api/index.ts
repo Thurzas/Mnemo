@@ -96,6 +96,27 @@ export interface RemindersResponse {
   reminders: ReminderItem[]
 }
 
+export interface OnboardingQuestion {
+  id: string
+  question: string
+  section: string
+  subsection: string
+  label: string
+}
+
+export interface OnboardingStatusResponse {
+  needed: boolean
+  questions: OnboardingQuestion[]
+}
+
+export interface OnboardingAnswerItem {
+  id: string
+  answer: string
+  section: string
+  subsection: string
+  label: string
+}
+
 // ── Auth token ───────────────────────────────────────────────────
 
 const TOKEN_KEY = 'mnemo_token'
@@ -181,4 +202,13 @@ export const api = {
 
   whoami: () =>
     request<{ username: string; calendar_source: string; created_at: string | null }>('/api/auth/whoami'),
+
+  onboardingStatus: () =>
+    request<OnboardingStatusResponse>('/api/onboarding/status'),
+
+  onboardingSubmit: (answers: OnboardingAnswerItem[]) =>
+    request<{ ok: boolean; written: number }>('/api/onboarding', {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    }),
 }

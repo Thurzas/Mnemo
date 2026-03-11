@@ -7,7 +7,9 @@ import { MemoryPage } from '@/pages/MemoryPage'
 import { SessionsPage } from '@/pages/SessionsPage'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { LoginPage } from '@/pages/LoginPage'
+import { OnboardingModal } from '@/pages/OnboardingModal'
 import { api, auth } from '@/api'
+import type { OnboardingQuestion } from '@/api'
 import styles from './App.module.css'
 
 export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar'
@@ -17,6 +19,16 @@ export default function App() {
   const [connected, setConnected] = useState<'ok' | 'error' | 'connecting'>('connecting')
   const [username, setUsername] = useState<string | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
+  const [onboardingQuestions, setOnboardingQuestions] = useState<OnboardingQuestion[] | null>(null)
+
+  const checkOnboarding = async () => {
+    try {
+      const { questions } = await api.onboardingStatus()
+      setOnboardingQuestions(questions)
+    } catch {
+      setOnboardingQuestions([])
+    }
+  }
 
   // Verify stored token on mount
   useEffect(() => {
@@ -25,7 +37,7 @@ export default function App() {
       return
     }
     api.whoami()
-      .then(({ username: u }) => setUsername(u))
+      .then(({ username: u }) => { setUsername(u); checkOnboarding() })
       .catch(() => auth.clear())
       .finally(() => setAuthChecked(true))
   }, [])
@@ -83,7 +95,7 @@ export default function App() {
     return (
       <>
         <ToastContainer position="top-right" theme="dark" />
-        <LoginPage onLogin={setUsername} />
+        <LoginPage onLogin={u => { setUsername(u); checkOnboarding() }} />
       </>
     )
   }
@@ -106,6 +118,13 @@ export default function App() {
           <CalendarPage active={tab === 'calendar'} />
         </div>
       </main>
+      {onboardingQuestions?.length ? (
+        <OnboardingModal
+          username={username}
+          questions={onboardingQuestions}
+          onDone={() => setOnboardingQuestions([])}
+        />
+      ) : null}
     </div>
   )
 }

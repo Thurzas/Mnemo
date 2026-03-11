@@ -585,6 +585,77 @@ async def create_user(
     return {"username": username, "token": token}
 
 
+@app.get("/api/onboarding/status")
+async def onboarding_status(_: Auth):
+    """
+    Retourne les questions d'initialisation non encore renseignées dans memory.md.
+    """
+    from Mnemo.main import _detect_structural_gaps, _get_skipped_questions
+    from Mnemo.context import get_data_dir
+
+    memory_file = get_data_dir() / "memory.md"
+    memory_content = (
+        memory_file.read_text(encoding="utf-8", errors="ignore")
+        if memory_file.exists() else ""
+    )
+    structural_gaps = _detect_structural_gaps(memory_content)
+    skipped_ids     = _get_skipped_questions()
+    unfilled        = [g for g in structural_gaps if g["id"] not in skipped_ids]
+
+    return {
+        "needed": len(unfilled) > 0,
+        "questions": [
+            {
+                "id":         q["id"],
+                "question":   q["question"],
+                "section":    q["section"],
+                "subsection": q["subsection"],
+                "label":      q["label"],
+            }
+            for q in unfilled
+        ],
+    }
+
+
+class OnboardingAnswerItem(BaseModel):
+    id: str
+    answer: str
+    section: str
+    subsection: str
+    label: str
+
+
+class OnboardingSubmitRequest(BaseModel):
+    answers: list[OnboardingAnswerItem]
+
+
+@app.post("/api/onboarding")
+def onboarding_submit(req: OnboardingSubmitRequest, _: Auth):
+    """
+    Écrit les réponses non vides dans memory.md et synchronise la DB.
+    """
+    from Mnemo.tools.memory_tools import update_markdown_section, sync_markdown_to_db
+
+    written = 0
+    for ans in req.answers:
+        text = ans.answer.strip()
+        if not text:
+            continue
+        content = f"- **{ans.label}** : {text}" if ans.label else text
+        update_markdown_section(
+            section    = ans.section,
+            subsection = ans.subsection,
+            content    = content,
+            category   = "identité",
+        )
+        written += 1
+
+    if written:
+        sync_markdown_to_db()
+
+    return {"ok": True, "written": written}
+
+
 @app.get("/api/auth/whoami")
 async def whoami(username: Auth):
     users = _load_users()
