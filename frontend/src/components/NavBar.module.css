@@ -77,3 +77,33 @@
   color: var(--muted);
   font-size: 0.75rem;
 }
+
+.separator {
+  color: var(--border);
+  font-size: 0.75rem;
+}
+
+.username {
+  color: var(--muted);
+  font-size: 0.75rem;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logoutBtn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.15s;
+  line-height: 1;
+}
+
+.logoutBtn:hover {
+  color: var(--a4);
+}

@@ -2,11 +2,11 @@
 calendar_tools.py — Temporal awareness pour Mnemo
 
 Supporte deux sources ICS :
-  - Fichier local    : CALENDAR_SOURCE=/home/matt/agenda.ics
-  - URL Google Cal   : CALENDAR_SOURCE=https://calendar.google.com/calendar/ical/xxx/basic.ics
-  - URL Nextcloud    : CALENDAR_SOURCE=https://nextcloud.local/remote.php/dav/calendars/...
+  - Fichier local    : get_calendar_source()=/home/matt/agenda.ics
+  - URL Google Cal   : get_calendar_source()=https://calendar.google.com/calendar/ical/xxx/basic.ics
+  - URL Nextcloud    : get_calendar_source()=https://nextcloud.local/remote.php/dav/calendars/...
 
-Si CALENDAR_SOURCE est absent ou invalide, tout est silencieux — le système
+Si get_calendar_source() est absent ou invalide, tout est silencieux — le système
 fonctionne normalement sans calendrier.
 
 Dépendance : icalendar (pip install icalendar)
@@ -36,7 +36,8 @@ except ImportError:
     _ICALENDAR_AVAILABLE = False
 
 # ── Config ───────────────────────────────────────────────────────
-CALENDAR_SOURCE   = os.getenv("CALENDAR_SOURCE", "")
+from Mnemo.context import get_calendar_source   # source per-user via ContextVar
+
 LOOKAHEAD_DAYS    = int(os.getenv("CALENDAR_LOOKAHEAD_DAYS", "14"))
 CACHE_TTL_SECONDS = int(os.getenv("CALENDAR_CACHE_TTL", "300"))  # 5 min
 
@@ -53,10 +54,10 @@ def _fetch_ics_raw() -> Optional[bytes]:
     Récupère le contenu brut du fichier ICS depuis la source configurée.
     Retourne None si source absente, inaccessible ou icalendar non installé.
     """
-    if not CALENDAR_SOURCE or not _ICALENDAR_AVAILABLE:
+    if not get_calendar_source() or not _ICALENDAR_AVAILABLE:
         return None
 
-    src = CALENDAR_SOURCE.strip()
+    src = get_calendar_source().strip()
 
     # ── URL (Google Calendar, Nextcloud, etc.) ──
     if src.startswith("http://") or src.startswith("https://"):
@@ -84,7 +85,7 @@ def _get_calendar() -> Optional["Calendar"]:
     # Vérifie si le fichier local a été modifié depuis le dernier chargement
     # (pour détecter les écritures faites par un autre processus, ex. CLI → FastAPI)
     file_modified = False
-    src = CALENDAR_SOURCE.strip() if CALENDAR_SOURCE else ""
+    src = get_calendar_source().strip() if get_calendar_source() else ""
     if src and not src.startswith("http") and _cache["fetched_at"] is not None:
         try:
             mtime = datetime.fromtimestamp(Path(src).stat().st_mtime)
@@ -590,7 +591,7 @@ def get_deadline_context() -> str:
 
 def calendar_is_configured() -> bool:
     """Retourne True si une source calendrier est configurée ET accessible."""
-    return bool(CALENDAR_SOURCE) and _ICALENDAR_AVAILABLE
+    return bool(get_calendar_source()) and _ICALENDAR_AVAILABLE
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -599,16 +600,16 @@ def calendar_is_configured() -> bool:
 
 def calendar_is_writable() -> bool:
     """True si CALENDAR_SOURCE est un fichier local (pas une URL)."""
-    if not CALENDAR_SOURCE or not _ICALENDAR_AVAILABLE:
+    if not get_calendar_source() or not _ICALENDAR_AVAILABLE:
         return False
-    src = CALENDAR_SOURCE.strip()
+    src = get_calendar_source().strip()
     return not (src.startswith("http://") or src.startswith("https://"))
 
 
 def _save_calendar(cal: "Calendar") -> None:
     """Écrit le calendrier modifié dans le fichier ICS et invalide le cache."""
     global _cache
-    path = Path(CALENDAR_SOURCE.strip())
+    path = Path(get_calendar_source().strip())
     path.write_bytes(cal.to_ical())
     _cache["data"] = None
     _cache["fetched_at"] = None
@@ -623,7 +624,7 @@ def _load_writable_calendar() -> "Calendar":
     if not calendar_is_writable():
         raise ValueError(
             "Le calendrier est en lecture seule (URL distante) ou non configuré. "
-            "Configure CALENDAR_SOURCE avec un chemin de fichier local."
+            "Configurez une source ICS locale dans votre profil utilisateur."
         )
     raw = _fetch_ics_raw()
     if raw:
@@ -915,7 +916,7 @@ try:
             events = get_upcoming_events(days=days)
             if not events:
                 if not calendar_is_configured():
-                    return "Aucun calendrier configuré (variable CALENDAR_SOURCE absente)."
+                    return "Aucun calendrier configuré (CALENDAR_SOURCE ou profil utilisateur absent)."
                 return f"Aucun événement dans les {days} prochains jours."
             return format_events_for_prompt(events)
 

@@ -14,6 +14,7 @@
 #   ./mnemo.sh logs         # logs du scheduler en temps réel
 #   ./mnemo.sh logs-api     # logs de l'API en temps réel
 #   ./mnemo.sh ingest <f>   # ingère un fichier dans la mémoire
+#   ./mnemo.sh adduser <n>  # crée un utilisateur et affiche son token
 #   ./mnemo.sh status       # état des containers
 #
 # Tip WSL2 : ajoute un alias dans ~/.bashrc pour lancer depuis n'importe où :
@@ -130,6 +131,75 @@ case "$CMD" in
     fi
     ;;
 
+  adduser)
+    USERNAME="${2:-}"
+    if [ -z "$USERNAME" ]; then
+      warn "Usage : ./mnemo.sh adduser <nom_utilisateur>"
+      exit 1
+    fi
+    ADMIN_TOKEN="${MNEMO_ADMIN_TOKEN:-}"
+    if [ -z "$ADMIN_TOKEN" ]; then
+      warn "MNEMO_ADMIN_TOKEN n'est pas défini."
+      warn "Définissez-le dans .env ou exportez-le : export MNEMO_ADMIN_TOKEN=votre_secret"
+      exit 1
+    fi
+    # Appel à l'API si elle tourne, sinon appel Python direct
+    if docker compose ps --status running mnemo-api 2>/dev/null | grep -q mnemo-api; then
+      info "Création de l'utilisateur '$USERNAME' via l'API..."
+      RESPONSE=$(curl -s -X POST http://localhost:8000/api/users \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\": \"$USERNAME\"}")
+      TOKEN=$(echo "$RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+      if [ -z "$TOKEN" ]; then
+        warn "Erreur : $RESPONSE"
+        exit 1
+      fi
+    else
+      info "API non démarrée — création directe via Python..."
+      DATA_DIR="${DATA_PATH:-./data}"
+      USERS_FILE="$DATA_DIR/users.json"
+      TOKEN=$(python3 -c "
+import json, hashlib, secrets, os, sys
+from pathlib import Path
+from datetime import datetime
+
+username = sys.argv[1]
+users_file = Path('$USERS_FILE')
+admin_dir = Path('$DATA_DIR/users') / username
+
+users = {}
+if users_file.exists():
+    users = json.loads(users_file.read_text())
+if username in users:
+    print('ERROR:already_exists', file=sys.stderr)
+    sys.exit(1)
+
+token = f'mnemo_{secrets.token_hex(32)}'
+users[username] = {
+    'token_hash': hashlib.sha256(token.encode()).hexdigest(),
+    'calendar_source': '',
+    'created_at': datetime.now().isoformat(),
+}
+users_file.parent.mkdir(parents=True, exist_ok=True)
+users_file.write_text(json.dumps(users, ensure_ascii=False, indent=2))
+admin_dir.mkdir(parents=True, exist_ok=True)
+(admin_dir / 'sessions').mkdir(exist_ok=True)
+print(token)
+" "$USERNAME" 2>&1)
+      if echo "$TOKEN" | grep -q "ERROR:already_exists"; then
+        warn "Utilisateur '$USERNAME' déjà existant."
+        exit 1
+      fi
+    fi
+    ok "Utilisateur '$USERNAME' créé."
+    echo ""
+    echo -e "  ${BOLD}Token (à conserver — non récupérable) :${RESET}"
+    echo -e "  ${GREEN}$TOKEN${RESET}"
+    echo ""
+    warn "Ce token ne sera plus affiché. Conservez-le en lieu sûr."
+    ;;
+
   status)
     echo -e "\n${BOLD}── Containers Mnemo ──────────────────────────${RESET}"
     docker compose ps
@@ -152,6 +222,7 @@ case "$CMD" in
     echo -e "  ${BOLD}./mnemo.sh logs${RESET}          Logs scheduler en temps réel"
     echo -e "  ${BOLD}./mnemo.sh logs-api${RESET}      Logs API en temps réel"
     echo -e "  ${BOLD}./mnemo.sh ingest <f>${RESET}    Ingère un fichier en mémoire"
+    echo -e "  ${BOLD}./mnemo.sh adduser <n>${RESET}   Crée un utilisateur, affiche son token"
     echo -e "  ${BOLD}./mnemo.sh status${RESET}        État des containers"
     echo ""
     ;;

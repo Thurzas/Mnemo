@@ -21,14 +21,28 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 from typing import Type
 
-# ── Config paths ──────────────────────────────────────────────
-DB_PATH      = Path("memory.db")
-MARKDOWN_PATH = Path("memory.md")
-SESSIONS_DIR = Path("sessions")
-try:
-    SESSIONS_DIR.mkdir(exist_ok=True)
-except OSError:
-    pass  # /data pas encore monté — le mkdir sera retentré au premier usage
+# ── Config paths (dynamiques — résolus via ContextVar par requête) ────
+from Mnemo.context import get_data_dir
+
+
+def _db_path() -> Path:
+    """Chemin vers memory.db de l'utilisateur courant."""
+    return get_data_dir() / "memory.db"
+
+
+def _markdown_path() -> Path:
+    """Chemin vers memory.md de l'utilisateur courant."""
+    return get_data_dir() / "memory.md"
+
+
+def _sessions_dir() -> Path:
+    """Répertoire sessions/ de l'utilisateur courant (créé si absent)."""
+    d = get_data_dir() / "sessions"
+    try:
+        d.mkdir(exist_ok=True, parents=True)
+    except OSError:
+        pass
+    return d
 
 EMBED_MODEL   = "nomic-embed-text"
 TOP_K_SEARCH  = 10
@@ -62,7 +76,7 @@ TOP_K_FINAL  = 5
 # ══════════════════════════════════════════════════════════════
 
 def get_db() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(_db_path())
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -380,7 +394,9 @@ def upsert_chunk(
     db.commit()
 
 
-def sync_markdown_to_db(md_path: Path = MARKDOWN_PATH):
+def sync_markdown_to_db(md_path: Path = None):
+    if md_path is None:
+        md_path = _markdown_path()
     db = get_db()
     chunks = parse_markdown_chunks(md_path)
     expected_ids = set()
@@ -420,8 +436,10 @@ def _normalize_section(title: str) -> str:
     return title.strip().lower()
 
 
-def update_markdown_section(section: str, subsection: str, content: str, md_path: Path = MARKDOWN_PATH, category: str = "connaissance"):
+def update_markdown_section(section: str, subsection: str, content: str, md_path: Path = None, category: str = "connaissance"):
     """Upsert propre d'une sous-section dans le Markdown."""
+    if md_path is None:
+        md_path = _markdown_path()
     section    = sanitize_str(section).lstrip("#").strip()  # retire les ## accidentels
     subsection = sanitize_str(subsection).lstrip("#").strip()
     content    = sanitize_str(content)
@@ -525,7 +543,7 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
 # ══════════════════════════════════════════════════════════════
 
 def load_session_json(session_id: str) -> dict:
-    path = SESSIONS_DIR / f"{session_id}.json"
+    path = _sessions_dir() / f"{session_id}.json"
     if not path.exists():
         return {}
     try:
@@ -551,7 +569,7 @@ def update_session_memory(session_id: str, user_message: str, agent_response: st
     # Sanitize avant écriture — certains modèles Ollama retournent des surrogates invalides
     session["messages"].append({"role": "user", "content": sanitize_str(user_message)})
     session["messages"].append({"role": "agent", "content": sanitize_str(agent_response)})
-    path = SESSIONS_DIR / f"{session_id}.json"
+    path = _sessions_dir() / f"{session_id}.json"
     path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -564,12 +582,14 @@ def get_file_hash(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
-def is_markdown_stale(md_path: Path = MARKDOWN_PATH) -> bool:
+def is_markdown_stale(md_path: Path = None) -> bool:
     """
     Retourne True si memory.md a été modifié depuis la dernière sync.
     Vérifie à la fois le mtime (rapide) et le hash (fiable).
     Retourne True aussi si le fichier n'a jamais été indexé.
     """
+    if md_path is None:
+        md_path = _markdown_path()
     if not md_path.exists():
         return False  # Rien à syncer
 
@@ -595,8 +615,10 @@ def is_markdown_stale(md_path: Path = MARKDOWN_PATH) -> bool:
     return get_file_hash(md_path) != stored_hash
 
 
-def update_file_state(md_path: Path = MARKDOWN_PATH):
+def update_file_state(md_path: Path = None):
     """Met à jour file_state après une sync réussie."""
+    if md_path is None:
+        md_path = _markdown_path()
     if not md_path.exists():
         return
     db = get_db()
@@ -608,7 +630,7 @@ def update_file_state(md_path: Path = MARKDOWN_PATH):
     db.close()
 
 
-def check_and_sync(md_path: Path = MARKDOWN_PATH) -> bool:
+def check_and_sync(md_path: Path = None) -> bool:
     """
     Vérifie si memory.md est désynchronisé et re-sync si nécessaire.
     Appelé au démarrage de run().

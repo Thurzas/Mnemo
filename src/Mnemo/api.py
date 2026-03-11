@@ -6,16 +6,24 @@ Routes :
   GET    /api/health             → {"status": "ok"}
   POST   /api/message            → {message, session_id?} → {response, session_id}
   GET    /api/memory             → contenu de memory.md + sections parsées
+  POST   /api/memory             → écriture memory.md + sync DB
   GET    /api/sessions           → liste des sessions avec métadonnées
   GET    /api/sessions/{id}      → messages d'une session
   GET    /api/calendar           → événements à venir (14 jours) avec uid
   POST   /api/calendar           → créer un événement ICS
   PUT    /api/calendar/{uid}     → modifier un événement ICS
   DELETE /api/calendar/{uid}     → supprimer un événement ICS
+  GET    /api/reminders          → rappels depuis briefing.md
+  POST   /api/users              → créer un utilisateur (MNEMO_ADMIN_TOKEN requis)
+  GET    /api/auth/whoami        → infos de l'utilisateur courant
+
+Authentification :
+  - Toutes les routes /api/* (sauf health) requièrent : Authorization: Bearer <token>
+  - Les tokens sont stockés dans DATA_PATH/users.json (hash SHA-256)
+  - Chaque utilisateur a son répertoire DATA_PATH/users/{username}/
 
 Sécurité :
   - Route shell bloquée (pas de subprocess depuis le web)
-  - needs_web auto-refusé (pas de confirmation interactive)
   - needs_clarification ignoré
   - Validation des session_id contre le path traversal
   - Écriture calendrier : lecture seule si CALENDAR_SOURCE est une URL
@@ -27,25 +35,92 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import uuid
+from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-DATA_PATH    = Path(os.getenv("DATA_PATH", "/data")).resolve()
-MEMORY_FILE  = DATA_PATH / "memory.md"
-SESSIONS_DIR = DATA_PATH / "sessions"
-BRIEFING_FILE = DATA_PATH / "briefing.md"
-STATIC_DIR   = Path(__file__).parent / "static"
+DATA_PATH  = Path(os.getenv("DATA_PATH", "/data")).resolve()
+USERS_FILE = DATA_PATH / "users.json"
+USERS_DIR  = DATA_PATH / "users"
+STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
 
 # Serve React build — mounted last so /api/* routes take priority
 if STATIC_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
+
+
+# ── Gestion des utilisateurs ───────────────────────────────────────
+
+def _load_users() -> dict:
+    """Charge users.json. Retourne {} si absent."""
+    if not USERS_FILE.exists():
+        return {}
+    try:
+        return json.loads(USERS_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_users(users: dict) -> None:
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    USERS_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _init_user_dir(username: str, user_info: dict) -> Path:
+    """Crée le répertoire utilisateur et initialise sa DB si nécessaire."""
+    from Mnemo.init_db import init_db, migrate_db
+    user_dir = USERS_DIR / username
+    user_dir.mkdir(parents=True, exist_ok=True)
+    (user_dir / "sessions").mkdir(exist_ok=True)
+    db_path = user_dir / "memory.db"
+    if not db_path.exists():
+        init_db(db_path=db_path)
+        migrate_db(db_path=db_path)
+    return user_dir
+
+
+# ── Dépendance d'authentification ─────────────────────────────────
+
+async def get_current_user(authorization: Annotated[str | None, Header()] = None) -> str:
+    """
+    Valide le token Bearer, configure le contexte utilisateur (data dir + calendar source)
+    et retourne le username. Appelé en dépendance async avant les handlers sync —
+    anyio copie le ContextVar dans le thread pool, donc les tools CrewAI voient le bon chemin.
+    """
+    from Mnemo.context import set_data_dir, set_calendar_source
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token manquant (Authorization: Bearer <token>)")
+
+    token = authorization[7:].strip()
+    token_hash = _hash_token(token)
+
+    users = _load_users()
+    for username, info in users.items():
+        if info.get("token_hash") == token_hash:
+            user_dir = _init_user_dir(username, info)
+            set_data_dir(user_dir)
+            if info.get("calendar_source"):
+                set_calendar_source(info["calendar_source"])
+            return username
+
+    raise HTTPException(status_code=401, detail="Token invalide")
+
+
+Auth = Annotated[str, Depends(get_current_user)]
 
 
 # ── Modèles ────────────────────────────────────────────────────────
@@ -188,16 +263,11 @@ def _handle_message_web(
 
 @app.get("/api/health")
 async def health():
-    return {
-        "status": "ok",
-        "data_path": str(DATA_PATH),
-        "memory_exists": MEMORY_FILE.exists(),
-        "sessions_dir": str(SESSIONS_DIR),
-    }
+    return {"status": "ok", "data_path": str(DATA_PATH)}
 
 
 @app.post("/api/message", response_model=MessageResponse)
-def message(req: MessageRequest):
+def message(req: MessageRequest, _: Auth):
     """
     Envoie un message à Mnemo — exécuté en thread pool (def, pas async def)
     pour ne pas bloquer la boucle d'événements pendant l'appel LLM.
@@ -214,11 +284,13 @@ def message(req: MessageRequest):
 
 
 @app.get("/api/memory")
-async def memory():
-    if not MEMORY_FILE.exists():
+async def memory(_: Auth):
+    from Mnemo.context import get_data_dir
+    memory_file = get_data_dir() / "memory.md"
+    if not memory_file.exists():
         return {"content": "", "sections": [], "preamble": ""}
 
-    content = MEMORY_FILE.read_text(encoding="utf-8")
+    content = memory_file.read_text(encoding="utf-8")
 
     sections: list[dict] = []
     preamble_lines: list[str] = []
@@ -252,14 +324,15 @@ class MemoryWriteRequest(BaseModel):
 
 
 @app.post("/api/memory")
-def memory_write(req: MemoryWriteRequest):
+def memory_write(req: MemoryWriteRequest, _: Auth):
     """
     Écrit le contenu dans memory.md puis synchronise la DB SQLite.
     Exécuté en thread pool (def, pas async) car sync_markdown_to_db peut être lent.
     """
     try:
+        from Mnemo.context import get_data_dir
         from Mnemo.tools.memory_tools import sync_markdown_to_db
-        MEMORY_FILE.write_text(req.content, encoding="utf-8")
+        (get_data_dir() / "memory.md").write_text(req.content, encoding="utf-8")
         sync_markdown_to_db()
         return {"ok": True}
     except Exception as e:
@@ -267,13 +340,15 @@ def memory_write(req: MemoryWriteRequest):
 
 
 @app.get("/api/sessions")
-async def sessions():
-    if not SESSIONS_DIR.exists():
+async def sessions(_: Auth):
+    from Mnemo.context import get_data_dir
+    sessions_dir = get_data_dir() / "sessions"
+    if not sessions_dir.exists():
         return {"sessions": []}
 
     result = []
     for f in sorted(
-        SESSIONS_DIR.glob("*.json"),
+        sessions_dir.glob("*.json"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     ):
@@ -283,7 +358,7 @@ async def sessions():
             result.append({
                 "id": f.stem,
                 "message_count": len(messages),
-                "done": (SESSIONS_DIR / f"{f.stem}.done").exists(),
+                "done": (sessions_dir / f"{f.stem}.done").exists(),
                 "modified": f.stat().st_mtime,
                 "preview": (
                     next(
@@ -300,11 +375,12 @@ async def sessions():
 
 
 @app.get("/api/sessions/{session_id}")
-async def session_detail(session_id: str):
+async def session_detail(session_id: str, _: Auth):
+    from Mnemo.context import get_data_dir
     if any(c in session_id for c in ("/", "\\", "..")):
         raise HTTPException(status_code=400, detail="Invalid session ID")
 
-    path = SESSIONS_DIR / f"{session_id}.json"
+    path = get_data_dir() / "sessions" / f"{session_id}.json"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -326,7 +402,7 @@ def _serialize_events(events: list) -> list:
 
 
 @app.get("/api/calendar")
-async def calendar_list():
+async def calendar_list(_: Auth):
     try:
         from datetime import date, timedelta
         from Mnemo.tools.calendar_tools import get_events_with_uid, calendar_is_writable
@@ -360,7 +436,7 @@ class EventUpdateRequest(BaseModel):
 
 
 @app.post("/api/calendar", status_code=201)
-def calendar_create(req: EventCreateRequest):
+def calendar_create(req: EventCreateRequest, _: Auth):
     try:
         from Mnemo.tools.calendar_tools import add_event, calendar_is_writable
         if not calendar_is_writable():
@@ -383,7 +459,7 @@ def calendar_create(req: EventCreateRequest):
 
 
 @app.put("/api/calendar/{event_uid}")
-def calendar_update(event_uid: str, req: EventUpdateRequest):
+def calendar_update(event_uid: str, req: EventUpdateRequest, _: Auth):
     if any(c in event_uid for c in ("/", "\\", "..")):
         raise HTTPException(status_code=400, detail="UID invalide.")
     try:
@@ -402,7 +478,7 @@ def calendar_update(event_uid: str, req: EventUpdateRequest):
 
 
 @app.delete("/api/calendar/{event_uid}")
-def calendar_delete(event_uid: str):
+def calendar_delete(event_uid: str, _: Auth):
     if any(c in event_uid for c in ("/", "\\", "..")):
         raise HTTPException(status_code=400, detail="UID invalide.")
     try:
@@ -420,15 +496,17 @@ def calendar_delete(event_uid: str):
 
 
 @app.get("/api/reminders")
-async def reminders():
+async def reminders(_: Auth):
     """
     Retourne les rappels présents dans briefing.md (sections ## 🔔 Rappel).
     Chaque rappel a un `id` (MD5 du message) pour dédupliquer côté client.
     """
-    if not BRIEFING_FILE.exists():
+    from Mnemo.context import get_data_dir
+    briefing_file = get_data_dir() / "briefing.md"
+    if not briefing_file.exists():
         return {"reminders": []}
 
-    content = BRIEFING_FILE.read_text(encoding="utf-8")
+    content = briefing_file.read_text(encoding="utf-8")
     items: list[dict] = []
 
     # Découpe sur chaque en-tête ## 🔔 Rappel
@@ -441,6 +519,56 @@ async def reminders():
             items.append({"id": rid, "message": body})
 
     return {"reminders": items}
+
+
+# ── Gestion des utilisateurs (admin) ──────────────────────────────
+
+class UserCreateRequest(BaseModel):
+    username: str
+    calendar_source: str = ""
+
+
+@app.post("/api/users", status_code=201)
+async def create_user(
+    req: UserCreateRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """
+    Crée un utilisateur. Protégé par MNEMO_ADMIN_TOKEN (pas par le token utilisateur).
+    Retourne le token en clair une seule fois — non récupérable ensuite.
+    """
+    admin_token = os.getenv("MNEMO_ADMIN_TOKEN", "")
+    if not admin_token or authorization != f"Bearer {admin_token}":
+        raise HTTPException(status_code=403, detail="MNEMO_ADMIN_TOKEN requis")
+
+    username = req.username.strip()
+    if not username or not re.match(r"^[a-zA-Z0-9_-]{1,64}$", username):
+        raise HTTPException(status_code=400, detail="Nom invalide (alphanumérique, 1-64 caractères)")
+
+    users = _load_users()
+    if username in users:
+        raise HTTPException(status_code=409, detail="Utilisateur déjà existant")
+
+    token = f"mnemo_{secrets.token_hex(32)}"
+    users[username] = {
+        "token_hash": _hash_token(token),
+        "calendar_source": req.calendar_source,
+        "created_at": datetime.now().isoformat(),
+    }
+    _save_users(users)
+    _init_user_dir(username, users[username])
+    return {"username": username, "token": token}
+
+
+@app.get("/api/auth/whoami")
+async def whoami(username: Auth):
+    users = _load_users()
+    info = users.get(username, {})
+    return {
+        "username": username,
+        "calendar_source": info.get("calendar_source", ""),
+        "created_at": info.get("created_at"),
+    }
 
 
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──
