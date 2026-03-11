@@ -730,6 +730,35 @@ async def whoami(username: Auth):
     }
 
 
+async def _consolidate_on_disconnect(sid: str, user_context: contextvars.Context) -> None:
+    """
+    Lance end_session() en background après déconnexion WebSocket.
+    Ignoré si la session est vide ou déjà consolidée (.done).
+    """
+    def _run() -> None:
+        from Mnemo.main import end_session
+        from Mnemo.tools.memory_tools import load_session_json
+        from Mnemo.context import get_data_dir
+
+        session = load_session_json(sid)
+        if not session.get("messages"):
+            return  # session vide — rien à consolider
+
+        done_marker = get_data_dir() / "sessions" / f"{sid}.done"
+        if done_marker.exists():
+            return  # déjà consolidée
+
+        print(f"[WS] Consolidation on disconnect : {sid}")
+        end_session(sid)
+        print(f"[WS] Consolidation terminée : {sid}")
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: user_context.run(_run))
+    except Exception as e:
+        print(f"[WS] Consolidation {sid} échouée : {e}")
+
+
 # ── WebSocket streaming ────────────────────────────────────────────
 
 @app.websocket("/ws/message")
@@ -830,25 +859,28 @@ async def ws_message(websocket: WebSocket):
 
         await websocket.send_json({"type": "done", "session_id": sid})
 
+    last_sid: str | None = None
+
     try:
         while True:
             msg = await websocket.receive_json()
             msg_type = msg.get("type")
 
             if msg_type == "message":
-                text = msg.get("message", "")
-                sid  = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
-                await _run_and_stream(text, sid)
+                text     = msg.get("message", "")
+                last_sid = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+                await _run_and_stream(text, last_sid)
 
             elif msg_type == "web_answer":
                 original  = msg.get("original_message", "")
-                sid       = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+                last_sid  = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
                 confirmed = bool(msg.get("confirmed", False))
                 wq        = msg.get("web_query") if confirmed else None
-                await _run_and_stream(original, sid, confirmed, wq)
+                await _run_and_stream(original, last_sid, confirmed, wq)
 
     except WebSocketDisconnect:
-        pass
+        if last_sid:
+            asyncio.create_task(_consolidate_on_disconnect(last_sid, user_context))
 
 
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──
