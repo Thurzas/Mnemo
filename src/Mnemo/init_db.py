@@ -1,6 +1,10 @@
 """
 Lance ce script une seule fois pour initialiser la base SQLite.
     python init_db.py
+
+Peut aussi être appelé programmatiquement avec un chemin explicite :
+    from Mnemo.init_db import init_db, migrate_db
+    init_db(db_path=Path("/data/users/alice/memory.db"))
 """
 import sqlite3
 from pathlib import Path
@@ -8,8 +12,10 @@ from pathlib import Path
 DB_PATH = Path("memory.db")
 
 
-def init_db():
-    db = sqlite3.connect(DB_PATH)
+def init_db(db_path: Path = None):
+    if db_path is None:
+        db_path = DB_PATH
+    db = sqlite3.connect(db_path)
     db.executescript("""
         CREATE TABLE IF NOT EXISTS chunks (
             id               TEXT PRIMARY KEY,
@@ -138,15 +144,17 @@ def init_db():
     """)
     db.commit()
     db.close()
-    print(f"✅ Base initialisée : {DB_PATH}")
+    print(f"✅ Base initialisée : {db_path}")
 
 
-def migrate_db():
+def migrate_db(db_path: Path = None):
     """
     Ajoute les colonnes manquantes sur une DB existante.
     Sûr à relancer plusieurs fois — ignore les colonnes déjà présentes.
     """
-    db = sqlite3.connect(DB_PATH)
+    if db_path is None:
+        db_path = DB_PATH
+    db = sqlite3.connect(db_path)
     migrations = [
         "ALTER TABLE chunks ADD COLUMN importance_weight REAL DEFAULT 1.0",
         "ALTER TABLE chunks ADD COLUMN category TEXT DEFAULT 'connaissance'",

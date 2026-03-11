@@ -10,11 +10,15 @@ export interface HealthResponse {
 export interface MessageRequest {
   message: string
   session_id?: string
+  web_confirmed?: boolean
+  web_query?: string
 }
 
 export interface MessageResponse {
   response: string
   session_id: string
+  needs_web_confirm?: boolean
+  web_query?: string
 }
 
 export interface MemorySection {
@@ -25,6 +29,7 @@ export interface MemorySection {
 export interface MemoryResponse {
   content: string
   sections: MemorySection[]
+  preamble: string
 }
 
 export interface SessionMeta {
@@ -91,13 +96,33 @@ export interface RemindersResponse {
   reminders: ReminderItem[]
 }
 
+// ── Auth token ───────────────────────────────────────────────────
+
+const TOKEN_KEY = 'mnemo_token'
+
+export const auth = {
+  getToken: () => localStorage.getItem(TOKEN_KEY),
+  setToken: (t: string) => localStorage.setItem(TOKEN_KEY, t),
+  clear:    () => localStorage.removeItem(TOKEN_KEY),
+}
+
 // ── Fetch helper ─────────────────────────────────────────────────
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
-  })
+  const token = auth.getToken()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (init?.headers) {
+    for (const [k, v] of Object.entries(init.headers as Record<string, string>)) {
+      headers[k] = v
+    }
+  }
+  const res = await fetch(path, { ...init, headers })
+  if (res.status === 401) {
+    auth.clear()
+    window.location.href = '/login'
+    throw new Error('Non authentifié')
+  }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(detail?.detail ?? res.statusText)
@@ -154,4 +179,7 @@ export const api = {
 
   getReminders: () =>
     request<RemindersResponse>('/api/reminders'),
+
+  whoami: () =>
+    request<{ username: string; calendar_source: string; created_at: string | null }>('/api/auth/whoami'),
 }

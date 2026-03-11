@@ -72,9 +72,10 @@ from Mnemo.crew import (
     ShellCrew, BriefingCrew, CalendarWriteCrew, SchedulerCrew, NoteWriterCrew,
 )
 from Mnemo.tools.memory_tools import (
-    update_session_memory, load_session_json, SESSIONS_DIR,
-    check_and_sync, MARKDOWN_PATH, get_db, compute_hash,
+    update_session_memory, load_session_json,
+    check_and_sync, get_db, compute_hash,
     update_markdown_section, sync_markdown_to_db,
+    _sessions_dir, _markdown_path,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
@@ -84,6 +85,11 @@ from Mnemo.tools.calendar_tools import (
 from Mnemo.tools.web_tools import (
     SEARXNG_URL, _DDG_AVAILABLE, web_search, format_results_for_prompt,
 )
+from Mnemo.context import set_data_dir as _set_data_dir
+
+# ── Data dir — CLI utilise DATA_PATH (ou /data par défaut) ────────
+import os as _os
+_set_data_dir(Path(_os.getenv("DATA_PATH", "/data")).resolve())
 
 
 # ══════════════════════════════════════════════════════════════
@@ -298,8 +304,8 @@ def curiosity_session(session_content: str) -> None:
     Phase 3  — Menu CLI    : collecte les réponses utilisateur
     Phase 4  — LLM         : QuestionnaireAgent reformule + écrit dans memory.md
     """
-    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
-        if MARKDOWN_PATH.exists() else ""
+    memory_content = _markdown_path().read_text(encoding="utf-8", errors="ignore") \
+        if _markdown_path().exists() else ""
 
     # ── Phase 1a : trous structurels (Python pur, garanti) ──
     structural_gaps = _detect_structural_gaps(memory_content)
@@ -861,32 +867,20 @@ def handle_message(user_message: str, session_id: str) -> str:
     # Routes déterministes — bypass LLM direct pour les signaux non ambigus
     if kw_note:
         _dbg("SKIP LLM activé -> Route retenue : note (keyword)")
-        eval_json = {
-            "route": "note",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-        }
+        eval_json = {"route": "note", "needs_memory": False, "needs_web": False, "needs_clarification": False}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
     if kw_calendar:
         _dbg("SKIP LLM activé -> Route retenue : calendar (keyword)")
-        eval_json = {
-            "route": "calendar",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-        }
+        eval_json = {"route": "calendar", "needs_memory": False, "needs_web": False, "needs_clarification": False}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
     if kw_scheduler_strong:
         _dbg("SKIP LLM activé -> Route retenue : scheduler (keyword fort)")
-        eval_json = {
-            "route": "scheduler",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-        }
+        eval_json = {"route": "scheduler", "needs_memory": False, "needs_web": False, "needs_clarification": False}
+        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
         return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
 
     # --- 2. DÉCISION DU SKIP (Bypass LLM pour la performance) ---
@@ -907,6 +901,7 @@ def handle_message(user_message: str, session_id: str) -> str:
             "needs_clarification": False,
             "shell_command": None # Sera extrait plus tard si besoin
         }
+        print(f"[EVAL] (bypass ML) {json.dumps(eval_json, ensure_ascii=False)}")
     else:
         # --- 3. EVALUATION LLM (Le juge sémantique) ---
         _dbg("Lancement de l'EvaluationCrew (LLM)...")
@@ -935,6 +930,12 @@ def handle_message(user_message: str, session_id: str) -> str:
                 _dbg("ARBITRAGE : Keyword Shell prioritaire sur LLM Conversation")
                 
         eval_json["route"] = final_route
+
+        # Coercion : web_query non-null implique needs_web = True
+        if eval_json.get("web_query") and not eval_json.get("needs_web"):
+            eval_json["needs_web"] = True
+
+        print(f"[EVAL] (LLM) {json.dumps(eval_json, ensure_ascii=False)}")
 
     # --- 5. POST-TRAITEMENT (Clarification / Web / Shell) ---
     # Clarification si besoin (ex: "quel fichier ?")
@@ -986,7 +987,7 @@ def end_session(session_id: str) -> tuple:
     })
 
     # Marque la session comme consolidée
-    (SESSIONS_DIR / f"{session_id}.done").touch()
+    (_sessions_dir() / f"{session_id}.done").touch()
     return result.raw, session_text
 
 
@@ -997,9 +998,9 @@ def end_session(session_id: str) -> tuple:
 def consolidate_orphan_sessions():
     """Consolide les sessions JSON non traitées des runs précédents."""
     orphans = [
-        f for f in SESSIONS_DIR.glob("*.json")
+        f for f in _sessions_dir().glob("*.json")
         if not f.stem.endswith(".broken")
-        and not (SESSIONS_DIR / f"{f.stem}.done").exists()
+        and not (_sessions_dir() / f"{f.stem}.done").exists()
     ]
     if not orphans:
         return
@@ -1012,7 +1013,7 @@ def consolidate_orphan_sessions():
         raw = path.read_text(encoding="utf-8", errors="ignore").strip()
         if not raw:
             print(f"   ⚠️  Session vide, ignorée et marquée comme traitée.")
-            (SESSIONS_DIR / f"{session_id}.done").touch()
+            (_sessions_dir() / f"{session_id}.done").touch()
             continue
 
         try:
@@ -1021,7 +1022,7 @@ def consolidate_orphan_sessions():
         except Exception as e:
             print(f"   ❌ Échec : {e}")
             # On marque quand même comme done pour éviter de boucler indéfiniment
-            (SESSIONS_DIR / f"{session_id}.done").touch()
+            (_sessions_dir() / f"{session_id}.done").touch()
             print(f"   ↳ Session marquée comme traitée pour ne pas bloquer au prochain démarrage.")
 
 
@@ -1035,8 +1036,8 @@ def _show_briefing_if_fresh() -> None:
     a été généré aujourd'hui (par le scheduler) et n'a pas encore été lu.
     Marque le fichier comme lu en ajoutant briefing.read à côté.
     """
-    briefing_path = MARKDOWN_PATH.parent / "briefing.md"
-    read_flag     = MARKDOWN_PATH.parent / "briefing.read"
+    briefing_path = _markdown_path().parent / "briefing.md"
+    read_flag     = _markdown_path().parent / "briefing.read"
 
     if not briefing_path.exists():
         return
@@ -1110,8 +1111,8 @@ def run():
     _show_briefing_if_fresh()
 
     # Premier lancement — memory.md vierge → questionnaire d'initialisation
-    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
-        if MARKDOWN_PATH.exists() else ""
+    memory_content = _markdown_path().read_text(encoding="utf-8", errors="ignore") \
+        if _markdown_path().exists() else ""
     structural_gaps = _detect_structural_gaps(memory_content)
     skipped_ids     = _get_skipped_questions()
     unfilled_gaps   = [g for g in structural_gaps if g["id"] not in skipped_ids]
@@ -1261,8 +1262,8 @@ def debug_curiosity() -> None:
     print("🧪 Mode debug — déclenchement direct du questionnaire\n")
 
     # Affiche l'état de memory.md
-    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
-        if MARKDOWN_PATH.exists() else ""
+    memory_content = _markdown_path().read_text(encoding="utf-8", errors="ignore") \
+        if _markdown_path().exists() else ""
     print(f"📄 memory.md : {len(memory_content)} caractères")
 
     # Détection structurelle

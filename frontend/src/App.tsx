@@ -6,7 +6,8 @@ import { ChatPage } from '@/pages/ChatPage'
 import { MemoryPage } from '@/pages/MemoryPage'
 import { SessionsPage } from '@/pages/SessionsPage'
 import { CalendarPage } from '@/pages/CalendarPage'
-import { api } from '@/api'
+import { LoginPage } from '@/pages/LoginPage'
+import { api, auth } from '@/api'
 import styles from './App.module.css'
 
 export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar'
@@ -14,6 +15,20 @@ export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar'
 export default function App() {
   const [tab, setTab] = useState<TabId>('chat')
   const [connected, setConnected] = useState<'ok' | 'error' | 'connecting'>('connecting')
+  const [username, setUsername] = useState<string | null>(null)
+  const [authChecked, setAuthChecked] = useState(false)
+
+  // Verify stored token on mount
+  useEffect(() => {
+    if (!auth.getToken()) {
+      setAuthChecked(true)
+      return
+    }
+    api.whoami()
+      .then(({ username: u }) => setUsername(u))
+      .catch(() => auth.clear())
+      .finally(() => setAuthChecked(true))
+  }, [])
 
   useEffect(() => {
     const check = async () => {
@@ -62,10 +77,21 @@ export default function App() {
     return () => clearInterval(id)
   }, [])
 
+  if (!authChecked) return null
+
+  if (!username) {
+    return (
+      <>
+        <ToastContainer position="top-right" theme="dark" />
+        <LoginPage onLogin={setUsername} />
+      </>
+    )
+  }
+
   return (
     <div className={styles.layout}>
       <ToastContainer position="top-right" theme="dark" />
-      <NavBar tab={tab} onTab={setTab} connected={connected} />
+      <NavBar tab={tab} onTab={setTab} connected={connected} username={username} />
       <main className={styles.main}>
         <div className={tab === 'chat' ? styles.visible : styles.hidden}>
           <ChatPage />

@@ -83,3 +83,130 @@
   white-space: pre-wrap;
   line-height: 1.7;
 }
+
+/* ── CRUD editor ─────────────────────────────────── */
+
+.addBtn {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 12px 12px 0;
+  padding: 7px 12px;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-align: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.addBtn:hover {
+  color: var(--a1);
+  border-color: var(--a1);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.editorHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.titleInput {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  color: var(--a1);
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 2px 4px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.titleInput:focus {
+  border-bottom-color: var(--a1);
+}
+
+.editorActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.saveMsg {
+  font-size: 0.75rem;
+  color: var(--a2);
+}
+
+.btnSave {
+  padding: 5px 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: default;
+  opacity: 0.5;
+}
+
+.btnSave.dirty {
+  background: var(--a1);
+  color: var(--bg);
+  cursor: pointer;
+  opacity: 1;
+}
+
+.btnSave.dirty:hover { filter: brightness(1.1); }
+.btnSave:disabled { cursor: not-allowed; }
+
+.btnDelete {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.btnDelete:hover {
+  color: var(--a4);
+  border-color: var(--a4);
+}
+
+.btnDelete:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.bodyTextarea {
+  flex: 1;
+  width: 100%;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.7;
+  resize: none;
+  outline: none;
+  padding: 8px 4px;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.bodyTextarea:focus {
+  border-color: var(--border);
+}

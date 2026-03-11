@@ -97,7 +97,7 @@ Turn Mnemo into a headless brain callable from any interface.
   - [x] `POST /message` — send a message, receive a response
   - [x] `GET /memory` — read long-term memory
   - [x] `POST /memory` — write a fact directly into memory
-  - [ ] `GET /session/{id}` — session history
+  - [x] `GET /session/{id}` — session history
   - [ ] Lightweight authentication (local token, no public exposure)
   - [ ] WebSocket for token-by-token response streaming
 - [ ] **Local TTS / STT**
