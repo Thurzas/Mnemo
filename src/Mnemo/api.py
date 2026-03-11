@@ -44,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -520,6 +520,61 @@ def calendar_delete(event_uid: str, _: Auth):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/calendar/import", status_code=200)
+async def calendar_import(file: UploadFile, _: Auth):
+    """
+    Importe un fichier ICS : fusionne les VEVENTs dans le calendrier local.
+    Les événements dont l'UID existe déjà sont ignorés (pas de doublon).
+    Retourne {"imported": N, "skipped": M}.
+    """
+    try:
+        from Mnemo.tools.calendar_tools import (
+            calendar_is_writable, _load_writable_calendar, _save_calendar
+        )
+        from icalendar import Calendar as _Calendar
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"icalendar non disponible : {e}")
+
+    if not calendar_is_writable():
+        raise HTTPException(status_code=403, detail="Calendrier en lecture seule (URL distante).")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+
+    try:
+        imported_cal = _Calendar.from_ical(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Fichier ICS invalide.")
+
+    local_cal = _load_writable_calendar()
+
+    # Collecte les UIDs déjà présents
+    existing_uids: set[str] = {
+        str(c.get("UID", ""))
+        for c in local_cal.walk()
+        if c.name == "VEVENT"
+    }
+
+    imported = 0
+    skipped = 0
+    for component in imported_cal.walk():
+        if component.name != "VEVENT":
+            continue
+        uid = str(component.get("UID", ""))
+        if uid and uid in existing_uids:
+            skipped += 1
+            continue
+        local_cal.add_component(component)
+        existing_uids.add(uid)
+        imported += 1
+
+    if imported > 0:
+        _save_calendar(local_cal)
+
+    return {"imported": imported, "skipped": skipped}
+
+
 @app.get("/api/reminders")
 async def reminders(_: Auth):
     """
@@ -585,35 +640,37 @@ async def create_user(
     return {"username": username, "token": token}
 
 
+_ONBOARDING_QUESTIONS = [
+    {"id": "name",     "question": "Comment tu t'appelles ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Nom/Pseudo"},
+    {"id": "job",      "question": "Quelle est ta profession ou ton domaine d'activité ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Métier"},
+    {"id": "location", "question": "Dans quelle ville ou pays tu te trouves ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Localisation"},
+    {"id": "style",    "question": "Tu préfères des réponses courtes et directes, ou détaillées ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Préférences & style",  "label": "Style de communication"},
+    {"id": "agent",    "question": "Comment tu veux appeler l'agent ? Il a un nom ?",
+     "section": "🧑 Identité Agent",       "subsection": "Rôle & personnalité définis", "label": "Nom de l'agent"},
+]
+
+
 @app.get("/api/onboarding/status")
 async def onboarding_status(_: Auth):
     """
-    Retourne les questions d'initialisation non encore renseignées dans memory.md.
+    Première connexion = memory.md absent ou vide.
+    Dans ce cas, retourne les 5 questions d'initialisation.
     """
-    from Mnemo.main import _detect_structural_gaps, _get_skipped_questions
     from Mnemo.context import get_data_dir
 
     memory_file = get_data_dir() / "memory.md"
-    memory_content = (
-        memory_file.read_text(encoding="utf-8", errors="ignore")
-        if memory_file.exists() else ""
+    is_empty    = (
+        not memory_file.exists()
+        or not memory_file.read_text(encoding="utf-8", errors="ignore").strip()
     )
-    structural_gaps = _detect_structural_gaps(memory_content)
-    skipped_ids     = _get_skipped_questions()
-    unfilled        = [g for g in structural_gaps if g["id"] not in skipped_ids]
 
     return {
-        "needed": len(unfilled) > 0,
-        "questions": [
-            {
-                "id":         q["id"],
-                "question":   q["question"],
-                "section":    q["section"],
-                "subsection": q["subsection"],
-                "label":      q["label"],
-            }
-            for q in unfilled
-        ],
+        "needed":    is_empty,
+        "questions": _ONBOARDING_QUESTIONS if is_empty else [],
     }
 
 

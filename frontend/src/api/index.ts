@@ -197,6 +197,21 @@ export const api = {
       method: 'DELETE',
     }),
 
+  importCalendar: async (file: File): Promise<{ imported: number; skipped: number }> => {
+    const token = auth.getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch('/api/calendar/import', { method: 'POST', headers, body })
+    if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(detail?.detail ?? res.statusText)
+    }
+    return res.json()
+  },
+
   getReminders: () =>
     request<RemindersResponse>('/api/reminders'),
 
