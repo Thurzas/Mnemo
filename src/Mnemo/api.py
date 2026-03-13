@@ -44,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -728,6 +728,58 @@ async def whoami(username: Auth):
         "calendar_source": info.get("calendar_source", ""),
         "created_at": info.get("created_at"),
     }
+
+
+# ── STT / TTS ─────────────────────────────────────────────────────
+
+@app.post("/api/stt")
+async def speech_to_text(
+    username: Auth,
+    file: UploadFile = File(...),
+):
+    """
+    Transcrit un fichier audio (webm, wav, mp3…) en texte.
+    Nécessite faster-whisper installé (sinon 503).
+    """
+    try:
+        from Mnemo.tools.audio_tools import transcribe_audio  # noqa: PLC0415
+    except ImportError:
+        raise HTTPException(503, "Module STT non disponible — installez faster-whisper")
+
+    audio_bytes = await file.read()
+    loop = asyncio.get_running_loop()
+    try:
+        text = await loop.run_in_executor(None, lambda: transcribe_audio(audio_bytes))
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur STT : {exc}") from exc
+    return {"text": text}
+
+
+class TTSRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/tts")
+async def text_to_speech(
+    req: TTSRequest,
+    username: Auth,
+):
+    """
+    Synthétise `text` en audio WAV.
+    Nécessite piper-tts installé (sinon 503).
+    Retourne audio/wav (bytes).
+    """
+    try:
+        from Mnemo.tools.audio_tools import synthesize_speech  # noqa: PLC0415
+    except ImportError:
+        raise HTTPException(503, "Module TTS non disponible — installez piper-tts")
+
+    loop = asyncio.get_running_loop()
+    try:
+        wav_bytes = await loop.run_in_executor(None, lambda: synthesize_speech(req.text))
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur TTS : {exc}") from exc
+    return Response(content=wav_bytes, media_type="audio/wav")
 
 
 # ── WebSocket streaming ────────────────────────────────────────────
