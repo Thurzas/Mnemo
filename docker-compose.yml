@@ -109,6 +109,9 @@ services:
     environment:
       - HOME=/tmp
       - DATA_PATH=/data
+      # Si le service RVC est actif (profile voice), activer la conversion de voix.
+      # Laisser vide pour utiliser Piper seul (TTS sans RVC).
+      - RVC_SERVICE_URL=${RVC_SERVICE_URL:-}
 
     volumes:
       - ${DATA_DIR:-./data}:/data
@@ -148,6 +151,9 @@ services:
       searxng:
         condition: service_healthy
         required: false
+      mnemo-rvc:
+        condition: service_healthy
+        required: false
 
 
   # ── SearXNG — moteur de recherche local (optionnel) ──────────────
@@ -174,6 +180,63 @@ services:
       - SEARXNG_BASE_URL=http://searxng:8080
       - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY:-change_me_in_env}
 
+
+
+  # ── RVC — conversion de voix (optionnel, profile voice) ─────────
+  # Transforme la voix Piper neutre en voix personnalisée (modèle .pth).
+  # Démarrer avec : docker compose --profile voice up -d mnemo-rvc
+  # mnemo-api appelle ce service via RVC_SERVICE_URL=http://mnemo-rvc:7865
+  mnemo-rvc:
+    build:
+      context: .
+      dockerfile: dockerfile.rvc
+    image: mnemo-rvc:latest
+    container_name: mnemo-rvc
+    profiles:
+      - voice
+
+    environment:
+      - MODELS_DIR=/models
+      # Optionnel : pointer un modèle précis si plusieurs .pth dans /models/
+      # - RVC_MODEL_PATH=/models/ShalltearRVC2.pth
+      # - RVC_INDEX_PATH=/models/added_IVF1115_Flat_nprobe_1_ShalltearRVC2_v2.index
+      - RVC_F0_METHOD=${RVC_F0_METHOD:-harvest}
+      - RVC_F0_UP_KEY=${RVC_F0_UP_KEY:-0}
+      - RVC_INDEX_RATE=${RVC_INDEX_RATE:-0.75}
+
+    volumes:
+      # Modèles RVC — répertoire contenant *.pth et *.index
+      - ${VOICES_DIR:-./src/Voices}:/models:ro
+
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    user: "1000:1000"
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    networks:
+      - mnemo_internal
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7865/health', timeout=3)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 
   # ── Scheduler — morning briefing (service background) ────────────

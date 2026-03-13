@@ -84,7 +84,26 @@ case "$CMD" in
     docker compose build mnemo mnemo-scheduler
     info "Redémarrage du scheduler et de l'API..."
     docker compose up -d mnemo-scheduler mnemo-api
-    ok "Rebuild terminé. Scheduler et API redémarrés."
+    # Si mnemo-rvc était actif (profile voice), rebuild + redémarre
+    if docker compose --profile voice ps -q mnemo-rvc 2>/dev/null | grep -q .; then
+      info "Rebuild du service RVC..."
+      docker compose --profile voice build mnemo-rvc
+      docker compose --profile voice up -d mnemo-rvc
+      ok "Rebuild terminé. Scheduler, API et RVC redémarrés."
+    else
+      ok "Rebuild terminé. Scheduler et API redémarrés."
+      echo -e "  (RVC non actif — lance ${BOLD}./mnemo.sh rvc${RESET} pour l'activer)"
+    fi
+    ;;
+
+  rvc)
+    info "Build + démarrage du service RVC (voix custom)..."
+    docker compose --profile voice build mnemo-rvc
+    docker compose --profile voice up -d mnemo-rvc
+    ok "Service RVC démarré."
+    echo -e "  Ajoute ${BOLD}RVC_SERVICE_URL=http://mnemo-rvc:7865${RESET} dans .env puis relance l'API :"
+    echo -e "  ${BOLD}./mnemo.sh api${RESET}"
+    echo -e "  Logs : ${BOLD}./mnemo.sh logs-rvc${RESET}"
     ;;
 
   briefing)
@@ -113,6 +132,11 @@ case "$CMD" in
   logs-api)
     info "Logs de l'API (Ctrl+C pour quitter)..."
     docker compose logs -f mnemo-api
+    ;;
+
+  logs-rvc)
+    info "Logs du service RVC (Ctrl+C pour quitter)..."
+    docker compose --profile voice logs -f mnemo-rvc
     ;;
 
   ingest)
@@ -240,12 +264,14 @@ print(token)
     echo -e "  ${BOLD}./mnemo.sh scheduler${RESET}     Démarre le scheduler seul (daemon)"
     echo -e "  ${BOLD}./mnemo.sh api${RESET}           Démarre l'API seule (daemon)"
     echo -e "  ${BOLD}./mnemo.sh stop${RESET}          Arrête scheduler + API"
-    echo -e "  ${BOLD}./mnemo.sh rebuild${RESET}       Stop → build → redémarre scheduler + API"
+    echo -e "  ${BOLD}./mnemo.sh rebuild${RESET}       Stop → build → redémarre scheduler + API (+ RVC si actif)"
     echo -e "  ${BOLD}./mnemo.sh briefing${RESET}      Génère briefing.md maintenant"
     echo -e "  ${BOLD}./mnemo.sh weekly${RESET}        Génère weekly.md maintenant"
     echo -e "  ${BOLD}./mnemo.sh deadline${RESET}      Scanne les deadlines J-1/J-3"
     echo -e "  ${BOLD}./mnemo.sh logs${RESET}          Logs scheduler en temps réel"
     echo -e "  ${BOLD}./mnemo.sh logs-api${RESET}      Logs API en temps réel"
+    echo -e "  ${BOLD}./mnemo.sh rvc${RESET}           Build + démarre le service RVC (voix custom)"
+    echo -e "  ${BOLD}./mnemo.sh logs-rvc${RESET}      Logs RVC en temps réel"
     echo -e "  ${BOLD}./mnemo.sh ingest <f>${RESET}    Ingère un fichier en mémoire"
     echo -e "  ${BOLD}./mnemo.sh adduser <n>${RESET}   Crée un utilisateur, affiche son token"
     echo -e "  ${BOLD}./mnemo.sh fix-perms${RESET}     Corrige chmod 600/700 sur /data (migration)"

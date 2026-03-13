@@ -33,3 +33,9 @@ pysbd>=0.3.4
 # ── Dashboard web ──────────────────────────────────────────────────
 fastapi>=0.115.0
 uvicorn>=0.30.0
+
+# ── STT / TTS (requis pour /api/stt et /api/tts) ──────────────────
+# Speech-to-Text : Whisper (modèle tiny téléchargé au premier usage dans /data/models/whisper/)
+faster-whisper>=1.0.0
+# Text-to-Speech : Piper (voix fr_FR téléchargée au premier usage dans /data/models/piper/)
+piper-tts>=1.2.0
