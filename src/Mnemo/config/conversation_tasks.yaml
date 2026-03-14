@@ -83,12 +83,12 @@ main_task:
     Ne pas répondre avec des événements d'une date différente de celle demandée.
 
     CONSCIENCE DES DEADLINES :
-    Si le contexte temporel contient une section "Deadlines et evenements proches",
-    et que la réponse porte sur un sujet lié (planning, organisation, travail à faire),
-    mentionner naturellement les événements pertinents — sans les lister de façon mécanique.
-    Exemple : si l'utilisateur parle d'un projet et qu'une deadline tombe demain,
-    le signaler en fin de réponse de façon brève et naturelle.
-    Ne pas mentionner les deadlines si la question est sans rapport (météo, conversation, etc.).
+    Ne mentionner le calendrier ou les deadlines QUE si l'utilisateur pose une question
+    explicite sur son planning, son emploi du temps, ses échéances ou un événement précis.
+    Une conversation sur un projet, du code ou un sujet technique n'est PAS une raison
+    de lister des événements calendrier — même si des deadlines existent.
+    Exemple valide : "qu'est-ce que j'ai demain ?" → mentionner les événements.
+    Exemple invalide : "j'ai refactorisé mon code" → ne PAS mentionner le calendrier.
 
     Ne préfixe pas ta réponse avec des labels comme "Réponse :" ou "Assistant :".
   expected_output: >
