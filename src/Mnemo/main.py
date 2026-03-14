@@ -527,6 +527,16 @@ def run():
     import os as _os_run
     _os_run.umask(0o077)  # nouveau fichier → 600, nouveau répertoire → 700
 
+    # 0. Init + migration idempotentes — s'assure que toutes les tables existent
+    try:
+        from Mnemo.init_db import init_db, migrate_db
+        from Mnemo.context import get_data_dir
+        _db = get_data_dir() / "memory.db"
+        init_db(db_path=_db)
+        migrate_db(db_path=_db)
+    except Exception as _e:
+        print(f"[WARN] init/migrate_db échoué : {_e}")
+
     # 1. Vérifie la cohérence de memory.md avec la DB
     check_and_sync()
 
