@@ -48,6 +48,8 @@ frontend/node_modules/
 #Autres
 documents/
 src/Voices/
+docs/
+
 # NEVER export calendars. it's a major security risk.
 *.ics 
 data/

@@ -198,8 +198,8 @@ services:
     environment:
       - MODELS_DIR=/models
       # Optionnel : pointer un modèle précis si plusieurs .pth dans /models/
-      # - RVC_MODEL_PATH=/models/ShalltearRVC2.pth
-      # - RVC_INDEX_PATH=/models/added_IVF1115_Flat_nprobe_1_ShalltearRVC2_v2.index
+      # - RVC_MODEL_PATH=/models/rvc/Voices/seia.pth
+      # - RVC_INDEX_PATH=/models/rvc/Voices/seia.index
       - RVC_F0_METHOD=${RVC_F0_METHOD:-harvest}
       - RVC_F0_UP_KEY=${RVC_F0_UP_KEY:-0}
       - RVC_INDEX_RATE=${RVC_INDEX_RATE:-0.75}
