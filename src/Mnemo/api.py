@@ -186,106 +186,63 @@ def _handle_message_web(
 ) -> str | dict:
     """
     Variante de handle_message sans stdin — destinée à l'API web.
-
-    Différences vs handle_message() :
-    - route=shell          → refus explicite (sécurité)
-    - needs_clarification  → ignoré (pas d'input utilisateur possible)
+    Utilise la même CoR que le CLI (build_router) avec des adaptations web :
+    - route=shell          → refus explicite (sécurité, pas de confirmation possible)
+    - needs_clarification  → ignoré
     - needs_web=True       → retourne {"__web_confirm__": True, "web_query": ...}
                              si web_confirmed is None (premier appel).
                              Si web_confirmed=True  → lance la recherche.
                              Si web_confirmed=False → skip la recherche.
     """
-    from Mnemo.main import (
-        _parse_eval_json,
-        _route_message,
-        _detect_shell_intent,
-        _detect_calendar_write_intent,
-        _detect_note_intent,
-        _detect_scheduler_intent,
-        _ml_detect_intent,
-    )
-    from Mnemo.crew import EvaluationCrew
+    from Mnemo.routing import build_router, RouterContext, dispatch
+    from Mnemo.routing.handlers.keyword import _detect_shell_intent
+    from Mnemo.routing.context import RouterResult
     from Mnemo.tools.memory_tools import update_session_memory
     from Mnemo.tools.calendar_tools import get_temporal_context
 
     temporal_ctx = get_temporal_context()
 
-    # Sécurité rapide : keywords shell → refus immédiat sans LLM
+    # Sécurité rapide : keywords shell → refus immédiat sans passer par la CoR
     if _detect_shell_intent(user_message):
         return _SHELL_BLOCKED
 
-    # ML pre-check : shell à haute confiance → refus
-    ml_route, ml_conf = _ml_detect_intent(user_message)
-    if ml_route == "shell" and ml_conf >= 0.80:
+    # Routing via la chaîne de responsabilité
+    ctx    = RouterContext(message=user_message, session_id=session_id, temporal_context=temporal_ctx)
+    router = build_router()
+    result = router.handle(ctx)
+
+    if result is None:
+        result = RouterResult("conversation", 0.0, "fallback")
+
+    # API : shell toujours bloqué, même si le ML/LLM l'a choisi
+    if result.route == "shell":
         return _SHELL_BLOCKED
 
-    # Pre-check note : keywords forts → bypass LLM
-    if _detect_note_intent(user_message):
-        eval_json = {"route": "note", "needs_memory": False, "needs_web": False,
-                     "needs_clarification": False, "_web_mode": True}
-        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
-        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
-        update_session_memory(session_id, user_message, response)
-        return response
-
-    # Pre-check scheduler : keywords forts → bypass LLM
-    kw_scheduler_strong, kw_scheduler_weak = _detect_scheduler_intent(user_message)
-    if kw_scheduler_strong:
-        eval_json = {"route": "scheduler", "needs_memory": False, "needs_web": False,
-                     "needs_clarification": False, "_web_mode": True}
-        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
-        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
-        update_session_memory(session_id, user_message, response)
-        return response
-
-    # Pre-check calendar : keywords → force route=calendar sans passer par le LLM
-    kw_calendar = _detect_calendar_write_intent(user_message)
-    ml_calendar  = ml_route == "calendar" and ml_conf >= 0.92
-
-    if kw_calendar or ml_calendar:
-        eval_json = {"route": "calendar", "needs_memory": False, "needs_web": False,
-                     "needs_clarification": False, "_web_mode": True}
-        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
-        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
-        update_session_memory(session_id, user_message, response)
-        return response
-
-    # EvaluationCrew (LLM) — analyse sémantique complète
-    eval_result = EvaluationCrew().crew().kickoff(inputs={
-        "user_message": user_message,
-        "temporal_context": temporal_ctx,
-    })
-    eval_json = _parse_eval_json(eval_result.raw.strip())
-
-    # Dernier filet : si le LLM a quand même routé vers shell
-    if eval_json.get("route") == "shell":
-        return _SHELL_BLOCKED
+    meta = result.metadata
 
     # Coercion : web_query non-null implique needs_web = True
-    if eval_json.get("web_query") and not eval_json.get("needs_web"):
-        eval_json["needs_web"] = True
+    if meta.get("web_query") and not meta.get("needs_web"):
+        meta["needs_web"] = True
 
-    # Gestion de la recherche web interactive
+    # Gestion de la confirmation web interactive (remplace stdin)
     web_context = ""
-    if eval_json.get("needs_web") and eval_json.get("web_query"):
+    if meta.get("needs_web") and meta.get("web_query"):
         if web_confirmed is None:
-            # Premier appel : demander confirmation au client
-            return {"__web_confirm__": True, "web_query": eval_json["web_query"]}
+            return {"__web_confirm__": True, "web_query": meta["web_query"]}
         elif web_confirmed:
-            # Confirmé : lancer la recherche
             from Mnemo.tools.web_tools import web_search, format_results_for_prompt
-            results = web_search(confirmed_web_query or eval_json["web_query"])
+            results = web_search(confirmed_web_query or meta["web_query"])
             web_context = format_results_for_prompt(results) if results else ""
         else:
-            # Refusé : désactiver la recherche
-            eval_json["needs_web"] = False
-            eval_json["web_query"] = None
+            meta["needs_web"] = False
+            meta["web_query"] = None
 
-    eval_json["needs_clarification"] = False
-    eval_json["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
+    meta["needs_clarification"] = False
+    meta["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
 
-    print(f"[EVAL] (LLM) {json.dumps(eval_json, ensure_ascii=False)}")
-    response = _route_message(eval_json, user_message, session_id, temporal_ctx, web_context)
+    print(f"[EVAL] ({result.handler}) {json.dumps({'route': result.route, 'conf': round(result.confidence, 2), **meta}, ensure_ascii=False)}")
+    response = dispatch(result, user_message=user_message, session_id=session_id,
+                        temporal_ctx=temporal_ctx, web_context=web_context)
     update_session_memory(session_id, user_message, response)
     return response
 

@@ -503,49 +503,30 @@ def get_week_dates_for_prompt() -> str:
 
 def get_temporal_context() -> str:
     """
-    Construit le bloc temporel complet à injecter dans les prompts.
+    Construit le bloc temporel minimal injecté dans TOUS les prompts.
 
-    Structure claire :
-      - Date et heure actuelles + mapping semaine (lundi 9 → dimanche 15)
-      - Hier (pour résoudre les requêtes "qu'est-ce que j'ai fait hier")
-      - Deadlines urgentes (<=3j)
-      - Agenda de la semaine courante (7 jours) — le LLM utilise get_calendar_events
-        pour toute requête au-delà de cette fenêtre
+    Contient UNIQUEMENT les ancres temporelles nécessaires au LLM pour
+    calculer des dates relatives ("hier", "demain", "lundi prochain").
+    L'agenda et les deadlines sont injectés séparément via calendar_context,
+    uniquement quand needs_calendar=True — ce qui évite que l'agent parle
+    du calendrier dans des conversations sans rapport.
     """
     _jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
     _mois  = ["janvier","février","mars","avril","mai","juin",
               "juillet","août","septembre","octobre","novembre","décembre"]
 
-    today   = date.today()
-    monday  = today - timedelta(days=today.weekday())
+    today  = date.today()
+    monday = today - timedelta(days=today.weekday())
     week_parts = []
     for i in range(7):
         d = monday + timedelta(days=i)
         week_parts.append(f"{_jours[i]} {d.day} {_mois[d.month - 1]}")
 
-    lines = [
+    return "\n".join([
         f"Date et heure actuelles : {get_current_datetime_str()}",
         f"Semaine en cours : {' · '.join(week_parts)}",
         f"Hier : {get_yesterday_date_str()}",
-    ]
-
-    # Deadlines urgentes (<=3j) — section dédiée, visible en premier
-    deadline_block = get_deadline_context()
-    if deadline_block:
-        lines.append("")
-        lines.append(deadline_block)
-
-    # Agenda 7 jours (semaine courante) — fenêtre réduite pour limiter le bruit.
-    # Pour les requêtes au-delà, le LLM dispose de get_calendar_events(reference_date=...).
-    events = get_upcoming_events(days=7)
-    if events:
-        lines.append("")
-        lines.append("Agenda - 7 prochains jours :")
-        lines.append(format_events_for_prompt(events))
-    elif not deadline_block:
-        lines.append("Aucun evenement calendrier disponible.")
-
-    return "\n".join(lines)
+    ])
 
 
 def get_deadline_context() -> str:

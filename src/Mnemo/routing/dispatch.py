@@ -43,20 +43,34 @@ def _get_crew_registry() -> dict:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _prefetch_calendar(metadata: dict) -> str:
-    """Pré-fetch calendrier si needs_calendar — évite que le retriever itère."""
+    """
+    Pré-fetch calendrier si needs_calendar=True.
+
+    Retourne un bloc texte complet : deadlines urgentes + agenda.
+    Injecté dans calendar_context — le seul endroit où le LLM voit les événements.
+    (temporal_context ne contient plus l'agenda depuis la séparation date/calendrier.)
+    """
     if not metadata.get("needs_calendar"):
         return ""
     try:
         from Mnemo.tools.calendar_tools import (
             get_upcoming_events, get_events_for_date, format_events_for_prompt,
+            get_deadline_context,
         )
         ref_date_str = metadata.get("reference_date")
         if ref_date_str:
-            ref_date  = _date.fromisoformat(ref_date_str)
+            ref_date   = _date.fromisoformat(ref_date_str)
             cal_events = get_events_for_date(ref_date)
         else:
             cal_events = get_upcoming_events(days=21)
-        return format_events_for_prompt(cal_events) if cal_events else "Aucun événement trouvé."
+
+        parts = []
+        deadline_block = get_deadline_context()
+        if deadline_block:
+            parts.append(deadline_block)
+        if cal_events:
+            parts.append(format_events_for_prompt(cal_events))
+        return "\n\n".join(parts) if parts else "Aucun événement trouvé."
     except Exception as e:
         return f"Erreur calendrier : {e}"
 

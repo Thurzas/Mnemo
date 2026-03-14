@@ -399,7 +399,7 @@ def handle_message(user_message: str, session_id: str) -> str:
         result = RouterResult("conversation", 0.0, "fallback")
 
     _dbg(f"ROUTE -> {result.route} (conf={result.confidence:.2f}, handler={result.handler})")
-    print(f"[EVAL] ({result.handler}) route={result.route} conf={result.confidence:.2f}")
+    print(f"[EVAL] ({result.handler}) {json.dumps({'route': result.route, 'conf': round(result.confidence, 2), **result.metadata}, ensure_ascii=False)}")
 
     confirmed = run_confirmation_middleware(result, user_message, temporal_ctx)
 
