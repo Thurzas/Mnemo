@@ -100,26 +100,18 @@ Turn Mnemo into a headless brain callable from any interface.
   - [x] `GET /session/{id}` — session history
   - [x] Lightweight authentication (local token, no public exposure)
   - [x] WebSocket for token-by-token response streaming
-- [ ] **Local TTS / STT**
-  - [ ] Speech-to-Text via Whisper.cpp (offline, WSL compatible)
-  - [ ] Text-to-Speech via Piper TTS (lightweight local voice)
-  - [ ] Voice → Mnemo → Voice pipeline
-- [ ] **Raspberry Pi integration**
-  - [ ] Lightweight Python client consuming the REST API
-  - [ ] Latency optimization for embedded hardware responses
-  - [ ] Fallback mode if Mnemo is unreachable (local cache responses)
-- [ ] **Unity integration (desktop pet)**
-  - [ ] C# client consuming the REST API
-  - [ ] State protocol: mood, attention, reaction to messages
-  - [ ] Token streaming to animate the character in real time
-  - [ ] Events: `on_thinking`, `on_response`, `on_memory_write`
-
+- [x] **Local TTS / STT**
+  - [x] Speech-to-Text via Whisper.cpp (offline, WSL compatible)
+  - [x] Text-to-Speech via Piper TTS (lightweight local voice)
+  - [x] Voice → Mnemo → Voice pipeline
 ---
 
 ## 🚀 Phase 5 — Proactivity *(advanced vision)*
 
 The agent takes initiative without waiting to be prompted.
 
+- [ ] Refactoring contextual weighting
+- [ ] Evoluting contextual weighting in use case
 - [ ] Contextual suggestions based on time and memory
 - [ ] Pattern detection ("you work on X every Monday")
 - [ ] Alerts for approaching deadlines
@@ -133,6 +125,17 @@ The agent takes initiative without waiting to be prompted.
   - [ ] Migration path: preconditions/effects already expressible as metadata on `_ACTION_MAP` entries
 
 ---
+
+## Phase 6 — mise en application et développement sur d'autre supports *(Plannification dans un context industriel)*
+- [ ] **Raspberry Pi integration**
+  - [ ] Lightweight Python client consuming the REST API
+  - [ ] Latency optimization for embedded hardware responses
+  - [ ] Fallback mode if Mnemo is unreachable (local cache responses)
+- [ ] **Unity integration (desktop pet)**
+  - [ ] C# client consuming the REST API
+  - [ ] State protocol: mood, attention, reaction to messages
+  - [ ] Token streaming to animate the character in real time
+  - [ ] Events: `on_thinking`, `on_response`, `on_memory_write`
 
 ## 🔐 Cross-cutting Principles
 

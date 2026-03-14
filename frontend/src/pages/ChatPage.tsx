@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { MessageBubble } from '@/components/MessageBubble'
 import { ConfirmModal } from '@/components/ConfirmModal'
-import { auth } from '@/api'
+import { auth, api } from '@/api'
 import styles from './ChatPage.module.css'
 
 interface Message {
@@ -32,6 +32,17 @@ export function ChatPage() {
   )
   const [webConfirm, setWebConfirm]   = useState<WebConfirmState | null>(null)
   const [wsStatus, setWsStatus]       = useState<WsStatus>('connecting')
+
+  // ── Audio state ───────────────────────────────────────────────────
+  const [recording, setRecording]     = useState(false)
+  const [ttsEnabled, setTtsEnabled]   = useState(false)
+  const [sttError, setSttError]       = useState<string | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef   = useRef<Blob[]>([])
+  const ttsEnabledRef    = useRef(false)
+
+  // Keep ref in sync with state (readable inside WS callbacks without closure stale issue)
+  useEffect(() => { ttsEnabledRef.current = ttsEnabled }, [ttsEnabled])
 
   const bottomRef    = useRef<HTMLDivElement>(null)
   const textareaRef  = useRef<HTMLTextAreaElement>(null)
@@ -91,6 +102,9 @@ export function ChatPage() {
           setSessionId(sid)
           sessionStorage.setItem(SID_KEY, sid)
           textareaRef.current?.focus()
+          if (ttsEnabledRef.current && finalContent.trim()) {
+            playTts(finalContent)
+          }
           break
         }
 
@@ -182,6 +196,98 @@ export function ChatPage() {
     el.style.height = Math.min(el.scrollHeight, 110) + 'px'
   }
 
+  // ── TTS ──────────────────────────────────────────────────────────
+
+  const playTts = useCallback(async (text: string) => {
+    try {
+      const blob = await api.tts(text)
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.onended = () => URL.revokeObjectURL(url)
+      await audio.play()
+    } catch {
+      // TTS errors are non-critical — silent fail
+    }
+  }, [])
+
+  // ── STT ──────────────────────────────────────────────────────────
+
+  const startRecording = useCallback(async () => {
+    setSttError(null)
+
+    // getUserMedia nécessite un contexte sécurisé (HTTPS ou localhost)
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setSttError('Microphone non disponible (HTTPS ou localhost requis)')
+      return
+    }
+
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch (e) {
+      setSttError(e instanceof Error ? e.message : 'Microphone inaccessible')
+      return
+    }
+
+    // Choisir le mimeType supporté par ce navigateur
+    const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', '']
+      .find(m => !m || MediaRecorder.isTypeSupported(m)) ?? ''
+
+    let mr: MediaRecorder
+    try {
+      mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    } catch (e) {
+      stream.getTracks().forEach(t => t.stop())
+      setSttError(e instanceof Error ? e.message : 'MediaRecorder non supporté')
+      return
+    }
+    mediaRecorderRef.current = mr
+    audioChunksRef.current = []
+
+    const recordedMime = mr.mimeType || mimeType || 'audio/webm'
+
+    mr.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data)
+    }
+
+    mr.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop())
+      const blob = new Blob(audioChunksRef.current, { type: recordedMime })
+      if (blob.size < 1000) {
+        setSttError('Enregistrement trop court ou silencieux')
+        return
+      }
+      try {
+        const { text } = await api.stt(blob)
+        if (text) {
+          setInput(text)
+          // auto-resize textarea
+          if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto'
+            textareaRef.current.style.height =
+              Math.min(textareaRef.current.scrollHeight, 110) + 'px'
+          }
+          textareaRef.current?.focus()
+        }
+      } catch (e) {
+        setSttError(e instanceof Error ? e.message : 'Erreur STT')
+      }
+    }
+
+    mr.start(250)   // chunk toutes les 250ms — garantit des données même pour les courtes durées
+    setRecording(true)
+  }, [])
+
+  const stopRecording = useCallback(() => {
+    mediaRecorderRef.current?.stop()
+    setRecording(false)
+  }, [])
+
+  const toggleMic = useCallback(() => {
+    if (recording) stopRecording()
+    else startRecording()
+  }, [recording, startRecording, stopRecording])
+
   const isDisabled = loading || wsStatus !== 'ready'
 
   return (
@@ -195,6 +301,10 @@ export function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
+      {sttError && (
+        <div className={styles.sttError}>{sttError}</div>
+      )}
+
       <div className={styles.inputBar}>
         <span className={styles.sessionPill}>
           {sessionId ? `sid: ${sessionId.slice(-8)}` : 'nouvelle session'}
@@ -207,8 +317,25 @@ export function ChatPage() {
           onKeyDown={onKeyDown}
           placeholder="Envoie un message… (Entrée pour envoyer, Maj+Entrée pour sauter une ligne)"
           rows={1}
-          disabled={isDisabled}
+          disabled={loading}
         />
+        <button
+          className={`${styles.micBtn} ${recording ? styles.micBtnActive : ''}`}
+          onClick={toggleMic}
+          disabled={loading}
+          title={recording ? 'Arrêter l\'enregistrement' : 'Dicter un message'}
+          aria-label={recording ? 'Arrêter' : 'Micro'}
+        >
+          {recording ? '⏹' : '🎙'}
+        </button>
+        <button
+          className={`${styles.ttsBtn} ${ttsEnabled ? styles.ttsBtnActive : ''}`}
+          onClick={() => setTtsEnabled(v => !v)}
+          title={ttsEnabled ? 'Désactiver la synthèse vocale' : 'Activer la synthèse vocale'}
+          aria-label="Synthèse vocale"
+        >
+          {ttsEnabled ? '🔊' : '🔇'}
+        </button>
         <button
           className={styles.sendBtn}
           onClick={send}

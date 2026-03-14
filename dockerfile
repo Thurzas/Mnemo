@@ -43,6 +43,7 @@ LABEL version="3.0"
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         curl \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Utilisateur non-root ─────────────────────────────────────────
@@ -56,6 +57,22 @@ RUN groupadd --gid 1000 mnemo \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
  && pip install --no-cache-dir litellm
+
+# ── Modèles STT / TTS — téléchargés au build (internet dispo) ───
+# Whisper tiny (~39 MB) — modèle STT offline
+RUN python3 -c "\
+from faster_whisper import WhisperModel; \
+WhisperModel('tiny', device='cpu', compute_type='int8', download_root='/app/models/whisper')"
+
+# Voix Piper fr_FR-siwis-medium (~65 MB) — modèle TTS offline
+ARG PIPER_TAG=v1.0.0
+ARG PIPER_HF=fr/fr_FR/siwis/medium/fr_FR-siwis-medium
+ARG PIPER_NAME=fr_FR-siwis-medium
+RUN mkdir -p /app/models/piper \
+ && curl -fsSL "https://huggingface.co/rhasspy/piper-voices/resolve/${PIPER_TAG}/${PIPER_HF}.onnx" \
+         -o "/app/models/piper/${PIPER_NAME}.onnx" \
+ && curl -fsSL "https://huggingface.co/rhasspy/piper-voices/resolve/${PIPER_TAG}/${PIPER_HF}.onnx.json" \
+         -o "/app/models/piper/${PIPER_NAME}.onnx.json"
 
 # ── Patch CrewAI : désactive le prompt interactif de tracing ────
 COPY docker/patch_crewai_tracing.py /tmp/patch_crewai_tracing.py

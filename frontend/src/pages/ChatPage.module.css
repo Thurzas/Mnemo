@@ -85,3 +85,72 @@
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+.micBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--s2);
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  align-self: flex-end;
+  transition: background 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+
+.micBtn:hover:not(:disabled) {
+  border-color: var(--a1);
+}
+
+.micBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.micBtnActive {
+  background: #c0392b22;
+  border-color: #c0392b;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 #c0392b44; }
+  50%       { box-shadow: 0 0 0 6px #c0392b00; }
+}
+
+.ttsBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--s2);
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  align-self: flex-end;
+  transition: background 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+
+.ttsBtn:hover {
+  border-color: var(--a1);
+}
+
+.ttsBtnActive {
+  background: var(--a1);
+  border-color: var(--a1);
+}
+
+.sttError {
+  padding: 6px 24px;
+  font-size: 0.78rem;
+  color: #c0392b;
+  background: #c0392b11;
+  border-top: 1px solid #c0392b33;
+}

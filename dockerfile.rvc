@@ -1,0 +1,71 @@
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Système + Python 3.9 ──────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.9 python3.9-dev python3.9-distutils \
+        build-essential ffmpeg curl \
+ && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1 \
+ && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.9 1 \
+ && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.9 - "pip==23.3.2" \
+ && python3.9 -m pip install --no-cache-dir setuptools wheel \
+ && rm -rf /var/lib/apt/lists/*
+
+# ── Utilisateur non-root ───────────────────────────────────────────
+RUN groupadd --gid 1000 mnemo \
+ && useradd  --uid 1000 --gid 1000 --create-home --shell /bin/false mnemo
+
+# ── PyTorch CUDA 12.4 (avant rvc-python pour éviter l'écrasement CPU) ──
+RUN python3.9 -m pip install --no-cache-dir \
+        torch==2.5.1 torchaudio==2.5.1 \
+        --index-url https://download.pytorch.org/whl/cu124
+
+# ── fairseq (pip==23.3.2 requis : omegaconf 2.0.6 a des métadonnées invalides) ──
+RUN python3.9 -m pip install --no-cache-dir \
+        "hydra-core==1.0.7" "fairseq==0.12.2"
+
+# ── Patch fairseq/dataclass/initialize.py ─────────────────────────
+# Corrige deux bugs :
+#   1. mutable defaults Python 3.10+ (non concerné ici mais sécurité)
+#   2. _MISSING_TYPE : initialize.py logue l'erreur omegaconf puis re-raise —
+#      le re-raise est inutile pour l'inférence, on le supprime.
+COPY docker/patch_fairseq.py /tmp/patch_fairseq.py
+RUN python3.9 /tmp/patch_fairseq.py && rm /tmp/patch_fairseq.py
+
+# ── rvc-python + service (torch déjà installé → pas de réinstall CPU) ──
+RUN python3.9 -m pip install --no-cache-dir \
+        rvc-python faiss-cpu fastapi "uvicorn[standard]"
+
+# ── Modèles HuBERT (au build, container isolé au runtime) ─────────
+RUN python3.9 -c "\
+import urllib.request, pathlib, importlib.util; \
+base = pathlib.Path(importlib.util.find_spec('rvc_python').origin).parent / 'base_model'; \
+base.mkdir(parents=True, exist_ok=True); \
+[( \
+    print(f'Downloading {f}...'), \
+    urllib.request.urlretrieve(f'https://huggingface.co/Daswer123/RVC_Base/resolve/main/{f}', str(base / f)) \
+) for f in ['hubert_base.pt', 'rmvpe.pt', 'rmvpe.onnx']]"
+
+# ── Code du service + permissions ─────────────────────────────────
+COPY src/rvc_service/ /app/rvc_service/
+
+RUN mkdir -p /models \
+ && chown -R mnemo:mnemo /app /models \
+ && python3.9 -c "import importlib.util, pathlib; print(pathlib.Path(importlib.util.find_spec('rvc_python').origin).parent)" \
+    | xargs chown -R mnemo:mnemo
+
+# ── pkg_resources — supprimé dans setuptools 80+ ─────────────────
+# rvc-python l'utilise pour localiser ses fichiers de ressources.
+RUN python3.9 -m pip install --no-cache-dir "setuptools<80"
+
+WORKDIR /app
+USER mnemo
+
+ENV PYTHONUNBUFFERED=1
+ENV MODELS_DIR=/models
+ENV RVC_DEVICE=cuda:0
+
+EXPOSE 7865
+ENTRYPOINT ["python3.9", "-u", "-m", "uvicorn"]
+CMD ["rvc_service.main:app", "--host", "0.0.0.0", "--port", "7865"]
