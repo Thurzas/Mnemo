@@ -865,6 +865,97 @@ async def ws_message(websocket: WebSocket):
         pass
 
 
+# ── Base de connaissances (ingestion de fichiers) ──────────────────
+
+@app.get("/api/documents")
+def documents_list(_: Auth):
+    """Liste tous les documents ingérés avec leurs métadonnées."""
+    try:
+        from Mnemo.context import get_data_dir
+        from Mnemo.tools.ingest_tools import list_ingested_documents
+        docs = list_ingested_documents(db_path=get_data_dir() / "memory.db")
+        return {"documents": docs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Formats acceptés pour l'ingestion (sync avec ingest_file dispatcher)
+_INGEST_EXTENSIONS = {
+    ".pdf", ".docx", ".txt", ".md",
+    ".py", ".js", ".ts", ".c", ".cpp", ".h",
+    ".cs", ".java", ".sh", ".bash", ".ps1",
+}
+
+
+@app.post("/api/ingest", status_code=200)
+def ingest_upload(file: UploadFile, _: Auth):
+    """
+    Ingère un fichier uploadé dans la base de connaissances.
+    Le fichier est sauvegardé temporairement, ingéré, puis supprimé.
+    Retourne {status, filename, pages, chunks, doc_id}.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+    from Mnemo.context import get_data_dir
+    from Mnemo.tools.ingest_tools import ingest_file
+
+    filename = file.filename or "upload"
+    ext = _Path(filename).suffix.lower()
+    if ext not in _INGEST_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Format non supporté : {ext}. Acceptés : {', '.join(sorted(_INGEST_EXTENSIONS))}",
+        )
+
+    try:
+        raw = file.file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lecture du fichier échouée : {e}")
+
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+
+    # Sauvegarde temporaire avec l'extension correcte (ingest_file en a besoin)
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp.write(raw)
+            tmp_path = _Path(tmp.name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur temporaire : {e}")
+
+    try:
+        result = ingest_file(tmp_path, db_path=get_data_dir() / "memory.db")
+        result["filename"] = filename   # remplace le nom tmp par le nom original
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+@app.delete("/api/documents/{doc_id}", status_code=200)
+def document_delete(doc_id: str, _: Auth):
+    """Supprime un document ingéré et tous ses chunks de la base."""
+    if not doc_id or len(doc_id) > 64 or any(c in doc_id for c in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail="doc_id invalide.")
+    try:
+        from Mnemo.context import get_data_dir
+        from Mnemo.tools.ingest_tools import delete_document
+        ok = delete_document(doc_id, db_path=get_data_dir() / "memory.db")
+        if not ok:
+            raise HTTPException(status_code=404, detail="Document introuvable.")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──
 # FastAPI matche les routes dans l'ordre de définition.
 # Ce catch-all doit être après toutes les routes /api/*.

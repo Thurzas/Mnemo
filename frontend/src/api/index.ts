@@ -109,6 +109,26 @@ export interface OnboardingStatusResponse {
   questions: OnboardingQuestion[]
 }
 
+export interface IngestedDocument {
+  filename: string
+  pages: number
+  chunks: number
+  ingested_at: string
+  doc_id?: string   // présent si on l'expose plus tard via la route list
+}
+
+export interface DocumentsResponse {
+  documents: IngestedDocument[]
+}
+
+export interface IngestResult {
+  status: 'ingested' | 'already_ingested' | 'empty'
+  doc_id: string
+  filename: string
+  pages: number
+  chunks: number
+}
+
 export interface OnboardingAnswerItem {
   id: string
   answer: string
@@ -217,6 +237,29 @@ export const api = {
 
   whoami: () =>
     request<{ username: string; calendar_source: string; created_at: string | null }>('/api/auth/whoami'),
+
+  getDocuments: () =>
+    request<DocumentsResponse>('/api/documents'),
+
+  deleteDocument: (docId: string) =>
+    request<{ ok: boolean }>(`/api/documents/${encodeURIComponent(docId)}`, {
+      method: 'DELETE',
+    }),
+
+  ingestFile: async (file: File): Promise<IngestResult> => {
+    const token = auth.getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch('/api/ingest', { method: 'POST', headers, body })
+    if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(detail?.detail ?? res.statusText)
+    }
+    return res.json()
+  },
 
   onboardingStatus: () =>
     request<OnboardingStatusResponse>('/api/onboarding/status'),

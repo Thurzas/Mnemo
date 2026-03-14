@@ -739,6 +739,32 @@ def ingest_file(path: Path, db_path: Path | None = None) -> dict:
 
 
 
+def delete_document(doc_id: str, db_path: Path | None = None) -> bool:
+    """
+    Supprime un document et tous ses chunks (cascade) de la base.
+    Nettoie aussi doc_chunks_fts (table virtuelle sans FK constraint).
+    Retourne True si le document existait, False s'il était introuvable.
+    """
+    if db_path is None:
+        db_path = _db_path_default()
+    db = sqlite3.connect(str(db_path))
+    row = db.execute("SELECT id FROM documents WHERE id = ?", (doc_id,)).fetchone()
+    if not row:
+        db.close()
+        return False
+    # Récupère les chunk_ids avant suppression pour nettoyer FTS
+    chunk_ids = [r[0] for r in db.execute(
+        "SELECT id FROM doc_chunks WHERE doc_id = ?", (doc_id,)
+    ).fetchall()]
+    for cid in chunk_ids:
+        db.execute("DELETE FROM doc_chunks_fts WHERE chunk_id = ?", (cid,))
+    # ON DELETE CASCADE supprime doc_chunks + doc_embeddings
+    db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    db.commit()
+    db.close()
+    return True
+
+
 # ══════════════════════════════════════════════════════════════
 # Retrieval dans les documents (utilisé par retrieve_all)
 # ══════════════════════════════════════════════════════════════
@@ -814,17 +840,18 @@ def list_ingested_documents(db_path: Path | None = None) -> list[dict]:
         db_path = _db_path_default()
     db   = sqlite3.connect(str(db_path))
     rows = db.execute("""
-        SELECT filename, page_count, chunk_count, ingested_at
+        SELECT id, filename, page_count, chunk_count, ingested_at
         FROM documents
         ORDER BY ingested_at DESC
     """).fetchall()
     db.close()
     return [
         {
-            "filename":    r[0],
-            "pages":       r[1],
-            "chunks":      r[2],
-            "ingested_at": r[3],
+            "doc_id":      r[0],
+            "filename":    r[1],
+            "pages":       r[2],
+            "chunks":      r[3],
+            "ingested_at": r[4],
         }
         for r in rows
     ]
