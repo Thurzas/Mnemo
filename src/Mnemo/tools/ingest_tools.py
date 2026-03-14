@@ -638,6 +638,82 @@ def ingest_code(path: Path, db_path: Path | None = None) -> dict:
     return _ingest_pages(path, pages, page_count, mime, db_path)
 
 
+def ingest_text_block(
+    text:     str,
+    title:    str | None = None,
+    source:   str = "text_block",
+    db_path:  Path | None = None,
+) -> dict:
+    """
+    Ingère un bloc de texte brut (sans fichier physique) dans doc_chunks.
+
+    Utilisé par NoteWriterCrew pour les contenus classifiés Bucket B.
+    Le doc_id est le MD5 du texte — garantit l'idempotence si le même
+    contenu est soumis deux fois.
+
+    Args:
+        text   : contenu brut à ingérer.
+        title  : titre optionnel (affiché dans le retrieval). Si absent,
+                 généré depuis les premiers mots du texte.
+        source : identifiant du type de source (stocké dans la colonne path
+                 de la table documents). Défaut : "text_block".
+        db_path: chemin vers memory.db. Défaut : DATA_DIR/memory.db.
+
+    Returns:
+        dict { status, doc_id, filename, pages, chunks }
+        status ∈ "ingested" | "already_ingested" | "empty"
+    """
+    import hashlib as _hashlib
+
+    if db_path is None:
+        db_path = _db_path_default()
+
+    cleaned = sanitize_str(text)
+    if not cleaned.strip():
+        return {"status": "empty", "doc_id": "", "filename": title or "", "pages": 0, "chunks": 0}
+
+    doc_id = _hashlib.md5(cleaned.encode()).hexdigest()
+
+    if not title:
+        words = cleaned.split()[:8]
+        title = " ".join(words) + ("…" if len(cleaned.split()) > 8 else "")
+
+    db = sqlite3.connect(str(db_path))
+
+    if is_already_ingested(db, doc_id):
+        db.close()
+        return {"status": "already_ingested", "doc_id": doc_id, "filename": title, "pages": 0, "chunks": 0}
+
+    # Découpe en pages fictives de 500 mots (même logique que extract_text_pages)
+    WORDS_PER_PAGE = 500
+    words = cleaned.split()
+    pages = []
+    for i in range(0, len(words), WORDS_PER_PAGE):
+        pages.append({
+            "page": len(pages) + 1,
+            "text": " ".join(words[i:i + WORDS_PER_PAGE]),
+        })
+
+    if not pages:
+        db.close()
+        return {"status": "empty", "doc_id": doc_id, "filename": title, "pages": 0, "chunks": 0}
+
+    chunks = chunk_pages(pages)
+    total  = len(chunks)
+
+    for chunk in chunks:
+        upsert_doc_chunk(db, doc_id, chunk, title)
+
+    db.execute("""
+        INSERT INTO documents (id, filename, path, mime_type, page_count, chunk_count)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (doc_id, title, source, "text/plain", len(pages), total))
+    db.commit()
+    db.close()
+
+    return {"status": "ingested", "doc_id": doc_id, "filename": title, "pages": len(pages), "chunks": total}
+
+
 def ingest_file(path: Path, db_path: Path | None = None) -> dict:
     """
     Dispatcher universel — détecte le format et appelle le bon ingester.

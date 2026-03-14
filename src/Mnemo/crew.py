@@ -478,6 +478,30 @@ class NoteWriterCrew:
         )
 
     def run(self, inputs: dict) -> str:
+        from Mnemo.tools.memory_classifier import classify_content
+        from Mnemo.tools.ingest_tools import ingest_text_block
+
+        user_message = inputs.get("user_message", "")
+        classification = classify_content(user_message)
+
+        print(
+            f"[NOTE] classifier={classification.method} "
+            f"bucket={classification.bucket} "
+            f"conf={classification.confidence:.2f} — {classification.reason}"
+        )
+
+        if classification.bucket == "B":
+            res = ingest_text_block(user_message)
+            if res["status"] == "ingested":
+                return (
+                    f"Contenu ingéré comme document de référence "
+                    f"({res['chunks']} chunks indexés)."
+                )
+            if res["status"] == "already_ingested":
+                return "Ce contenu est déjà dans la base de connaissances."
+            return "Le contenu était vide, rien n'a été ingéré."
+
+        # Bucket A — pipeline note courte : memory.md
         result = self.crew().kickoff(inputs=inputs)
         return result.raw.strip()
 
