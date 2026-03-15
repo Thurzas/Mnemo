@@ -30,9 +30,10 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 # ── Lazy singletons ────────────────────────────────────────────────
-_whisper_model = None
-_piper_voice   = None
-_rvc_infer     = None          # RVCInference instance, None si non configuré
+_whisper_model  = None
+_piper_voice    = None   # voix française (fr_FR-siwis-medium)
+_piper_voice_ja = None   # voix japonaise (ja_JP-kokoro-medium)
+_rvc_infer      = None   # RVCInference instance, None si non configuré
 
 
 def _models_dir() -> Path:
@@ -105,60 +106,92 @@ def transcribe_audio(audio_bytes: bytes, language: str = "fr") -> str:
 # TTS étape 1 — Piper (texte → WAV neutre)
 # ══════════════════════════════════════════════════════════════════
 
-_PIPER_VOICE      = os.getenv("PIPER_VOICE", "fr_FR-siwis-medium")
+_PIPER_VOICE      = os.getenv("PIPER_VOICE",    "fr_FR-siwis-medium")
+_PIPER_VOICE_JA   = os.getenv("PIPER_VOICE_JA", "ja_JP-kokoro-medium")
 _PIPER_VOICE_REPO = "rhasspy/piper-voices"
 _PIPER_VOICE_TAG  = "v1.0.0"
-_PIPER_VOICE_HF   = "fr/fr_FR/siwis/medium/fr_FR-siwis-medium"
+
+# Chemins HuggingFace par voix
+_PIPER_HF_PATHS: dict[str, str] = {
+    "fr_FR-siwis-medium":  "fr/fr_FR/siwis/medium/fr_FR-siwis-medium",
+    "ja_JP-kokoro-medium": "ja/ja_JP/kokoro/medium/ja_JP-kokoro-medium",
+}
 
 
-def _piper_voice_paths() -> tuple[Path, Path]:
+def _piper_voice_paths(voice_name: str) -> tuple[Path, Path]:
     """
+    Résout (onnx, config) pour une voix Piper donnée.
     Priorité : /app/models/piper (baked au build) →
                /data/models/piper (volume, fallback download)
     """
     bundled_dir = _APP_MODELS / "piper"
-    onnx_b   = bundled_dir / f"{_PIPER_VOICE}.onnx"
-    config_b = bundled_dir / f"{_PIPER_VOICE}.onnx.json"
+    onnx_b   = bundled_dir / f"{voice_name}.onnx"
+    config_b = bundled_dir / f"{voice_name}.onnx.json"
     if onnx_b.exists() and config_b.exists():
         return onnx_b, config_b
 
-    # Fallback : volume /data (et téléchargement si absent)
     voice_dir = _models_dir() / "piper"
     voice_dir.mkdir(parents=True, exist_ok=True)
-    onnx   = voice_dir / f"{_PIPER_VOICE}.onnx"
-    config = voice_dir / f"{_PIPER_VOICE}.onnx.json"
+    onnx   = voice_dir / f"{voice_name}.onnx"
+    config = voice_dir / f"{voice_name}.onnx.json"
     if not onnx.exists() or not config.exists():
-        _download_piper_voice(onnx, config)
+        _download_piper_voice(voice_name, onnx, config)
     return onnx, config
 
 
-def _download_piper_voice(onnx: Path, config: Path) -> None:
+def _download_piper_voice(voice_name: str, onnx: Path, config: Path) -> None:
+    hf_path = _PIPER_HF_PATHS.get(voice_name, f"??/{voice_name}")
     base = (
         f"https://huggingface.co/{_PIPER_VOICE_REPO}/resolve/"
-        f"{_PIPER_VOICE_TAG}/{_PIPER_VOICE_HF}"
+        f"{_PIPER_VOICE_TAG}/{hf_path}"
     )
-    log.info("Téléchargement de la voix Piper '%s'…", _PIPER_VOICE)
+    log.info("Téléchargement de la voix Piper '%s'…", voice_name)
     for path, suffix in [(onnx, ".onnx"), (config, ".onnx.json")]:
         log.info("  GET %s%s", base, suffix)
         urllib.request.urlretrieve(f"{base}{suffix}", str(path))
-    log.info("Voix Piper téléchargée.")
+    log.info("Voix Piper '%s' téléchargée.", voice_name)
 
 
 def _get_piper():
+    """Voix française (lazy singleton)."""
     global _piper_voice
     if _piper_voice is None:
         from piper import PiperVoice  # noqa: PLC0415
-        onnx, config = _piper_voice_paths()
+        onnx, config = _piper_voice_paths(_PIPER_VOICE)
         log.info("Chargement de la voix Piper '%s'…", _PIPER_VOICE)
         _piper_voice = PiperVoice.load(str(onnx), config_path=str(config), use_cuda=False)
         log.info("Voix Piper chargée.")
     return _piper_voice
 
 
-def _piper_to_wav_bytes(text: str) -> bytes:
-    """Piper : texte → bytes WAV (voix neutre française)."""
+def _get_piper_ja():
+    """Voix japonaise (lazy singleton)."""
+    global _piper_voice_ja
+    if _piper_voice_ja is None:
+        from piper import PiperVoice  # noqa: PLC0415
+        onnx, config = _piper_voice_paths(_PIPER_VOICE_JA)
+        log.info("Chargement de la voix Piper japonaise '%s'…", _PIPER_VOICE_JA)
+        _piper_voice_ja = PiperVoice.load(str(onnx), config_path=str(config), use_cuda=False)
+        log.info("Voix Piper japonaise chargée.")
+    return _piper_voice_ja
+
+
+def _contains_japanese(text: str) -> bool:
+    """True si le texte contient des caractères hiragana, katakana ou kanji."""
+    for ch in text:
+        cp = ord(ch)
+        if (0x3040 <= cp <= 0x30FF   # hiragana + katakana
+                or 0x4E00 <= cp <= 0x9FFF   # CJK unifié (kanji communs)
+                or 0xFF65 <= cp <= 0xFF9F):  # katakana demi-chasse
+            return True
+    return False
+
+
+def _piper_to_wav_bytes(text: str, voice=None) -> bytes:
+    """Piper : texte → bytes WAV (utilise la voix fournie ou la voix FR par défaut)."""
     import wave
-    voice = _get_piper()
+    if voice is None:
+        voice = _get_piper()
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)
@@ -321,7 +354,15 @@ def _rvc_convert(wav_bytes: bytes) -> bytes:
 def synthesize_speech(text: str) -> bytes:
     """
     Texte → WAV bytes.
-    Pipeline : Piper TTS  →  RVC conversion (si modèle disponible)
+
+    Détection automatique de langue :
+    - Japonais (hiragana / katakana / kanji) → ja_JP-kokoro-medium, RVC ignoré
+      (le modèle RVC est entraîné sur voix FR ; passer du japonais dedans crée
+      des artefacts importants)
+    - Tout le reste → fr_FR-siwis-medium → RVC (si modèle disponible)
     """
+    if _contains_japanese(text):
+        return _piper_to_wav_bytes(text, voice=_get_piper_ja())
+
     piper_wav = _piper_to_wav_bytes(text)
     return _rvc_convert(piper_wav)
