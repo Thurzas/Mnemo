@@ -72,7 +72,7 @@ class ConversationCrew:
             config=self.agents_config["memory_retriever"],
             verbose=False,
             allow_delegation=False,
-            tools=[RetrieveMemoryTool(), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool(), WebSearchTool()],
+            tools=[RetrieveMemoryTool(profile="conversation"), GetSessionMemoryTool(), ListDocumentsTool(), GetCalendarTool(), WebSearchTool()],
             max_iter=8,   # session + mémoire + calendrier + web = jusqu'à 4 appels, marge incluse
             llm=_llm(0.0),
         )

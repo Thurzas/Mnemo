@@ -4,6 +4,7 @@ import sqlite3
 import numpy as np
 import ollama
 import os
+from dataclasses import dataclass, field
 # Client Ollama explicite — lit OLLAMA_HOST ou API_BASE depuis l'env.
 # Sans ça, le client Python se connecte toujours à localhost:11434
 # ce qui échoue dans un conteneur Docker où Ollama est sur l'hôte.
@@ -47,7 +48,19 @@ def _sessions_dir() -> Path:
 EMBED_MODEL   = "nomic-embed-text"
 TOP_K_SEARCH  = 10
 TOP_K_FINAL   = 5
-HALF_LIFE_DAYS = 30.0  # Fraîcheur : un chunk vieux de 30j a un score de ~0.37
+
+# Demi-vie par catégorie (en jours) — remplace l'ancien HALF_LIFE_DAYS unique de 30j
+HALF_LIFE_BY_CATEGORY: dict[str, float] = {
+    "identité":           365.0,  # change rarement — stable sur des années
+    "décision":           180.0,
+    "projet":              90.0,
+    "préférence":          90.0,
+    "connaissance":        60.0,
+    "historique_session":  14.0,  # périme vite
+}
+
+# Un chunk ne descend jamais sous ce score de fraîcheur (évite l'écrasement multiplicatif)
+FRESHNESS_FLOOR = 0.15
 
 # Poids statiques par catégorie — ajustables selon tes préférences
 CATEGORY_WEIGHTS: dict[str, float] = {
@@ -57,6 +70,35 @@ CATEGORY_WEIGHTS: dict[str, float] = {
     "préférence":         1.1,  # habitudes, style de communication
     "connaissance":       1.0,  # faits appris en session (défaut)
     "historique_session": 0.7,  # résumés de sessions passées
+}
+
+
+@dataclass
+class WeightProfile:
+    """Profil de pondération contextuel — passé à retrieve_all() selon le crew appelant."""
+    category_overrides:   dict[str, float] = field(default_factory=dict)
+    half_life_multiplier: float = 1.0       # < 1 → decay plus rapide, > 1 → plus lent
+    freshness_floor:      float = FRESHNESS_FLOOR
+    top_k_override:       int | None = None  # None → utilise top_k_final du caller
+
+
+PROFILES: dict[str, WeightProfile] = {
+    "conversation": WeightProfile(),
+    "briefing": WeightProfile(
+        category_overrides   = {"historique_session": 2.0, "projet": 1.5, "décision": 1.3},
+        half_life_multiplier = 0.25,   # fraîcheur très privilégiée
+        freshness_floor      = 0.30,   # les vieux chunks sont vraiment écartés
+        top_k_override       = 8,      # le briefing a besoin de plus de contexte
+    ),
+    "curiosity": WeightProfile(
+        category_overrides = {"identité": 2.5, "préférence": 2.0},
+    ),
+    "scheduler": WeightProfile(
+        category_overrides = {"décision": 1.8, "projet": 1.6},
+    ),
+    "shell": WeightProfile(
+        category_overrides = {"projet": 1.4, "décision": 1.2},
+    ),
 }
 
 
@@ -100,18 +142,21 @@ def build_chunk_text(section: str, subsection: str, content: str) -> str:
 # Pondération — fraîcheur & importance
 # ══════════════════════════════════════════════════════════════
 
-def freshness_score(updated_at: str, half_life_days: float = HALF_LIFE_DAYS) -> float:
+def freshness_score(updated_at: str, category: str = "connaissance",
+                    half_life_multiplier: float = 1.0) -> float:
     """
-    Score de fraîcheur entre 0 et 1, décroissance exponentielle.
-    half_life_days=30 → chunk vieux de 30j = 0.37, 60j = 0.14, 90j = 0.05.
-    Configurable via HALF_LIFE_DAYS en tête de fichier.
+    Score de fraîcheur entre 0 et 1, décroissance exponentielle par catégorie.
+    Demi-vies : identité=365j · connaissance=60j · historique_session=14j.
+    half_life_multiplier < 1 accélère le decay (ex: profil briefing = 0.25).
     """
+    half_life = HALF_LIFE_BY_CATEGORY.get(category, HALF_LIFE_BY_CATEGORY["connaissance"])
+    half_life *= half_life_multiplier
     try:
         updated = datetime.fromisoformat(updated_at)
     except (ValueError, TypeError):
         return 1.0  # Pas de date → on ne pénalise pas
     age_days = max(0, (datetime.now() - updated).days)
-    return math.exp(-age_days / half_life_days)
+    return math.exp(-age_days / half_life)
 
 
 def importance_score(category: str, weight: float | None = None) -> float:
@@ -205,8 +250,12 @@ def adaptive_weights(query: str) -> tuple[float, float]:
 
 
 def reciprocal_rank_fusion(kw: list[dict], vec: list[dict],
-                           query: str = "", k: int = 60) -> list[dict]:
+                           query: str = "", k: int = 60,
+                           profile: WeightProfile | None = None) -> list[dict]:
+    p = profile or PROFILES["conversation"]
     w_fts, w_vec = adaptive_weights(query)
+    effective_cat_weights = {**CATEGORY_WEIGHTS, **p.category_overrides}
+
     scores: dict[str, float] = {}
     all_chunks: dict[str, dict] = {}
 
@@ -221,15 +270,27 @@ def reciprocal_rank_fusion(kw: list[dict], vec: list[dict],
 
     results = []
     for cid, rrf_score in scores.items():
-        chunk      = all_chunks[cid]
-        importance = importance_score(chunk.get("category"), chunk.get("importance_weight"))
-        freshness  = freshness_score(chunk.get("updated_at", datetime.now().isoformat()))
+        chunk = all_chunks[cid]
+        cat   = chunk.get("category") or "connaissance"
+
+        # Importance : poids explicite DB > catégorie effective (base + overrides profil)
+        explicit = chunk.get("importance_weight")
+        imp = explicit if explicit is not None else effective_cat_weights.get(cat, 1.0)
+
+        # Fraîcheur : demi-vie par catégorie × multiplicateur profil, plancher garanti
+        freshness = max(
+            freshness_score(chunk.get("updated_at", datetime.now().isoformat()),
+                            category=cat,
+                            half_life_multiplier=p.half_life_multiplier),
+            p.freshness_floor,
+        )
+
         results.append({
             **chunk,
-            "score_rrf":       rrf_score,
-            "score_importance": importance,
+            "score_rrf":        rrf_score,
+            "score_importance": imp,
             "score_freshness":  freshness,
-            "score_final":      rrf_score * importance * freshness,
+            "score_final":      rrf_score * imp * freshness,
         })
 
     results.sort(key=lambda x: x["score_final"], reverse=True)
@@ -246,16 +307,21 @@ def retrieve(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     return merged[:top_k_final]
 
 
-def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
+def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL,
+                 profile: str = "conversation") -> list[dict]:
     """
     Recherche hybride globale : mémoire personnelle + documents ingérés.
     Fusionne les deux sources via RRF avant de retourner le top_k_final.
 
+    profile : clé dans PROFILES — ajuste les poids catégorie, demi-vies et top_k.
     Les chunks mémoire et les doc_chunks sont normalisés dans le même format
     avant la fusion — le champ 'source_type' permet de les distinguer dans le prompt.
     """
     # Import ici pour éviter la dépendance circulaire (ingest_tools importe memory_tools)
     from Mnemo.tools.ingest_tools import search_docs_keyword, search_docs_vector
+
+    p = PROFILES.get(profile, PROFILES["conversation"])
+    effective_top_k = p.top_k_override or top_k_final
 
     db = get_db()
 
@@ -275,13 +341,13 @@ def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     db.close()
 
     # ── Fusion RRF globale ─────────────────────────────────────
-    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem, query=query)
-    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc, query=query)
+    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem, query=query, profile=p)
+    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc, query=query, profile=p)
 
     all_results = merged_mem + merged_doc
     all_results.sort(key=lambda x: x["score_final"], reverse=True)
 
-    return all_results[:top_k_final]
+    return all_results[:effective_top_k]
 
 
 def format_chunks_for_prompt(chunks: list[dict]) -> str:
@@ -671,9 +737,10 @@ class RetrieveMemoryTool(BaseTool):
         "Les résultats indiquent leur source : 🧠 = mémoire personnelle, 📄 = document."
     )
     args_schema: Type[BaseModel] = RetrieveMemoryInput
+    profile: str = "conversation"  # profil de pondération contextuel
 
     def _run(self, query: str) -> str:
-        chunks = retrieve_all(query)
+        chunks = retrieve_all(query, profile=self.profile)
         return format_chunks_for_prompt(chunks)
 
 

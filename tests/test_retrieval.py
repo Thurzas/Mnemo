@@ -149,12 +149,12 @@ def db_with_chunks(db_mem, monkeypatch, tmp_path) -> sqlite3.Connection:
 @pytest.fixture
 def ollama_db(tmp_path, monkeypatch):
     """
-    DB SQLite réelle sur disque, patchée comme DB_PATH globale.
+    DB SQLite réelle sur disque, patchée via get_data_dir.
     Utilisée pour les tests qui font de vrais appels Ollama.
     """
-    db_path = tmp_path / "test_memory.db"
-    monkeypatch.setattr("Mnemo.tools.memory_tools.DB_PATH", db_path)
+    monkeypatch.setattr("Mnemo.tools.memory_tools.get_data_dir", lambda: tmp_path)
 
+    db_path = tmp_path / "memory.db"
     db = sqlite3.connect(str(db_path))
     create_schema(db)
     db.close()
