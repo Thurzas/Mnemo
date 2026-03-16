@@ -215,7 +215,7 @@ services:
 
     volumes:
       # Modèles RVC — répertoire contenant *.pth et *.index
-      - ${VOICES_DIR:-./src/Voices}:/models:ro
+      - ${DATA_DIR:-./data}/models/rvc:/models:ro
 
     tmpfs:
       - /tmp:size=512m,mode=1777

@@ -21,6 +21,7 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 
@@ -120,6 +121,30 @@ async def get_params():
         "rms_mix_rate":  0.25,
         "protect":       0.33,
     }
+
+
+@app.post("/reload")
+async def reload_model(
+    model_path: str = Query(...),
+    index_path: str = Query(""),
+) -> dict:
+    """
+    Recharge le modèle RVC depuis les chemins donnés.
+    Utilisé par l'API Mnemo après upload d'un nouveau modèle via l'UI.
+    """
+    global _rvc
+    p = Path(model_path)
+    if not p.exists():
+        raise HTTPException(400, f"Modèle introuvable : {model_path}")
+    log.info("Rechargement du modèle RVC '%s'…", model_path)
+    _rvc = None
+    os.environ["RVC_MODEL_PATH"] = model_path
+    os.environ["RVC_INDEX_PATH"] = index_path
+    try:
+        _load_model()
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur chargement modèle : {exc}") from exc
+    return {"ok": True, "model_path": model_path, "index_path": index_path}
 
 
 @app.post("/convert")

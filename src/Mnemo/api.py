@@ -40,6 +40,7 @@ import os
 import re
 import secrets
 import uuid
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -746,6 +747,23 @@ async def text_to_speech(
 # ── Voix — paramétrage UI ──────────────────────────────────────────
 
 _VOICE_SETTINGS_FILE = DATA_PATH / "voice_settings.json"
+_RVC_MODELS_DIR = DATA_PATH / "models" / "rvc"
+
+
+def _list_rvc_models() -> list[dict]:
+    """Liste les modèles .pth disponibles dans DATA_PATH/models/rvc/."""
+    if not _RVC_MODELS_DIR.exists():
+        return []
+    models = []
+    for pth in sorted(_RVC_MODELS_DIR.glob("*.pth")):
+        stem = pth.stem
+        index_file = _RVC_MODELS_DIR / f"{stem}.index"
+        models.append({
+            "name":  stem,
+            "pth":   pth.name,
+            "index": index_file.name if index_file.exists() else None,
+        })
+    return models
 
 
 def _load_voice_settings_on_startup() -> None:
@@ -786,6 +804,8 @@ async def voice_settings_get(_: Auth):
     s = get_voice_settings()
     s["available_voices_fr"] = KOKORO_VOICES_FR
     s["available_voices_ja"] = KOKORO_VOICES_JA
+    s["rvc_service_url"]     = os.getenv("RVC_SERVICE_URL") or None
+    s["available_models"]    = _list_rvc_models()
     return s
 
 
@@ -805,6 +825,8 @@ async def voice_settings_post(req: VoiceSettingsRequest, _: Auth):
         log.warning("Impossible de persister voice_settings.json : %s", exc)
     current["available_voices_fr"] = KOKORO_VOICES_FR
     current["available_voices_ja"] = KOKORO_VOICES_JA
+    current["rvc_service_url"]     = os.getenv("RVC_SERVICE_URL") or None
+    current["available_models"]    = _list_rvc_models()
     return current
 
 
@@ -825,6 +847,104 @@ async def voice_test(_: Auth):
     if not wav:
         raise HTTPException(500, "Test voix retourné vide")
     return Response(content=wav, media_type="audio/wav")
+
+
+@app.post("/api/voice/model", status_code=201)
+def voice_model_upload(
+    pth_file:   UploadFile,
+    _: Auth,
+    index_file: UploadFile | None = None,
+):
+    """
+    Upload un modèle RVC (.pth requis, .index optionnel).
+    Sauvegarde dans DATA_PATH/models/rvc/.
+    Retourne {"name": stem, "pth": filename, "index": filename|null}.
+    """
+    if not pth_file.filename or not pth_file.filename.endswith(".pth"):
+        raise HTTPException(400, "Fichier .pth requis")
+    if index_file and index_file.filename and not index_file.filename.endswith(".index"):
+        raise HTTPException(400, "Le fichier index doit avoir l'extension .index")
+
+    _RVC_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Sécuriser les noms de fichier (pas de path traversal)
+    import re as _re
+    safe_pth   = _re.sub(r"[^\w.\-]", "_", pth_file.filename)
+    stem       = safe_pth[:-4]  # sans ".pth"
+
+    pth_dest = _RVC_MODELS_DIR / safe_pth
+    pth_data = pth_file.file.read()
+    if not pth_data:
+        raise HTTPException(400, "Fichier .pth vide")
+    pth_dest.write_bytes(pth_data)
+
+    index_dest = None
+    if index_file and index_file.filename:
+        safe_idx   = _re.sub(r"[^\w.\-]", "_", index_file.filename)
+        index_dest = _RVC_MODELS_DIR / safe_idx
+        idx_data   = index_file.file.read()
+        if idx_data:
+            index_dest.write_bytes(idx_data)
+        else:
+            index_dest = None
+
+    log.info("Modèle RVC uploadé : %s (index=%s)", safe_pth, index_dest)
+    return {
+        "name":  stem,
+        "pth":   safe_pth,
+        "index": index_dest.name if index_dest else None,
+    }
+
+
+@app.post("/api/voice/model/{model_name}/activate")
+async def voice_model_activate(model_name: str, _: Auth):
+    """
+    Active un modèle RVC uploadé en appelant /reload sur le service RVC.
+    Persiste le modèle actif dans voice_settings.json.
+    """
+    import json
+    import urllib.error
+
+    # Validation nom
+    import re as _re
+    if not _re.match(r"^[\w.\-]+$", model_name):
+        raise HTTPException(400, "Nom de modèle invalide")
+
+    pth_path   = _RVC_MODELS_DIR / f"{model_name}.pth"
+    index_path = _RVC_MODELS_DIR / f"{model_name}.index"
+    if not pth_path.exists():
+        raise HTTPException(404, f"Modèle '{model_name}.pth' introuvable")
+
+    rvc_url = os.getenv("RVC_SERVICE_URL", "").rstrip("/")
+    if rvc_url:
+        # Les chemins dans le container RVC sont sous /models/
+        rvc_model_path = f"/models/{pth_path.name}"
+        rvc_index_path = f"/models/{index_path.name}" if index_path.exists() else ""
+        qs = f"?model_path={urllib.parse.quote(rvc_model_path)}"
+        if rvc_index_path:
+            qs += f"&index_path={urllib.parse.quote(rvc_index_path)}"
+        req = urllib.request.Request(
+            f"{rvc_url}/reload{qs}",
+            data=b"",
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read())
+        except Exception as exc:
+            raise HTTPException(500, f"Erreur reload RVC : {exc}") from exc
+
+    # Persiste le modèle actif
+    from Mnemo.tools.audio_tools import apply_voice_settings  # noqa: PLC0415
+    apply_voice_settings({"rvc_active_model": model_name})
+    try:
+        current_settings = json.loads(_VOICE_SETTINGS_FILE.read_text()) if _VOICE_SETTINGS_FILE.exists() else {}
+        current_settings["rvc_active_model"] = model_name
+        _VOICE_SETTINGS_FILE.write_text(json.dumps(current_settings, indent=2))
+    except Exception as exc:
+        log.warning("Impossible de persister rvc_active_model : %s", exc)
+
+    return {"ok": True, "active_model": model_name}
 
 
 # ── WebSocket streaming ────────────────────────────────────────────

@@ -137,6 +137,12 @@ export interface OnboardingAnswerItem {
   label: string
 }
 
+export interface RvcModel {
+  name: string
+  pth: string
+  index: string | null
+}
+
 export interface VoiceSettings {
   rvc_enabled: boolean
   kokoro_voice_fr: string
@@ -148,12 +154,14 @@ export interface VoiceSettings {
   rvc_filter_radius: number
   rvc_rms_mix_rate: number
   rvc_protect: number
+  rvc_active_model: string
 }
 
 export interface VoiceSettingsResponse extends VoiceSettings {
   available_voices_fr: string[]
   available_voices_ja: string[]
   rvc_service_url: string | null
+  available_models: RvcModel[]
 }
 
 // ── Auth token ───────────────────────────────────────────────────
@@ -328,6 +336,30 @@ export const api = {
     request<VoiceSettings>('/api/voice/settings', {
       method: 'POST',
       body: JSON.stringify(settings),
+    }),
+
+  getVoiceModels: () =>
+    request<{ models: RvcModel[] }>('/api/voice/models'),
+
+  uploadVoiceModel: async (pthFile: File, indexFile?: File): Promise<RvcModel> => {
+    const token = auth.getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const body = new FormData()
+    body.append('pth_file', pthFile)
+    if (indexFile) body.append('index_file', indexFile)
+    const res = await fetch('/api/voice/model', { method: 'POST', headers, body })
+    if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(detail?.detail ?? res.statusText)
+    }
+    return res.json()
+  },
+
+  activateVoiceModel: (name: string) =>
+    request<{ ok: boolean; active_model: string }>(`/api/voice/model/${encodeURIComponent(name)}/activate`, {
+      method: 'POST',
     }),
 
   testVoice: async (text?: string): Promise<Blob> => {

@@ -157,6 +157,7 @@ def get_voice_settings() -> dict:
             "rvc_filter_radius": _runtime_settings.get("rvc_filter_radius", 3),
             "rvc_rms_mix_rate":  _runtime_settings.get("rvc_rms_mix_rate",  0.25),
             "rvc_protect":       _runtime_settings.get("rvc_protect",       0.33),
+            "rvc_active_model":  _runtime_settings.get("rvc_active_model",  ""),
         }
 
 
