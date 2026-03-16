@@ -73,6 +73,13 @@ CATEGORY_WEIGHTS: dict[str, float] = {
 }
 
 
+# ── Phase 5.3 — Buffer de retrieval du tour courant ──────────────
+# Vidé par handle_message() avant chaque kickoff ConversationCrew.
+# Rempli par RetrieveMemoryTool._run() pendant l'exécution de l'agent.
+# Lu par handle_message() après le kickoff pour persister les IDs dans le session JSON.
+_retrieved_this_turn: list[dict] = []
+
+
 @dataclass
 class WeightProfile:
     """Profil de pondération contextuel — passé à retrieve_all() selon le crew appelant."""
@@ -366,6 +373,78 @@ def format_chunks_for_prompt(chunks: list[dict]) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
+# Phase 5.3 — Scoring d'usage des chunks (mémoire procédurale)
+# ══════════════════════════════════════════════════════════════
+
+USAGE_THRESHOLD = 0.60  # similarité cosinus min pour considérer un chunk "utilisé"
+
+
+def score_and_record_chunk_usage(session: dict, session_id: str) -> None:
+    """
+    Appelé en fin de session (end_session), après ConsolidationCrew.
+    Pour chaque tour agent avec retrieved_chunk_ids :
+      1. Embed la réponse agent
+      2. Calcule cosine_similarity(response_vec, chunk_vec) pour chaque chunk récupéré
+      3. Insère dans chunk_usage
+      4. Met à jour chunks.use_count + last_used_at pour les chunks confirmés
+    Silencieux sur les tours sans retrieved_chunk_ids (sessions pré-5.3 ou non-conversation).
+    """
+    messages = session.get("messages", [])
+    if not messages:
+        return
+
+    db   = get_db()
+    now  = datetime.now().isoformat()
+
+    try:
+        for msg in messages:
+            if msg.get("role") != "agent":
+                continue
+            chunk_ids = msg.get("retrieved_chunk_ids")
+            if not chunk_ids:
+                continue
+
+            response_text = msg.get("content", "").strip()
+            if not response_text:
+                continue
+
+            # Embed la réponse — peut échouer si Ollama est offline (fin de session)
+            try:
+                response_vec = embed(response_text, prefix="search_document")
+            except Exception:
+                continue
+
+            for chunk_id in chunk_ids:
+                # Récupère le vecteur du chunk depuis la DB
+                row = db.execute(
+                    "SELECT vector FROM embeddings WHERE chunk_id = ?", (chunk_id,)
+                ).fetchone()
+                if row is None:
+                    continue
+
+                chunk_vec  = np.frombuffer(row[0], dtype=np.float32)
+                score      = float(cosine_similarity(response_vec, chunk_vec))
+                confirmed  = 1 if score >= USAGE_THRESHOLD else 0
+
+                db.execute(
+                    "INSERT INTO chunk_usage (chunk_id, session_id, retrieved_at, used_score, confirmed)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (chunk_id, session_id, now, score, confirmed),
+                )
+
+                if confirmed:
+                    db.execute(
+                        "UPDATE chunks SET use_count = use_count + 1, last_used_at = ?"
+                        " WHERE id = ?",
+                        (now, chunk_id),
+                    )
+
+        db.commit()
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════
 # Markdown helpers
 # ══════════════════════════════════════════════════════════════
 
@@ -633,7 +712,8 @@ def load_session_json(session_id: str) -> dict:
         return {}
 
 
-def update_session_memory(session_id: str, user_message: str, agent_response: str):
+def update_session_memory(session_id: str, user_message: str, agent_response: str,
+                          retrieved_chunk_ids: list[str] | None = None):
     session = load_session_json(session_id)
     session.setdefault("session_id", session_id)
     session.setdefault("messages", [])
@@ -642,7 +722,10 @@ def update_session_memory(session_id: str, user_message: str, agent_response: st
     session.setdefault("to_persist", [])
     # Sanitize avant écriture — certains modèles Ollama retournent des surrogates invalides
     session["messages"].append({"role": "user", "content": sanitize_str(user_message)})
-    session["messages"].append({"role": "agent", "content": sanitize_str(agent_response)})
+    agent_msg: dict = {"role": "agent", "content": sanitize_str(agent_response)}
+    if retrieved_chunk_ids:
+        agent_msg["retrieved_chunk_ids"] = retrieved_chunk_ids
+    session["messages"].append(agent_msg)
     path = _sessions_dir() / f"{session_id}.json"
     path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -740,7 +823,9 @@ class RetrieveMemoryTool(BaseTool):
     profile: str = "conversation"  # profil de pondération contextuel
 
     def _run(self, query: str) -> str:
+        global _retrieved_this_turn
         chunks = retrieve_all(query, profile=self.profile)
+        _retrieved_this_turn.extend(chunks)
         return format_chunks_for_prompt(chunks)
 
 

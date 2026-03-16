@@ -30,13 +30,14 @@ def make_crew_result(text: str) -> MagicMock:
 @pytest.fixture(autouse=True)
 def patch_sessions_dir(tmp_path, monkeypatch):
     """
-    Redirige SESSIONS_DIR vers un dossier temporaire pour tous les tests.
+    Redirige _sessions_dir() vers un dossier temporaire pour tous les tests.
+    Patche get_data_dir dans memory_tools — _sessions_dir() et _markdown_path()
+    utilisent toutes les deux cette fonction, donc un seul patch suffit.
     autouse=True : appliqué automatiquement à chaque test du module.
     """
+    monkeypatch.setattr("Mnemo.tools.memory_tools.get_data_dir", lambda: tmp_path)
     sessions = tmp_path / "sessions"
     sessions.mkdir()
-    monkeypatch.setattr("Mnemo.tools.memory_tools.SESSIONS_DIR", sessions)
-    monkeypatch.setattr("Mnemo.main.SESSIONS_DIR", sessions)
     return sessions
 
 
@@ -77,14 +78,28 @@ class TestHandleMessage:
 
     @pytest.fixture(autouse=True)
     def mock_conversation_crew(self):
-        """Mock ConversationCrew pour ne pas appeler de LLM."""
-        with patch("Mnemo.main.ConversationCrew") as mock_cls:
-            mock_instance = MagicMock()
-            mock_instance.crew.return_value.kickoff.return_value = make_crew_result(
-                "Bonjour Matt, je me souviens de toi !"
-            )
-            mock_cls.return_value = mock_instance
-            yield mock_cls
+        """
+        Mock le routing et ConversationCrew pour ne pas appeler de LLM.
+        build_router → retourne directement "conversation" (bypass KeywordHandler/ML/LLM).
+        run_confirmation_middleware → passthrough.
+        dispatch → retourne la réponse du ConversationCrew mocké.
+        """
+        from Mnemo.routing.context import RouterResult
+        from Mnemo.routing.confirmation import ConfirmationResult
+
+        mock_router = MagicMock()
+        mock_router.handle.return_value = RouterResult("conversation", 1.0, "keyword")
+
+        def fake_confirmation(result, user_message, temporal_ctx):
+            return ConfirmationResult(result=result, user_message=user_message)
+
+        def fake_dispatch(result, **kwargs):
+            return "Bonjour Matt, je me souviens de toi !"
+
+        with patch("Mnemo.routing.build_router", return_value=mock_router), \
+             patch("Mnemo.routing.confirmation.run_confirmation_middleware", side_effect=fake_confirmation), \
+             patch("Mnemo.routing.dispatch", side_effect=fake_dispatch):
+            yield
 
     def test_retourne_la_reponse_du_crew(self):
         from Mnemo.main import handle_message
@@ -302,10 +317,22 @@ class TestSessionScenarios:
 
     @pytest.fixture(autouse=True)
     def mock_all_crews(self):
-        with patch("Mnemo.main.ConversationCrew") as mock_conv, \
+        from Mnemo.routing.context import RouterResult
+        from Mnemo.routing.confirmation import ConfirmationResult
+
+        mock_router = MagicMock()
+        mock_router.handle.return_value = RouterResult("conversation", 1.0, "keyword")
+
+        def fake_confirmation(result, user_message, temporal_ctx):
+            return ConfirmationResult(result=result, user_message=user_message)
+
+        def fake_dispatch(result, **kwargs):
+            return "Réponse de l'agent."
+
+        with patch("Mnemo.routing.build_router", return_value=mock_router), \
+             patch("Mnemo.routing.confirmation.run_confirmation_middleware", side_effect=fake_confirmation), \
+             patch("Mnemo.routing.dispatch", side_effect=fake_dispatch), \
              patch("Mnemo.main.ConsolidationCrew") as mock_consol:
-            mock_conv.return_value.crew.return_value.kickoff.return_value = \
-                make_crew_result("Réponse de l'agent.")
             mock_consol.return_value.crew.return_value.kickoff.return_value = \
                 make_crew_result('{"worth_persisting": true, "facts": [], "session_summary": "OK"}')
             yield

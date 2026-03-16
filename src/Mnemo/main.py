@@ -49,6 +49,7 @@ from Mnemo.tools.memory_tools import (
     check_and_sync, get_db, compute_hash,
     update_markdown_section, sync_markdown_to_db,
     _sessions_dir, _markdown_path,
+    score_and_record_chunk_usage,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
@@ -384,6 +385,7 @@ def handle_message(user_message: str, session_id: str) -> str:
     Suivi du middleware de confirmation (clarification / web / shell),
     puis dispatch vers le crew approprié.
     """
+    import Mnemo.tools.memory_tools as _mt
     from Mnemo.routing import build_router, RouterContext, dispatch
     from Mnemo.routing.confirmation import run_confirmation_middleware
 
@@ -403,6 +405,9 @@ def handle_message(user_message: str, session_id: str) -> str:
 
     confirmed = run_confirmation_middleware(result, user_message, temporal_ctx)
 
+    # Phase 5.3 — vide le buffer de retrieval avant le kickoff
+    _mt._retrieved_this_turn = []
+
     response = dispatch(
         confirmed.result,
         user_message  = confirmed.user_message,
@@ -412,7 +417,10 @@ def handle_message(user_message: str, session_id: str) -> str:
         shell_command = confirmed.shell_command,
     )
 
-    update_session_memory(session_id, confirmed.user_message, response)
+    # Phase 5.3 — persiste les chunk IDs récupérés pendant ce tour
+    retrieved_ids = [c["id"] for c in _mt._retrieved_this_turn]
+    update_session_memory(session_id, confirmed.user_message, response,
+                          retrieved_chunk_ids=retrieved_ids or None)
     return response
 
 def end_session(session_id: str) -> tuple:
@@ -436,6 +444,12 @@ def end_session(session_id: str) -> tuple:
         "session_json":     json.dumps(session, ensure_ascii=False, indent=2),
         "temporal_context": get_temporal_context(),
     })
+
+    # Phase 5.3 — scoring d'usage des chunks (silencieux si Ollama offline)
+    try:
+        score_and_record_chunk_usage(session, session_id)
+    except Exception:
+        pass
 
     # Marque la session comme consolidée
     (_sessions_dir() / f"{session_id}.done").touch()
