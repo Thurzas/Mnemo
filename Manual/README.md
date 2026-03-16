@@ -14,6 +14,7 @@ Documentation technique du projet, organisée par thème.
 | [crews.md](crews.md) | Les 8 crews : rôle, agents, outils, température, déclenchement |
 | [scheduler.md](scheduler.md) | Scheduler : SchedulerCrew, service background, tâches système, cron, CRUD |
 | [scheduler_testing.md](scheduler_testing.md) | Capacités, limites et protocole de test utilisateur du scheduler |
+| [voice.md](voice.md) | Système de voix : pipeline TTS (Text To Speech) / STT (Speech To Text) avec customisation possible via un pipeline RVC (Retrieval Voice Changer) |
 
 ---
 

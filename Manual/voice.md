@@ -1,35 +1,76 @@
-# Voix — TTS + RVC
+# Voix — STT / TTS / RVC
 
-## Pipeline
+## Pipeline complet
 
 ```
-Texte  →  Kokoro-82M  →  WAV neutre  →  RVC  →  WAV voix custom
+Micro  →  [STT : faster-whisper]  →  texte  →  Agent
+Agent  →  texte  →  [TTS : Kokoro-82M]  →  WAV neutre  →  [RVC]  →  WAV voix custom  →  haut-parleur
 ```
 
-1. **Kokoro-82M** synthétise le texte en audio neutre (français ou japonais selon le contenu)
-2. **RVC** (optionnel) applique une conversion de timbre pour habiller la voix avec un modèle personnalisé
+| Composant | Rôle | Actif |
+|-----------|------|-------|
+| STT faster-whisper | Parole → texte | Toujours |
+| TTS Kokoro-82M | Texte → WAV (FR ou JA) | Toujours |
+| RVC micro-service | WAV neutre → WAV voix custom | Optionnel (profil `voice`) |
 
 ---
 
-## Kokoro-82M
+## 1. STT — Transcription vocale (faster-whisper)
 
-Modèle TTS multilingue unique (~82 MB). Téléchargé automatiquement au premier appel dans `/data/models/`.
+### Démarrage
+
+Le bouton micro dans le chat enregistre l'audio et envoie `POST /api/stt`.
+La transcription est automatiquement placée dans le champ de saisie.
+
+### Paramètres
+
+| Variable | Défaut | Valeurs possibles |
+|----------|--------|-------------------|
+| `WHISPER_MODEL` | `tiny` | `tiny` / `base` / `small` / `medium` |
+
+- `tiny` (~39 MB) — rapide, suffisant pour le français courant
+- `small` — meilleure qualité, ~4× plus lent
+- VAD activé (`vad_filter=True`) — filtre les silences courts
+- Langue forcée à `fr` (évite les dérives sur les silences)
+
+### Résolution du modèle
+
+```
+1. /app/models/whisper/   ← baked dans l'image au build
+2. /data/models/whisper/  ← téléchargé automatiquement au 1er appel
+```
+
+---
+
+## 2. TTS — Synthèse vocale (Kokoro-82M)
+
+### Modèle
+
+Kokoro-82M est un modèle TTS multilingue unique (~327 MB, `hexgrad/Kokoro-82M`).
+Il remplace Piper depuis la v15 et gère le français et le japonais dans la même instance.
+
+Le modèle est téléchargé automatiquement au premier appel TTS dans `/data/models/`
+(volume persistant — pas besoin d'internet après le premier démarrage).
+
+### Détection de langue automatique
+
+Chaque phrase est analysée avant synthèse :
+- Contient des hiragana / katakana / kanji → pipeline japonais
+- Sinon → pipeline français
+
+Les deux pipelines coexistent en mémoire (singletons lazy, chargés au premier appel).
 
 ### Voix disponibles
 
 | Code | Langue | Registre |
 |------|--------|----------|
-| `ff_siwis` | Français | Féminin, neutre |
+| `ff_siwis` | Français | Féminin, neutre — **seule voix FR disponible dans Kokoro-82M** |
 | `jf_alpha` | Japonais | Féminin |
 | `jf_nezumi` | Japonais | Féminin |
 | `jf_tebukuro` | Japonais | Féminin |
 | `jm_kumo` | Japonais | Masculin |
 
-> Kokoro-82M ne fournit qu'une seule voix française (`ff_siwis`). Pour plus de variété côté français, la diversité passe par le modèle RVC.
-
-### Détection de langue
-
-Les phrases contenant des caractères hiragana / katakana / kanji sont automatiquement routées vers le pipeline japonais. Le reste part en français.
+> Pour diversifier la voix française, la personnalisation passe par le modèle RVC.
 
 ### Paramètre Vitesse
 
@@ -37,17 +78,26 @@ Les phrases contenant des caractères hiragana / katakana / kanji sont automatiq
 - `0.5–0.8` = plus lent, plus posé
 - `1.2–1.8` = plus rapide
 
+Réglable depuis l'onglet *Voix* du dashboard ou via `KOKORO_SPEED` dans `.env`.
+
+### Flux audio par phrases
+
+Le frontend découpe la réponse de l'agent en phrases (`.`, `?`, `!`) avant d'appeler `/api/tts`.
+Un seul appel TTS est lancé à la fois, avec prefetch de la phrase suivante pendant la lecture.
+Résultat : l'audio commence rapidement et s'enchaîne sans interruption ni superposition.
+
 ---
 
-## RVC — Conversion de voix
+## 3. RVC — Conversion de voix
 
-RVC (Retrieval-based Voice Conversion) applique le timbre d'un modèle entraîné sur une voix cible. Il tourne dans un container séparé (`mnemo-rvc`) et communique via HTTP.
+RVC (Retrieval-based Voice Conversion) transforme le WAV neutre de Kokoro en un WAV
+avec le timbre d'une voix cible apprise par un modèle `.pth`.
 
 ### Démarrage
 
 ```bash
 ./mnemo.sh rvc          # build + démarre le container RVC
-./mnemo.sh logs-rvc     # voir les logs en temps réel
+./mnemo.sh logs-rvc     # logs en temps réel
 ```
 
 Ajouter dans `.env` :
@@ -55,19 +105,62 @@ Ajouter dans `.env` :
 RVC_SERVICE_URL=http://mnemo-rvc:7865
 ```
 
-### Modèles
+Sans cette variable, le TTS fonctionne avec la voix Kokoro brute (pas d'erreur).
 
-Les modèles sont stockés dans `data/models/rvc/`. Chaque modèle se compose de :
-- **`nom.pth`** — poids du modèle (requis)
-- **`nom.index`** — index de features pour la conversion (optionnel, améliore la qualité)
+### Structure d'un modèle
 
-**Via l'UI** : onglet *Voix* → section *Ajouter un modèle* → upload `.pth` + `.index` optionnel → bouton *Activer* pour charger à chaud.
+Chaque modèle RVC se compose de deux fichiers :
 
-**Via le filesystem** : déposer les fichiers dans `data/models/rvc/` et redémarrer le container RVC.
+| Fichier | Rôle | Requis |
+|---------|------|--------|
+| `nom.pth` | Poids du réseau de conversion | Oui |
+| `nom.index` | Index FAISS des features (améliore le timbre) | Non |
+
+Les modèles se placent dans `data/models/rvc/`.
 
 ---
 
-## Paramètres RVC
+## 4. Interface Voix (VoicePage)
+
+L'onglet **Voix** dans le dashboard permet de tout régler sans redémarrer les containers.
+
+### Sections
+
+**Synthèse vocale (Kokoro)**
+- Sélecteur de voix française et japonaise
+- Slider de vitesse
+
+**Conversion de voix (RVC)**
+- Toggle on/off — désactiver pour utiliser Kokoro seul
+- Indicateur de connexion au service RVC
+- 6 paramètres de conversion (voir section suivante)
+
+**Modèles personnalisés**
+- Upload d'un fichier `.pth` (requis) + `.index` (optionnel)
+- Bouton *Activer* pour charger le modèle à chaud dans le service RVC
+- Sélecteur du modèle actif parmi les modèles uploadés
+
+**Test de la voix**
+- Champ texte libre
+- Bouton *Tester* : applique les réglages du formulaire **immédiatement** (sans sauvegarder)
+  → utile pour ajuster les paramètres en temps réel
+- Bouton *Sauvegarder* : persiste les réglages dans `data/voice_settings.json`
+  → chargés automatiquement au prochain démarrage
+
+> **Tester ≠ Sauvegarder** : le test active les réglages pour la session en cours.
+> Le chat utilisera ces réglages immédiatement, mais ils seront perdus au redémarrage
+> si vous ne sauvegardez pas.
+
+### Ajouter un modèle custom
+
+1. Onglet *Voix* → section *Modèles personnalisés*
+2. Sélectionner le fichier `.pth` (et optionnellement le `.index` correspondant)
+3. Cliquer *Upload* — le fichier est copié dans `data/models/rvc/`
+4. Cliquer *Activer* sur le modèle voulu — le service RVC le charge à chaud
+
+---
+
+## 5. Paramètres RVC
 
 ### Méthode F0 (`f0_method`)
 
@@ -77,7 +170,7 @@ Algorithme de détection de la hauteur vocale (pitch).
 |--------|---------|-----------|-----------------|
 | `harvest` | Lent | Élevée | Voix complexes |
 | `pm` | Rapide | Faible | Test rapide |
-| `rmvpe` | Rapide | Élevée | **Recommandé** |
+| `rmvpe` | Rapide | Élevée | **Recommandé** — GPU-accéléré |
 
 ### Transposition (`f0_up_key`)
 
@@ -87,7 +180,7 @@ Décale le pitch en demi-tons. Plage : `-12` à `+12`.
 - `+12` — une octave plus haut (utile si le modèle est entraîné sur voix masculine)
 - `-12` — une octave plus bas
 
-Ajuster si la voix convertie semble trop aiguë ou trop grave par rapport au modèle d'entraînement.
+Ajuster si la voix convertie semble trop aiguë ou trop grave par rapport au modèle.
 
 ### Index rate (`index_rate`)
 
@@ -123,9 +216,7 @@ Protection des consonnes et sons non-voisés (s, t, f…). Plage : `0.0` à `0.5
 - `0.33` — valeur par défaut, bon équilibre
 - `0.5` — consonnes quasi intactes, voix plus naturelle mais conversion moins complète
 
----
-
-## Preset de départ
+### Preset de départ
 
 ```
 f0_method    : rmvpe
@@ -136,20 +227,56 @@ rms_mix_rate : 0.25
 protect      : 0.33
 ```
 
-Ajuster en priorité **index_rate** (timbre) et **f0_up_key** (hauteur) pour les changements les plus audibles.
+Ajuster en priorité **index_rate** (timbre) et **f0_up_key** (hauteur) pour les changements
+les plus audibles.
 
 ---
 
-## Variables d'environnement
+## 6. Variables d'environnement
 
 | Variable | Défaut | Description |
 |----------|--------|-------------|
+| `WHISPER_MODEL` | `tiny` | Modèle STT (`tiny` / `base` / `small` / `medium`) |
+| `KOKORO_VOICE_FR` | `ff_siwis` | Voix Kokoro française par défaut |
+| `KOKORO_VOICE_JA` | `jf_alpha` | Voix Kokoro japonaise par défaut |
+| `KOKORO_SPEED` | `1.0` | Vitesse de synthèse par défaut |
 | `RVC_SERVICE_URL` | *(vide)* | URL du container RVC (`http://mnemo-rvc:7865`) |
 | `RVC_F0_METHOD` | `harvest` | Méthode F0 par défaut |
 | `RVC_F0_UP_KEY` | `0` | Transposition par défaut |
 | `RVC_INDEX_RATE` | `0.75` | Index rate par défaut |
-| `KOKORO_VOICE_FR` | `ff_siwis` | Voix Kokoro française par défaut |
-| `KOKORO_VOICE_JA` | `jf_alpha` | Voix Kokoro japonaise par défaut |
-| `KOKORO_SPEED` | `1.0` | Vitesse de synthèse par défaut |
 
-Les valeurs en `.env` sont les défauts au démarrage. Elles peuvent être surchargées à chaud depuis l'UI (onglet *Voix*) et sont persistées dans `data/voice_settings.json`.
+Les valeurs `.env` sont les défauts au démarrage. Elles peuvent être surchargées à chaud
+depuis l'onglet *Voix* et sont persistées dans `data/voice_settings.json`.
+`voice_settings.json` est chargé au démarrage et prend priorité sur les variables d'environnement.
+
+---
+
+## 7. Résilience et fallback
+
+| Situation | Comportement |
+|-----------|-------------|
+| Service RVC absent ou en timeout | TTS retourne le WAV Kokoro brut — pas d'erreur visible |
+| Modèle RVC introuvable | Marqué indisponible, aucun retry, log INFO |
+| Kokoro : modèle non encore téléchargé | Téléchargement automatique au premier appel |
+| STT : silence ou bruit seul | VAD filtre → retourne chaîne vide `""` |
+| Voix japonaise demandée, MeCab absent | Erreur 500 → rebuild image avec `python -m unidic download` |
+
+---
+
+## 8. Docker — points critiques
+
+```yaml
+# /tmp doit être exec pour phonemizer (espeak-ng via ctypes)
+tmpfs:
+  - /tmp:size=256m,mode=1777,exec
+
+# HF_HOME doit pointer vers un volume en écriture
+environment:
+  - HF_HOME=/data/models
+```
+
+Le container principal (`mnemo-api`) a `read_only: true`. Tout ce qui écrit
+(modèles HuggingFace, paramètres voix) doit passer par le volume `/data`.
+
+Le container RVC (`mnemo-rvc`) requiert un GPU NVIDIA avec CUDA 12.4.
+Sans GPU, laisser `RVC_SERVICE_URL` vide et utiliser Kokoro seul.
