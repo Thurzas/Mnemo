@@ -185,6 +185,29 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Phrase de test ────────────────────────────────────────── */
+
+.testRow {
+  margin-bottom: 4px;
+}
+
+.testInput {
+  width: 100%;
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 9px 12px;
+  color: var(--fg);
+  font-size: 0.9rem;
+  font-family: inherit;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.testInput:focus { border-color: var(--a2); }
+.testInput::placeholder { color: var(--fg-muted, #666); }
+
 /* ── Actions ───────────────────────────────────────────────── */
 
 .actions {

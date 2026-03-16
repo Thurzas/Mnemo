@@ -168,6 +168,7 @@ export function VoicePage({ active }: { active: boolean }) {
   const [testing, setTesting]   = useState(false)
   const [saveMsg, setSaveMsg]   = useState<string | null>(null)
   const [dirty, setDirty]       = useState(false)
+  const [testPhrase, setTestPhrase] = useState('Bonjour, comment ça va ?')
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const load = () => {
@@ -212,7 +213,7 @@ export function VoicePage({ active }: { active: boolean }) {
     setTesting(true)
     try {
       // Envoie les settings du form courant — appliqués au runtime sans persistance
-      const blob = await api.testVoice(form)
+      const blob = await api.testVoice(form, testPhrase)
       const url  = URL.createObjectURL(blob)
       if (audioRef.current) {
         audioRef.current.pause()
@@ -382,6 +383,17 @@ export function VoicePage({ active }: { active: boolean }) {
           onChange={v => set({ rvc_protect: v })}
         />
       </section>
+
+      {/* ── Phrase de test ─────────────────────────────────── */}
+      <div className={styles.testRow}>
+        <input
+          className={styles.testInput}
+          type="text"
+          value={testPhrase}
+          onChange={e => setTestPhrase(e.target.value)}
+          placeholder="Phrase à tester…"
+        />
+      </div>
 
       {/* ── Actions ────────────────────────────────────────── */}
       <div className={styles.actions}>

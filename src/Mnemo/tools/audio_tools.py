@@ -494,9 +494,8 @@ def synthesize_speech(text: str) -> bytes:
 
     Le texte est découpé en phrases. Chaque phrase est synthétisée
     indépendamment avec la voix Kokoro appropriée :
-    - Phrase contenant du japonais → pipeline JA (jf_alpha), RVC ignoré
-      (le modèle RVC est entraîné sur voix FR — le japonais y produirait des artefacts)
-    - Phrase en français (ou autre) → pipeline FR (ff_siwis) → RVC
+    - Phrase contenant du japonais → pipeline JA → RVC (si activé)
+    - Phrase en français (ou autre) → pipeline FR → RVC (si activé)
 
     Tous les WAVs Kokoro sortent à 24 000 Hz — pas de rééchantillonnage nécessaire
     entre les chunks FR et JA (sauf si RVC change le sample rate en sortie).
@@ -509,10 +508,10 @@ def synthesize_speech(text: str) -> bytes:
     wav_parts: list[bytes] = []
     for chunk in chunks:
         if _contains_japanese(chunk):
-            wav = _kokoro_to_wav_bytes(chunk, _get_kokoro_ja(), s["kokoro_voice_ja"], s["kokoro_speed"])
+            raw = _kokoro_to_wav_bytes(chunk, _get_kokoro_ja(), s["kokoro_voice_ja"], s["kokoro_speed"])
         else:
             raw = _kokoro_to_wav_bytes(chunk, _get_kokoro_fr(), s["kokoro_voice_fr"], s["kokoro_speed"])
-            wav = _rvc_convert(raw) if s["rvc_enabled"] else raw
+        wav = _rvc_convert(raw) if s["rvc_enabled"] else raw
         if wav:
             wav_parts.append(wav)
 
