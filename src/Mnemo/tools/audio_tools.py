@@ -133,7 +133,8 @@ _KOKORO_REPO_ID     = "hexgrad/Kokoro-82M"
 _KOKORO_SAMPLE_RATE = 24_000   # constant — toutes les voix Kokoro sortent en 24 kHz
 
 # Voix disponibles (exposées à l'UI)
-KOKORO_VOICES_FR = ["ff_siwis", "ff_emma", "fm_galvani"]
+# Kokoro-82M n'a qu'une seule voix française confirmée.
+KOKORO_VOICES_FR = ["ff_siwis"]
 KOKORO_VOICES_JA = ["jf_alpha", "jf_nezumi", "jf_tebukuro", "jm_kumo"]
 
 # ── Paramètres runtime (modifiables depuis l'UI sans redémarrer) ────
@@ -204,7 +205,7 @@ def _contains_japanese(text: str) -> bool:
     return False
 
 
-def _kokoro_to_wav_bytes(text: str, pipeline, voice: str) -> bytes:
+def _kokoro_to_wav_bytes(text: str, pipeline, voice: str, speed: float = 1.0) -> bytes:
     """
     Kokoro pipeline → WAV bytes (PCM 16-bit mono 24 000 Hz).
 
@@ -215,7 +216,7 @@ def _kokoro_to_wav_bytes(text: str, pipeline, voice: str) -> bytes:
     import numpy as np
 
     parts: list[np.ndarray] = []
-    for _gs, _ps, audio in pipeline(text, voice=voice, speed=_KOKORO_SPEED):
+    for _gs, _ps, audio in pipeline(text, voice=voice, speed=speed):
         if audio is not None and len(audio) > 0:
             # Kokoro retourne des torch.Tensor — convertir en numpy pour wave/numpy ops
             if hasattr(audio, "numpy"):
@@ -508,9 +509,9 @@ def synthesize_speech(text: str) -> bytes:
     wav_parts: list[bytes] = []
     for chunk in chunks:
         if _contains_japanese(chunk):
-            wav = _kokoro_to_wav_bytes(chunk, _get_kokoro_ja(), s["kokoro_voice_ja"])
+            wav = _kokoro_to_wav_bytes(chunk, _get_kokoro_ja(), s["kokoro_voice_ja"], s["kokoro_speed"])
         else:
-            raw = _kokoro_to_wav_bytes(chunk, _get_kokoro_fr(), s["kokoro_voice_fr"])
+            raw = _kokoro_to_wav_bytes(chunk, _get_kokoro_fr(), s["kokoro_voice_fr"], s["kokoro_speed"])
             wav = _rvc_convert(raw) if s["rvc_enabled"] else raw
         if wav:
             wav_parts.append(wav)

@@ -59,7 +59,8 @@ COPY requirements.txt /tmp/requirements.txt
 COPY requirements.audio.txt /tmp/requirements.audio.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
  && pip install --no-cache-dir litellm \
- && pip install --no-cache-dir -r /tmp/requirements.audio.txt
+ && pip install --no-cache-dir -r /tmp/requirements.audio.txt \
+ && python -m unidic download
 
 # ── Modèles STT — téléchargés au build (internet dispo) ─────────
 # Whisper tiny (~39 MB) — modèle STT offline

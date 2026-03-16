@@ -232,6 +232,12 @@
   color: var(--muted);
 }
 
+.dirtyBadge {
+  font-size: 0.75rem;
+  color: var(--a4);
+  opacity: 0.8;
+}
+
 /* ── Section faded (RVC disabled) ─────────────────────────── */
 
 .sectionFaded {

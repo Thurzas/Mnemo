@@ -167,6 +167,7 @@ export function VoicePage({ active }: { active: boolean }) {
   const [saving, setSaving]     = useState(false)
   const [testing, setTesting]   = useState(false)
   const [saveMsg, setSaveMsg]   = useState<string | null>(null)
+  const [dirty, setDirty]       = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const load = () => {
@@ -184,8 +185,10 @@ export function VoicePage({ active }: { active: boolean }) {
 
   if (!active) return null
 
-  const set = (patch: Partial<VoiceSettings>) =>
+  const set = (patch: Partial<VoiceSettings>) => {
     setForm(f => f ? { ...f, ...patch } : f)
+    setDirty(true)
+  }
 
   const handleSave = async () => {
     if (!form) return
@@ -195,6 +198,7 @@ export function VoicePage({ active }: { active: boolean }) {
       const updated = await api.updateVoiceSettings(form)
       setData(d => d ? { ...d, ...updated } : d)
       setForm(f => f ? { ...f, ...updated } : f)
+      setDirty(false)
       setSaveMsg('Paramètres sauvegardés.')
     } catch (e: unknown) {
       setSaveMsg(`Erreur : ${e instanceof Error ? e.message : String(e)}`)
@@ -204,10 +208,11 @@ export function VoicePage({ active }: { active: boolean }) {
   }
 
   const handleTest = async () => {
-    if (testing) return
+    if (testing || !form) return
     setTesting(true)
     try {
-      const blob = await api.testVoice()
+      // Envoie les settings du form courant — appliqués au runtime sans persistance
+      const blob = await api.testVoice(form)
       const url  = URL.createObjectURL(blob)
       if (audioRef.current) {
         audioRef.current.pause()
@@ -386,6 +391,9 @@ export function VoicePage({ active }: { active: boolean }) {
         <button className={styles.saveBtn} onClick={handleSave} disabled={saving}>
           {saving ? 'Sauvegarde…' : 'Sauvegarder'}
         </button>
+        {dirty && !saving && !saveMsg && (
+          <span className={styles.dirtyBadge}>modifications non sauvegardées</span>
+        )}
         {saveMsg && <span className={styles.saveMsg}>{saveMsg}</span>}
       </div>
     </div>

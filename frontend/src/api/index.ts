@@ -362,14 +362,14 @@ export const api = {
       method: 'POST',
     }),
 
-  testVoice: async (text?: string): Promise<Blob> => {
+  testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
     const token = auth.getToken()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (token) headers['Authorization'] = `Bearer ${token}`
     const res = await fetch('/api/voice/test', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ text: text ?? null }),
+      body: JSON.stringify({ text: text ?? null, ...settings }),
     })
     if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
     if (!res.ok) {

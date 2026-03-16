@@ -36,11 +36,13 @@ import asyncio
 import contextvars
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
 import uuid
 import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -65,6 +67,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Nouveau fichier → 600 (rw-------), nouveau répertoire → 700 (rwx------)
 # Protège les données utilisateurs contre les autres comptes OS sur l'hôte.
 os.umask(0o077)
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
 
@@ -830,18 +834,43 @@ async def voice_settings_post(req: VoiceSettingsRequest, _: Auth):
     return current
 
 
+class VoiceTestRequest(BaseModel):
+    text:              str   | None = None
+    # Paramètres optionnels — appliqués au runtime sans persistance
+    rvc_enabled:       bool  | None = None
+    kokoro_voice_fr:   str   | None = None
+    kokoro_voice_ja:   str   | None = None
+    kokoro_speed:      float | None = None
+    rvc_f0_method:     str   | None = None
+    rvc_f0_up_key:     int   | None = None
+    rvc_index_rate:    float | None = None
+    rvc_filter_radius: int   | None = None
+    rvc_rms_mix_rate:  float | None = None
+    rvc_protect:       float | None = None
+    rvc_active_model:  str   | None = None
+
+
 @app.post("/api/voice/test")
-async def voice_test(_: Auth):
-    """Synthétise une phrase de test avec les paramètres voix actuels."""
+async def voice_test(req: VoiceTestRequest, _: Auth):
+    """
+    Synthétise une phrase de test.
+    Si des paramètres sont fournis dans le body, ils sont appliqués au runtime
+    avant la synthèse (sans persistance sur disque) — permet de tester sans sauvegarder.
+    """
     try:
-        from Mnemo.tools.audio_tools import synthesize_speech  # noqa: PLC0415
+        from Mnemo.tools.audio_tools import apply_voice_settings, synthesize_speech  # noqa: PLC0415
     except Exception as exc:
         raise HTTPException(503, f"Module TTS non disponible : {exc}")
+
+    # Applique les settings du form au runtime (profil intermédiaire, non persisté)
+    patch = {k: v for k, v in req.model_dump().items() if k != "text" and v is not None}
+    if patch:
+        apply_voice_settings(patch)
+
+    phrase = req.text or "Bonjour, je suis ta voix personnalisée."
     loop = asyncio.get_running_loop()
     try:
-        wav = await loop.run_in_executor(
-            None, lambda: synthesize_speech("Bonjour, je suis ta voix personnalisée.")
-        )
+        wav = await loop.run_in_executor(None, lambda: synthesize_speech(phrase))
     except Exception as exc:
         raise HTTPException(500, f"Erreur test voix : {exc}") from exc
     if not wav:
@@ -903,7 +932,6 @@ async def voice_model_activate(model_name: str, _: Auth):
     Persiste le modèle actif dans voice_settings.json.
     """
     import json
-    import urllib.error
 
     # Validation nom
     import re as _re
