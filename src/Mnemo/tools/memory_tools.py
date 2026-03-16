@@ -194,11 +194,19 @@ def search_vector(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH)
 
 
 def adaptive_weights(query: str) -> tuple[float, float]:
-    return (0.6, 0.4) if len(query.split()) <= 2 else (0.3, 0.7)
+    """
+    Poids FTS/vector selon la longueur de la query.
+    Interpolation linéaire : 1 mot → (0.70, 0.30) · 10+ mots → (0.25, 0.75).
+    """
+    n   = len(query.split())
+    t   = min(n / 10.0, 1.0)
+    w_kw = round(0.70 - 0.45 * t, 3)
+    return (w_kw, round(1.0 - w_kw, 3))
 
 
-def reciprocal_rank_fusion(kw: list[dict], vec: list[dict], k: int = 60) -> list[dict]:
-    w_fts, w_vec = adaptive_weights(" ".join(c["content"] for c in kw[:1]))
+def reciprocal_rank_fusion(kw: list[dict], vec: list[dict],
+                           query: str = "", k: int = 60) -> list[dict]:
+    w_fts, w_vec = adaptive_weights(query)
     scores: dict[str, float] = {}
     all_chunks: dict[str, dict] = {}
 
@@ -233,7 +241,7 @@ def retrieve(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     db = get_db()
     kw  = search_keyword(db, query)
     vec = search_vector(db, query)
-    merged = reciprocal_rank_fusion(kw, vec)
+    merged = reciprocal_rank_fusion(kw, vec, query=query)
     db.close()
     return merged[:top_k_final]
 
@@ -267,8 +275,8 @@ def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     db.close()
 
     # ── Fusion RRF globale ─────────────────────────────────────
-    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem)
-    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc)
+    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem, query=query)
+    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc, query=query)
 
     all_results = merged_mem + merged_doc
     all_results.sort(key=lambda x: x["score_final"], reverse=True)

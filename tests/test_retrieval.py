@@ -169,21 +169,23 @@ def ollama_db(tmp_path, monkeypatch):
 class TestAdaptiveWeights:
 
     def test_query_courte_biais_keyword(self):
-        """1-2 mots → keyword 60%, vector 40%."""
+        """1 mot → keyword-heavy (w_fts > 0.5)."""
         w_fts, w_vec = adaptive_weights("Python")
-        assert w_fts == 0.6
-        assert w_vec == 0.4
-
-    def test_query_deux_mots_biais_keyword(self):
-        w_fts, w_vec = adaptive_weights("projet Mnemo")
-        assert w_fts == 0.6
-        assert w_vec == 0.4
+        assert w_fts > 0.5
+        assert w_vec < 0.5
 
     def test_query_longue_biais_vector(self):
-        """3+ mots → keyword 30%, vector 70%."""
-        w_fts, w_vec = adaptive_weights("comment fonctionne la mémoire hybride")
-        assert w_fts == 0.3
-        assert w_vec == 0.7
+        """10+ mots → vector-heavy (w_vec > 0.5)."""
+        w_fts, w_vec = adaptive_weights("comment fonctionne la mémoire hybride de Mnemo en détail")
+        assert w_vec > 0.5
+        assert w_fts < 0.5
+
+    def test_gradation_croissante(self):
+        """Plus la query est longue, plus w_vec augmente."""
+        _, v1 = adaptive_weights("mot")
+        _, v2 = adaptive_weights("deux mots ici")
+        _, v3 = adaptive_weights("une phrase bien plus longue que les autres")
+        assert v1 < v2 < v3
 
     def test_somme_poids_egale_1(self):
         for query in ["mot", "deux mots", "une longue phrase de test"]:
@@ -194,6 +196,12 @@ class TestAdaptiveWeights:
         """Une query vide doit retourner des poids valides sans crasher."""
         w_fts, w_vec = adaptive_weights("")
         assert w_fts + w_vec == pytest.approx(1.0)
+
+    def test_plateau_au_dela_de_10_mots(self):
+        """Les queries > 10 mots ont le même poids maximal."""
+        _, v10 = adaptive_weights(" ".join(["x"] * 10))
+        _, v20 = adaptive_weights(" ".join(["x"] * 20))
+        assert v10 == v20
 
 
 # ══════════════════════════════════════════════════════════════
