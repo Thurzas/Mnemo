@@ -7,13 +7,14 @@ import { MemoryPage } from '@/pages/MemoryPage'
 import { SessionsPage } from '@/pages/SessionsPage'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
+import { VoicePage } from '@/pages/VoicePage'
 import { LoginPage } from '@/pages/LoginPage'
 import { OnboardingModal } from '@/pages/OnboardingModal'
 import { api, auth } from '@/api'
 import type { OnboardingQuestion } from '@/api'
 import styles from './App.module.css'
 
-export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar' | 'knowledge'
+export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar' | 'knowledge' | 'voice'
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('chat')
@@ -120,6 +121,9 @@ export default function App() {
         </div>
         <div className={tab === 'knowledge' ? styles.visible : styles.hidden}>
           <KnowledgePage active={tab === 'knowledge'} />
+        </div>
+        <div className={tab === 'voice' ? styles.visible : styles.hidden}>
+          <VoicePage active={tab === 'voice'} />
         </div>
       </main>
       {onboardingQuestions?.length ? (

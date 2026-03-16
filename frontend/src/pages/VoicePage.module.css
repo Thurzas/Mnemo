@@ -1,0 +1,255 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  padding: 28px 32px;
+  gap: 28px;
+  max-width: 680px;
+}
+
+.pageTitle {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+/* ── Sections ─────────────────────────────────────────────── */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+}
+
+.sectionTitle {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.badge {
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  background: color-mix(in srgb, var(--a4) 14%, transparent);
+  color: var(--a4);
+  border: 1px solid color-mix(in srgb, var(--a4) 30%, transparent);
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+
+/* ── Rows ──────────────────────────────────────────────────── */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.label {
+  font-size: 0.85rem;
+  color: var(--text);
+  min-width: 200px;
+  flex-shrink: 0;
+}
+
+/* ── Select ────────────────────────────────────────────────── */
+
+.select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 5px 10px;
+  cursor: pointer;
+  min-width: 160px;
+  transition: border-color 0.15s;
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--a1);
+}
+
+.select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Toggle ────────────────────────────────────────────────── */
+
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggleTrack {
+  display: block;
+  width: 40px;
+  height: 22px;
+  background: var(--border);
+  border-radius: 11px;
+  transition: background 0.2s;
+  position: relative;
+}
+
+.toggleTrack::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.toggle input:checked + .toggleTrack {
+  background: var(--a1);
+}
+
+.toggle input:checked + .toggleTrack::after {
+  transform: translateX(18px);
+}
+
+.toggle input:disabled + .toggleTrack {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Slider ────────────────────────────────────────────────── */
+
+.sliderRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sliderMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sliderLabel {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.sliderHint {
+  font-size: 0.72rem;
+  color: var(--dimmed);
+}
+
+.sliderControl {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.range {
+  flex: 1;
+  accent-color: var(--a1);
+  cursor: pointer;
+}
+
+.sliderValue {
+  font-size: 0.82rem;
+  color: var(--muted);
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Disabled RVC block ────────────────────────────────────── */
+
+.rvcParams {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: opacity 0.2s;
+}
+
+.rvcParams.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ── Actions ───────────────────────────────────────────────── */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 8px;
+}
+
+.testBtn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.testBtn:hover:not(:disabled) {
+  border-color: var(--a2);
+  color: var(--a1);
+}
+
+.testBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.saveBtn {
+  background: var(--a1);
+  border: none;
+  border-radius: 7px;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.saveBtn:hover:not(:disabled) { opacity: 0.88; }
+.saveBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.saveMsg {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+/* ── Empty state ───────────────────────────────────────────── */
+
+.empty {
+  color: var(--dimmed);
+  font-size: 0.85rem;
+  padding: 20px 0;
+}

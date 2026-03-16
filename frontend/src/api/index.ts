@@ -137,6 +137,25 @@ export interface OnboardingAnswerItem {
   label: string
 }
 
+export interface VoiceSettings {
+  rvc_enabled: boolean
+  kokoro_voice_fr: string
+  kokoro_voice_ja: string
+  kokoro_speed: number
+  rvc_f0_method: string
+  rvc_f0_up_key: number
+  rvc_index_rate: number
+  rvc_filter_radius: number
+  rvc_rms_mix_rate: number
+  rvc_protect: number
+}
+
+export interface VoiceSettingsResponse extends VoiceSettings {
+  available_voices_fr: string[]
+  available_voices_ja: string[]
+  rvc_service_url: string | null
+}
+
 // ── Auth token ───────────────────────────────────────────────────
 
 const TOKEN_KEY = 'mnemo_token'
@@ -293,6 +312,32 @@ export const api = {
       method: 'POST',
       headers,
       body: JSON.stringify({ text }),
+    })
+    if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(detail?.detail ?? res.statusText)
+    }
+    return res.blob()
+  },
+
+  getVoiceSettings: () =>
+    request<VoiceSettingsResponse>('/api/voice/settings'),
+
+  updateVoiceSettings: (settings: Partial<VoiceSettings>) =>
+    request<VoiceSettings>('/api/voice/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    }),
+
+  testVoice: async (text?: string): Promise<Blob> => {
+    const token = auth.getToken()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const res = await fetch('/api/voice/test', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ text: text ?? null }),
     })
     if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
     if (!res.ok) {
