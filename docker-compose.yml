@@ -39,16 +39,21 @@ services:
       # CrewAI écrit son cache ChromaDB dans HOME/.local/share/data —
       # avec read_only:true, /home/mnemo est non accessible en écriture.
       - HOME=/tmp
+      # Kokoro / HuggingFace hub : modèles dans /data/models (volume writable).
+      # Premier appel TTS → téléchargement ~82 MB dans /data/models/hub/...
+      # Appels suivants → lecture depuis le cache persistant.
+      - HF_HOME=/data/models
 
     # ── Volumes ───────────────────────────────────────────────────
     # /data  → données persistantes (DB, mémoire, sessions, docs)
     # Tout le reste du filesystem est read-only (défini plus bas).
-    # /tmp   → tmpfs en mémoire — nécessaire pour SQLite et pip
+    # /tmp   → tmpfs en mémoire — exec requis : phonemizer copie libespeak-ng.so
+    #          dans /tmp et l'ouvre via ctypes (nécessite mmap exécutable).
     volumes:
       - ${DATA_DIR:-./data}:/data
 
     tmpfs:
-      - /tmp:size=256m,mode=1777
+      - /tmp:size=256m,mode=1777,exec
       - /run:size=16m,mode=0755
 
     # ── Filesystem read-only ──────────────────────────────────────
@@ -110,14 +115,18 @@ services:
       - HOME=/tmp
       - DATA_PATH=/data
       # Si le service RVC est actif (profile voice), activer la conversion de voix.
-      # Laisser vide pour utiliser Piper seul (TTS sans RVC).
+      # Laisser vide pour utiliser Kokoro seul (TTS sans RVC).
       - RVC_SERVICE_URL=${RVC_SERVICE_URL:-}
+      # Kokoro / HuggingFace hub : modèles dans /data/models (volume writable).
+      # Premier appel TTS → téléchargement ~82 MB dans /data/models/hub/...
+      # Appels suivants → lecture depuis le cache persistant.
+      - HF_HOME=/data/models
 
     volumes:
       - ${DATA_DIR:-./data}:/data
 
     tmpfs:
-      - /tmp:size=256m,mode=1777
+      - /tmp:size=256m,mode=1777,exec
       - /run:size=16m,mode=0755
 
     read_only: true

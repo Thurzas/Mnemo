@@ -723,20 +723,108 @@ async def text_to_speech(
 ):
     """
     Synthétise `text` en audio WAV.
-    Nécessite piper-tts installé (sinon 503).
+    Nécessite kokoro installé (sinon 503).
     Retourne audio/wav (bytes).
     """
     try:
         from Mnemo.tools.audio_tools import synthesize_speech  # noqa: PLC0415
-    except ImportError:
-        raise HTTPException(503, "Module TTS non disponible — installez piper-tts")
+    except Exception as exc:
+        raise HTTPException(503, f"Module TTS non disponible : {exc}")
 
     loop = asyncio.get_running_loop()
     try:
         wav_bytes = await loop.run_in_executor(None, lambda: synthesize_speech(req.text))
     except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).error("TTS synthesis failed: %s", exc, exc_info=True)
         raise HTTPException(500, f"Erreur TTS : {exc}") from exc
+    if not wav_bytes:
+        raise HTTPException(500, "TTS a retourné des bytes vides")
     return Response(content=wav_bytes, media_type="audio/wav")
+
+
+# ── Voix — paramétrage UI ──────────────────────────────────────────
+
+_VOICE_SETTINGS_FILE = DATA_PATH / "voice_settings.json"
+
+
+def _load_voice_settings_on_startup() -> None:
+    """Charge voice_settings.json au démarrage de l'API (si présent)."""
+    import json
+    try:
+        from Mnemo.tools.audio_tools import apply_voice_settings
+        if _VOICE_SETTINGS_FILE.exists():
+            apply_voice_settings(json.loads(_VOICE_SETTINGS_FILE.read_text()))
+            log.info("Paramètres voix chargés depuis %s", _VOICE_SETTINGS_FILE)
+    except Exception as exc:
+        log.warning("Impossible de charger voice_settings.json : %s", exc)
+
+
+# Charge les settings au démarrage du module (uvicorn import)
+_load_voice_settings_on_startup()
+
+
+class VoiceSettingsRequest(BaseModel):
+    rvc_enabled:       bool  | None = None
+    kokoro_voice_fr:   str   | None = None
+    kokoro_voice_ja:   str   | None = None
+    kokoro_speed:      float | None = None
+    rvc_f0_method:     str   | None = None
+    rvc_f0_up_key:     int   | None = None
+    rvc_index_rate:    float | None = None
+    rvc_filter_radius: int   | None = None
+    rvc_rms_mix_rate:  float | None = None
+    rvc_protect:       float | None = None
+
+
+@app.get("/api/voice/settings")
+async def voice_settings_get(_: Auth):
+    """Retourne les paramètres voix actifs + les voix disponibles."""
+    from Mnemo.tools.audio_tools import (  # noqa: PLC0415
+        get_voice_settings, KOKORO_VOICES_FR, KOKORO_VOICES_JA,
+    )
+    s = get_voice_settings()
+    s["available_voices_fr"] = KOKORO_VOICES_FR
+    s["available_voices_ja"] = KOKORO_VOICES_JA
+    return s
+
+
+@app.post("/api/voice/settings")
+async def voice_settings_post(req: VoiceSettingsRequest, _: Auth):
+    """Met à jour les paramètres voix et les persiste dans voice_settings.json."""
+    import json
+    from Mnemo.tools.audio_tools import (  # noqa: PLC0415
+        get_voice_settings, apply_voice_settings, KOKORO_VOICES_FR, KOKORO_VOICES_JA,
+    )
+    update = {k: v for k, v in req.model_dump().items() if v is not None}
+    apply_voice_settings(update)
+    current = get_voice_settings()
+    try:
+        _VOICE_SETTINGS_FILE.write_text(json.dumps(current, indent=2))
+    except Exception as exc:
+        log.warning("Impossible de persister voice_settings.json : %s", exc)
+    current["available_voices_fr"] = KOKORO_VOICES_FR
+    current["available_voices_ja"] = KOKORO_VOICES_JA
+    return current
+
+
+@app.post("/api/voice/test")
+async def voice_test(_: Auth):
+    """Synthétise une phrase de test avec les paramètres voix actuels."""
+    try:
+        from Mnemo.tools.audio_tools import synthesize_speech  # noqa: PLC0415
+    except Exception as exc:
+        raise HTTPException(503, f"Module TTS non disponible : {exc}")
+    loop = asyncio.get_running_loop()
+    try:
+        wav = await loop.run_in_executor(
+            None, lambda: synthesize_speech("Bonjour, je suis ta voix personnalisée.")
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur test voix : {exc}") from exc
+    if not wav:
+        raise HTTPException(500, "Test voix retourné vide")
+    return Response(content=wav, media_type="audio/wav")
 
 
 # ── WebSocket streaming ────────────────────────────────────────────

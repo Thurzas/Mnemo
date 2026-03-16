@@ -241,12 +241,21 @@ export function ChatPage() {
     const sentences = splitSentences(text)
     if (sentences.length === 0) return
 
-    // Lance tous les fetches immédiatement (pipeline : phrase N+1 se télécharge
-    // pendant que la phrase N est en cours de lecture)
-    const fetches = sentences.map(s => api.tts(s).catch(() => null))
+    // Pool de concurrence : prefetch 1 phrase en avance seulement.
+    // Pendant que la phrase N est en cours de lecture, la phrase N+1 se
+    // télécharge en arrière-plan. On n'envoie JAMAIS plus de 2 requêtes
+    // simultanées au serveur — évite la race condition sur le singleton Kokoro.
+    let nextFetch: Promise<Blob | null> = api.tts(sentences[0]).catch(() => null)
 
-    for (const fetchPromise of fetches) {
+    for (let i = 0; i < sentences.length; i++) {
       if (abort.signal.aborted) break
+
+      const fetchPromise = nextFetch
+      // Lance le prefetch de la phrase suivante dès que la requête courante est en vol
+      nextFetch = i + 1 < sentences.length
+        ? api.tts(sentences[i + 1]).catch(() => null)
+        : Promise.resolve(null)
+
       let blob: Blob | null
       try { blob = await fetchPromise } catch { blob = null }
       if (!blob || abort.signal.aborted) continue
