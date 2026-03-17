@@ -4,7 +4,7 @@ import json
 import uuid
 import warnings
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
@@ -51,6 +51,7 @@ from Mnemo.tools.memory_tools import (
     _sessions_dir, _markdown_path,
     score_and_record_chunk_usage,
     adapt_weights_if_ready,
+    MemoryGap, MemoryGapReport, save_memory_gap_report,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
@@ -338,13 +339,67 @@ def curiosity_session(session_content: str, session_id: str = "") -> None:
             end   = raw.rfind("}") + 1
             if start != -1 and end > start:
                 detection = json.loads(raw[start:end])
-                if detection.get("has_gaps"):
-                    for q in detection.get("questions", [])[:remaining_slots]:
-                        q_id = q.get("id") or compute_hash(q.get("question", ""))
-                        if q_id not in skipped_ids:
-                            q["id"]   = q_id
-                            q["type"] = "contextual"
-                            contextual_gaps.append(q)
+                # Nouveau format : blocking_gaps + enriching_gaps
+                for gap_dict in detection.get("blocking_gaps", []):
+                    q_id = compute_hash(gap_dict.get("question", "") or gap_dict.get("description", ""))
+                    if q_id not in skipped_ids and gap_dict.get("question"):
+                        gap_dict["id"]   = q_id
+                        gap_dict["type"] = "contextual_blocking"
+                        contextual_gaps.append(gap_dict)
+                for gap_dict in detection.get("enriching_gaps", []):
+                    q_id = compute_hash(gap_dict.get("question", "") or gap_dict.get("description", ""))
+                    if q_id not in skipped_ids and gap_dict.get("question"):
+                        gap_dict["id"]   = q_id
+                        gap_dict["type"] = "contextual_enriching"
+                        contextual_gaps.append(gap_dict)
+                # Complétude mémoire pour le MemoryGapReport
+                llm_completeness = float(detection.get("memory_completeness", 0.0))
+                llm_blocking  = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("description", ""),
+                        affects     = g.get("affects", []),
+                        priority    = g.get("priority", 1),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in detection.get("blocking_gaps", [])
+                ]
+                llm_enriching = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("description", ""),
+                        affects     = g.get("affects", []),
+                        priority    = g.get("priority", 3),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in detection.get("enriching_gaps", [])
+                ]
+                # Lacunes structurelles → bloquantes par nature
+                struct_as_gaps = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("question", ""),
+                        priority    = g.get("priority", 2),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in structural_gaps
+                ]
+                gap_report = MemoryGapReport(
+                    assessed_at         = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                    memory_completeness = llm_completeness,
+                    blocking_gaps       = struct_as_gaps + llm_blocking,
+                    enriching_gaps      = llm_enriching,
+                )
+                save_memory_gap_report(gap_report)
+                print(f"  📊 Complétude mémoire : {llm_completeness:.0%} | "
+                      f"{len(gap_report.blocking_gaps)} bloquante(s), "
+                      f"{len(gap_report.enriching_gaps)} enrichissante(s)")
         except Exception as e:
             print(f"  ⚠️  Analyse contextuelle ignorée : {e}")
 

@@ -291,7 +291,7 @@ class TestCuriositySessionInjection:
         def fake_kickoff(inputs):
             captured.update(inputs)
             result = MagicMock()
-            result.raw = '{"has_gaps": false}'
+            result.raw = '{"memory_completeness": 0.5, "blocking_gaps": [], "enriching_gaps": []}'
             return result
 
         with patch("Mnemo.main.CuriosityCrew") as MockCrew, \
@@ -317,7 +317,7 @@ class TestCuriositySessionInjection:
         def fake_kickoff(inputs):
             captured.update(inputs)
             result = MagicMock()
-            result.raw = '{"has_gaps": false}'
+            result.raw = '{"memory_completeness": 0.5, "blocking_gaps": [], "enriching_gaps": []}'
             return result
 
         with patch("Mnemo.main.CuriosityCrew") as MockCrew, \
@@ -350,7 +350,7 @@ class TestCuriositySessionInjection:
              patch("Mnemo.main._collect_answers", return_value={}):
             mock_instance = MockCrew.return_value
             mock_instance.crew.return_value.kickoff.return_value = MagicMock(
-                raw='{"has_gaps": false}'
+                raw='{"memory_completeness": 0.5, "blocking_gaps": [], "enriching_gaps": []}'
             )
 
             from Mnemo.main import curiosity_session
@@ -367,7 +367,7 @@ class TestCuriositySessionInjection:
         def fake_kickoff(inputs):
             called.append(inputs)
             result = MagicMock()
-            result.raw = '{"has_gaps": false}'
+            result.raw = '{"memory_completeness": 0.5, "blocking_gaps": [], "enriching_gaps": []}'
             return result
 
         with patch("Mnemo.main.CuriosityCrew") as MockCrew, \

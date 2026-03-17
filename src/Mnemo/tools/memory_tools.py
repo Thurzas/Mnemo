@@ -114,6 +114,117 @@ PROFILES: dict[str, WeightProfile] = {
 }
 
 
+# ── Phase 5.6 — MemoryGapReport ───────────────────────────────
+
+@dataclass
+class MemoryGap:
+    """Un manque détecté dans memory.md."""
+    section:     str
+    subsection:  str
+    description: str
+    affects:     list[str] = field(default_factory=list)   # crews impactés
+    priority:    int = 3                                    # 1 (critique) → 5 (optionnel)
+    label:       str = ""                                   # label markdown si section atomique
+    question:    str = ""                                   # question à poser à l'utilisateur
+
+
+@dataclass
+class MemoryGapReport:
+    """
+    Rapport structuré produit par CuriosityCrew (AssessMemoryGaps).
+
+    Deux types de lacunes :
+    - blocking_gaps  : manques qui dégradent significativement un autre crew
+    - enriching_gaps : manques qui amélioreraient la qualité mais ne bloquent rien
+
+    Le rapport met à jour le World State via to_world_state().
+    Il est persisté dans world_state.json pour les crews en aval (PlannerCrew, etc.).
+    """
+    assessed_at:          str        = ""
+    memory_completeness:  float      = 0.0    # 0.0 → mémoire vide, 1.0 → complète
+    blocking_gaps:        list[MemoryGap] = field(default_factory=list)
+    enriching_gaps:       list[MemoryGap] = field(default_factory=list)
+    questions_ready:      list[dict] = field(default_factory=list)  # pour CuriosityCrew interactif
+
+    def to_world_state(self) -> dict:
+        """Flags GOAP dérivés du rapport."""
+        return {
+            "memory_gaps_known":    True,
+            "memory_blocking_gaps": len(self.blocking_gaps) > 0,
+            "memory_completeness":  round(self.memory_completeness, 2),
+        }
+
+    def to_json(self) -> str:
+        """Sérialise le rapport en JSON (pour world_state.json)."""
+        def _gap_to_dict(g: MemoryGap) -> dict:
+            return {
+                "section":     g.section,
+                "subsection":  g.subsection,
+                "description": g.description,
+                "affects":     g.affects,
+                "priority":    g.priority,
+                "label":       g.label,
+                "question":    g.question,
+            }
+        return json.dumps({
+            "assessed_at":         self.assessed_at,
+            "memory_completeness": self.memory_completeness,
+            "blocking_gaps":       [_gap_to_dict(g) for g in self.blocking_gaps],
+            "enriching_gaps":      [_gap_to_dict(g) for g in self.enriching_gaps],
+            "questions_ready":     self.questions_ready,
+        }, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def from_json(cls, raw: str | dict) -> "MemoryGapReport":
+        """Désérialise depuis une chaîne JSON ou un dict."""
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        def _dict_to_gap(d: dict) -> MemoryGap:
+            return MemoryGap(
+                section     = d.get("section", ""),
+                subsection  = d.get("subsection", ""),
+                description = d.get("description", ""),
+                affects     = d.get("affects", []),
+                priority    = d.get("priority", 3),
+                label       = d.get("label", ""),
+                question    = d.get("question", ""),
+            )
+        return cls(
+            assessed_at         = data.get("assessed_at", ""),
+            memory_completeness = data.get("memory_completeness", 0.0),
+            blocking_gaps       = [_dict_to_gap(g) for g in data.get("blocking_gaps", [])],
+            enriching_gaps      = [_dict_to_gap(g) for g in data.get("enriching_gaps", [])],
+            questions_ready     = data.get("questions_ready", []),
+        )
+
+
+def save_memory_gap_report(report: MemoryGapReport) -> None:
+    """Persiste le rapport + les flags WorldState dans data_dir/world_state.json."""
+    path = get_data_dir() / "world_state.json"
+    existing: dict = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    existing.update(report.to_world_state())
+    existing["last_gap_report"] = json.loads(report.to_json())
+    path.write_text(
+        json.dumps(existing, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_world_state() -> dict:
+    """Charge world_state.json, retourne {} si absent ou invalide."""
+    path = get_data_dir() / "world_state.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
 # ══════════════════════════════════════════════════════════════
 # Sanitization
 # ══════════════════════════════════════════════════════════════
