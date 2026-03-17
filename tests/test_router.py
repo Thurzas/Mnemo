@@ -183,6 +183,81 @@ class TestDispatch:
 
 
 # ══════════════════════════════════════════════════════════════════
+# 2b. Route "plan" — keyword + dispatch + needs_recon
+# ══════════════════════════════════════════════════════════════════
+
+class TestPlanRoute:
+    """Tests de la route 'plan' : détection keywords, dispatch, needs_recon."""
+
+    def test_plan_keyword_strong_routes_to_plan(self):
+        from Mnemo.routing.handlers.keyword import _detect_plan_intent
+        strong, _ = _detect_plan_intent("construis-moi la feature X")
+        assert strong
+
+    def test_plan_keyword_weak_no_strong(self):
+        from Mnemo.routing.handlers.keyword import _detect_plan_intent
+        strong, weak = _detect_plan_intent("comment implémenter le truc ?")
+        assert not strong
+        assert weak
+
+    def test_plan_keyword_no_match(self):
+        from Mnemo.routing.handlers.keyword import _detect_plan_intent
+        strong, weak = _detect_plan_intent("quel temps fait-il ?")
+        assert not strong
+        assert not weak
+
+    def test_keyword_handler_returns_plan_on_strong(self):
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="prépare un plan pour la feature Y", session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        assert result is not None
+        assert result.route == "plan"
+        assert result.confidence == 1.0
+
+    def test_dispatch_plan_without_planner_crew_returns_string(self):
+        """Avant l'implémentation de PlannerCrew, dispatch retourne un message d'erreur."""
+        result = _router_result(route="plan")
+        with patch("Mnemo.crew.ConversationCrew") as mock_conv, \
+             patch("Mnemo.crew.ShellCrew"), \
+             patch("Mnemo.crew.CalendarWriteCrew"), \
+             patch("Mnemo.crew.SchedulerCrew"), \
+             patch("Mnemo.crew.NoteWriterCrew"):
+            mock_conv.return_value.crew.return_value.kickoff.return_value = _mock_crew_result("conv")
+            res = dispatch(result, user_message="plan test", session_id="s1",
+                           temporal_ctx="", web_context="")
+        assert isinstance(res, str)
+
+    def test_needs_recon_set_on_complex_plan(self):
+        """LLMHandler doit setter needs_recon=True si route=plan et complexity=complex."""
+        from Mnemo.routing.handlers.llm import LLMHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="construis le module X", session_id="s1")
+        ctx._hints["ml_route"] = "plan"
+        ctx._hints["ml_conf"]  = 0.9
+        eval_json = _eval_json(route="plan", complexity="complex")
+        with patch("Mnemo.crew.EvaluationCrew") as MockEval:
+            MockEval.return_value.crew.return_value.kickoff.return_value = \
+                _mock_crew_result(json.dumps(eval_json))
+            result = LLMHandler().handle(ctx)
+        assert result.metadata.get("needs_recon") is True
+
+    def test_needs_recon_not_set_on_simple_plan(self):
+        """needs_recon reste False si complexity != complex."""
+        from Mnemo.routing.handlers.llm import LLMHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="construis le module X", session_id="s1")
+        ctx._hints["ml_route"] = "plan"
+        ctx._hints["ml_conf"]  = 0.9
+        eval_json = _eval_json(route="plan", complexity="simple")
+        with patch("Mnemo.crew.EvaluationCrew") as MockEval:
+            MockEval.return_value.crew.return_value.kickoff.return_value = \
+                _mock_crew_result(json.dumps(eval_json))
+            result = LLMHandler().handle(ctx)
+        assert not result.metadata.get("needs_recon")
+
+
+# ══════════════════════════════════════════════════════════════════
 # 3. Stubs Phase 3
 # ══════════════════════════════════════════════════════════════════
 

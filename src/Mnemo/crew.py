@@ -639,3 +639,259 @@ class SchedulerCrew:
             return (confirmation or "Planification partielle.") + suffix
 
         return confirmation or "Tâches planifiées."
+
+
+# ══════════════════════════════════════════════════════════════
+# ReconnaissanceCrew — Phase 6 : exploration code pré-planification
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class ReconnaissanceCrew:
+    """
+    Crew de reconnaissance : lit le code source pertinent et produit
+    un recon_context structuré pour PlannerCrew.
+
+    La lecture des fichiers est faite côté Python (pas de LLM).
+    Le LLM ne reçoit que les contenus déjà chargés — il ne peut pas halluciner
+    des fichiers qu'il n'a pas lus.
+
+    Flux :
+      1. Python résout les hints (noms de modules → chemins de fichiers)
+      2. Python lit les fichiers et tronque si nécessaire
+      3. LLM synthétise → JSON {files_read, symbols_found, summary, ...}
+      4. recon_context stocké dans world_state.json["recon_context"]
+    """
+    agents_config = "config/recon_agents.yaml"
+    tasks_config  = "config/recon_tasks.yaml"
+
+    # Taille max du contenu d'un fichier transmis au LLM (en caractères)
+    _MAX_FILE_CHARS = 3000
+
+    @agent
+    def recon_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["recon_agent"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=2,
+            llm=_llm(0.0),
+        )
+
+    @task
+    def recon_task(self) -> Task:
+        return Task(config=self.tasks_config["recon_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    @staticmethod
+    def _resolve_hints(hints: list[str]) -> list[str]:
+        """
+        Convertit des noms de modules/fichiers en chemins réels.
+        Cherche dans src/ et tests/ à partir du répertoire courant.
+        """
+        import glob as _glob
+        resolved = []
+        for hint in hints:
+            # Chemin direct
+            from pathlib import Path as _Path
+            p = _Path(hint)
+            if p.exists():
+                resolved.append(str(p))
+                continue
+            # Recherche par nom de fichier
+            name = _Path(hint).name
+            if not name.endswith(".py"):
+                name += ".py"
+            matches = _glob.glob(f"**/{name}", recursive=True)
+            resolved.extend(matches[:2])  # max 2 fichiers par hint
+        return list(dict.fromkeys(resolved))  # déduplique en préservant l'ordre
+
+    @staticmethod
+    def _load_files(paths: list[str], max_chars: int) -> dict[str, str]:
+        """Lit les fichiers et tronque si nécessaire."""
+        from pathlib import Path as _Path
+        contents = {}
+        for path in paths:
+            try:
+                text = _Path(path).read_text(encoding="utf-8", errors="ignore")
+                if len(text) > max_chars:
+                    text = text[:max_chars] + f"\n... [tronqué à {max_chars} caractères]"
+                contents[path] = text
+            except OSError:
+                contents[path] = f"(impossible de lire : {path})"
+        return contents
+
+    def run(self, inputs: dict) -> dict:
+        """
+        Exécute la reconnaissance et retourne le recon_context (dict).
+        Met aussi à jour world_state.json["recon_context"].
+
+        Args:
+            inputs : {"goal": str, "hints": list[str] | str}
+
+        Returns:
+            recon_context dict avec files_read, symbols_found, summary, etc.
+        """
+        import json as _json
+        from Mnemo.tools.memory_tools import save_memory_gap_report, load_world_state
+
+        goal  = inputs.get("goal", "")
+        hints = inputs.get("hints", [])
+        if isinstance(hints, str):
+            hints = [h.strip() for h in hints.split(",") if h.strip()]
+
+        # ── Lecture Python (sans LLM) ──────────────────────────────────
+        resolved_paths = self._resolve_hints(hints)
+        file_contents  = self._load_files(resolved_paths, self._MAX_FILE_CHARS)
+
+        file_contents_str = "\n\n".join(
+            f"### {path}\n```python\n{content}\n```"
+            for path, content in file_contents.items()
+        ) if file_contents else "(non disponible — aucun fichier trouvé)"
+
+        hints_str = ", ".join(hints) if hints else "(aucun hint fourni)"
+
+        # ── Synthèse LLM ───────────────────────────────────────────────
+        try:
+            result = self.crew().kickoff(inputs={
+                "goal":          goal,
+                "hints":         hints_str,
+                "file_contents": file_contents_str,
+            })
+            raw   = result.raw.strip() if result.raw else ""
+            start = raw.find("{")
+            end   = raw.rfind("}") + 1
+            if start == -1 or end <= start:
+                raise ValueError("JSON introuvable")
+            recon_context = _json.loads(raw[start:end])
+        except Exception as e:
+            recon_context = {
+                "files_read":    resolved_paths,
+                "symbols_found": {},
+                "existing_tests": [],
+                "key_imports":   [],
+                "entry_points":  [],
+                "todos_stubs":   [],
+                "summary":       f"Reconnaissance partielle — erreur LLM : {e}",
+            }
+
+        # ── Persistance dans world_state.json ─────────────────────────
+        try:
+            ws = load_world_state()
+            ws["recon_context"] = recon_context
+            ws["knows_module"]  = bool(resolved_paths)
+            from Mnemo.context import get_data_dir
+            import json as _j
+            (get_data_dir() / "world_state.json").write_text(
+                _j.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        return recon_context
+
+
+# ══════════════════════════════════════════════════════════════
+# PlannerCrew — Phase 6 : planification persistante (plan.md)
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class PlannerCrew:
+    """
+    Crew pour la décomposition d'un goal complexe en plan persistant (plan.md).
+
+    Flux :
+      1. Reçoit goal + recon_context (optionnel) + memory_gap_summary + needs_recon
+      2. Si needs_recon=True et recon_context vide → insère étape "Explorer le code"
+      3. LLM décompose le goal → JSON {title, steps, crew_targets, context_summary}
+      4. PlanStore.create() écrit plan.md dans /data/plans/
+      5. Retourne la confirmation avec le chemin du plan créé
+    """
+    agents_config = "config/planner_agents.yaml"
+    tasks_config  = "config/planner_tasks.yaml"
+
+    @agent
+    def planner_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["planner_agent"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=2,
+            llm=_llm(0.2),
+        )
+
+    @task
+    def planner_task(self) -> Task:
+        return Task(config=self.tasks_config["planner_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        import json as _json
+        from Mnemo.tools.plan_tools import PlanStore
+        from Mnemo.tools.memory_tools import load_world_state
+
+        goal         = inputs.get("user_message", "")
+        recon_context = inputs.get("recon_context", "(non disponible)")
+        needs_recon  = inputs.get("needs_recon", False)
+
+        # Résumé des lacunes mémoire depuis le WorldState
+        ws = load_world_state()
+        last_report  = ws.get("last_gap_report", {})
+        blocking     = last_report.get("blocking_gaps", [])
+        gap_summary  = "\n".join(
+            f"- [BLOQUANT] {g.get('description', '')}" for g in blocking
+        ) if blocking else "(aucune lacune bloquante connue)"
+
+        try:
+            result = self.crew().kickoff(inputs={
+                "goal":             goal,
+                "recon_context":    recon_context,
+                "memory_gap_summary": gap_summary,
+            })
+            raw = result.raw.strip() if result.raw else ""
+            start = raw.find("{")
+            end   = raw.rfind("}") + 1
+            if start == -1 or end <= start:
+                raise ValueError("JSON introuvable dans la réponse du LLM")
+
+            plan_data     = _json.loads(raw[start:end])
+            title         = plan_data.get("title", goal[:60])
+            steps         = plan_data.get("steps", [])
+            crew_targets  = plan_data.get("crew_targets", {})
+            ctx_summary   = plan_data.get("context_summary", "")
+
+            if not steps:
+                return "Le planificateur n'a pas pu décomposer ce goal. Peux-tu le reformuler ?"
+
+            plan_path = PlanStore.create(
+                goal         = goal,
+                steps        = steps,
+                context      = ctx_summary,
+                crew_targets = crew_targets,
+            )
+
+            lines = [f"**Plan créé** : `{plan_path.name}`", f"**Goal** : {goal}", ""]
+            for i, step in enumerate(steps, 1):
+                crew_t = crew_targets.get(step, "")
+                suffix = f" _(crew : {crew_t})_" if crew_t else ""
+                lines.append(f"{i}. {step}{suffix}")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Erreur lors de la planification : {e}"

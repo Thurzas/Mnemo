@@ -114,6 +114,22 @@ def dispatch(
         from Mnemo.crew import NoteWriterCrew
         return NoteWriterCrew().run({"user_message": user_message})
 
+    if route == "plan":
+        # Phase 6 — PlannerCrew + ReconnaissanceCrew (étapes 4-5)
+        # needs_recon est transmis via metadata pour les handlers en aval.
+        try:
+            from Mnemo.crew import PlannerCrew
+            needs_recon = metadata.get("needs_recon", False)
+            return PlannerCrew().run({
+                **base_inputs,
+                "needs_recon": needs_recon,
+            })
+        except ImportError:
+            return (
+                "La planification (PlannerCrew) n'est pas encore disponible. "
+                "Peux-tu reformuler ta demande ?"
+            )
+
     # Tous les autres crews (calendar, scheduler, briefing) — interface uniforme .run()
     crew_cls = registry.get(route)
     if crew_cls and route != "conversation":

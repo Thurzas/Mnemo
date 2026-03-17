@@ -135,6 +135,54 @@ def _detect_calendar_write_intent(msg: str) -> bool:
     return has_verb and has_ctx
 
 
+# ── Plan ──────────────────────────────────────────────────────────────────────
+
+_PLAN_KEYWORDS_STRONG = [
+    "construis-moi", "construis moi",
+    "développe", "developpe",
+    "implémente", "implemente",
+    "prépare un plan", "prepare un plan",
+    "fais-moi un plan", "fais moi un plan",
+    "décompose la tâche", "decompose la tache",
+    "organise les étapes", "organise les etapes",
+    "crée un plan", "cree un plan",
+    "écris un plan", "ecris un plan",
+    "planifie le développement", "planifie le developpement",
+    "rédige le plan", "redige le plan",
+]
+
+# Keywords faibles — hint pour ML (ambigus sans contexte)
+_PLAN_KEYWORDS_WEAK = [
+    "comment implémenter", "comment implementer",
+    "comment développer", "comment developper",
+    "comment construire",
+    "par où commencer", "par ou commencer",
+]
+
+
+def _detect_plan_intent(msg: str) -> tuple[bool, bool]:
+    """Retourne (strong, weak).
+
+    Les keywords multi-mots sont testés par substring (suffisant car non ambigus).
+    Les keywords mono-mots (verbes impératifs courts) sont testés avec \b pour
+    éviter de matcher des formes infinitives (ex: "implémente" ≠ "implémenter").
+    """
+    import re
+    m    = msg.lower()
+    strong = False
+    for kw in _PLAN_KEYWORDS_STRONG:
+        if " " in kw or "-" in kw:
+            if kw in m:
+                strong = True
+                break
+        else:
+            if re.search(r"\b" + re.escape(kw) + r"\b", m):
+                strong = True
+                break
+    weak = any(kw in m for kw in _PLAN_KEYWORDS_WEAK)
+    return strong, weak
+
+
 # ── Note ──────────────────────────────────────────────────────────────────────
 
 _NOTE_KEYWORDS = [
@@ -174,6 +222,11 @@ class KeywordHandler(RouterHandler):
         if _detect_note_intent(msg):
             return RouterResult("note", 1.0, "keyword")
 
+        # ── Plan fort ─────────────────────────────────────────────────────
+        plan_strong, plan_weak = _detect_plan_intent(msg)
+        if plan_strong:
+            return RouterResult("plan", 1.0, "keyword")
+
         # ── Calendar write ────────────────────────────────────────────────
         if _detect_calendar_write_intent(msg):
             return RouterResult("calendar", 1.0, "keyword")
@@ -186,5 +239,6 @@ class KeywordHandler(RouterHandler):
         # ── Dépôt des hints pour les handlers aval ────────────────────────
         ctx._hints["kw_shell"]      = _detect_shell_intent(msg)
         ctx._hints["kw_sched_weak"] = weak
+        ctx._hints["kw_plan_weak"]  = plan_weak
 
         return self._pass(ctx)

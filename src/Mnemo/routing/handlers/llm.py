@@ -67,6 +67,16 @@ class LLMHandler(RouterHandler):
         if eval_json.get("web_query") and not eval_json.get("needs_web"):
             eval_json["needs_web"] = True
 
+        # Coercion : plan + complexité "complex" → needs_recon par défaut
+        if final_route == "plan" and not eval_json.get("needs_recon"):
+            if eval_json.get("complexity") == "complex":
+                eval_json["needs_recon"] = True
+
+        # Hint kw_plan_weak + LLM dit "conversation" → suggère "plan"
+        if final_route == "conversation" and ctx._hints.get("kw_plan_weak"):
+            if eval_json.get("complexity") == "complex":
+                final_route = "plan"
+
         eval_json["route"] = final_route
 
         # Active learning — log si ML était incertain

@@ -1,0 +1,39 @@
+recon_task:
+  description: >
+    Explore le code source pertinent pour le goal suivant et produis un rapport structuré.
+
+    GOAL : {goal}
+
+    FICHIERS ET MODULES SUSPECTS (hints fournis par l'utilisateur ou le routing) :
+    {hints}
+
+    CONTENU DES FICHIERS LUS (pré-chargé côté Python) :
+    {file_contents}
+
+    À partir des fichiers lus, identifie :
+    1. Les symboles clés (fonctions, classes, constantes) directement liés au goal
+    2. Les fichiers de tests existants qui couvrent ces symboles
+    3. Les dépendances entre modules (imports clés)
+    4. Les points d'entrée pertinents (fonctions publiques, interfaces)
+    5. Les TODOs ou stubs visibles dans le code
+
+    RÈGLES :
+    - Ne mentionne que ce qui est réellement présent dans file_contents
+    - Si file_contents est vide ou "(non disponible)", indique-le dans summary
+    - Sois factuel et concis — pas de recommandations, uniquement des faits
+
+    Retourne UNIQUEMENT un objet JSON valide :
+    {{
+      "files_read": ["chemin/fichier1.py", "chemin/fichier2.py"],
+      "symbols_found": {{
+        "nom_symbole": "description courte + localisation (ex: ligne 42)"
+      }},
+      "existing_tests": ["tests/test_fichier1.py"],
+      "key_imports": ["module_a", "module_b"],
+      "entry_points": ["fonction_principale()", "ClassePrincipale.methode()"],
+      "todos_stubs": ["TODO ligne 15 : implémenter X"],
+      "summary": "Résumé factuel en 2-4 phrases de ce qui existe pour ce goal."
+    }}
+  expected_output: >
+    Un objet JSON valide décrivant ce qui existe dans le code pour le goal donné.
+  agent: recon_agent
