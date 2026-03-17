@@ -215,18 +215,50 @@ class TestPlanRoute:
         assert result.route == "plan"
         assert result.confidence == 1.0
 
-    def test_dispatch_plan_without_planner_crew_returns_string(self):
-        """Avant l'implémentation de PlannerCrew, dispatch retourne un message d'erreur."""
+    def test_dispatch_plan_appelle_planner_crew(self, tmp_path, monkeypatch):
+        """Route plan → PlannerCrew.run() est appelé."""
+        import Mnemo.tools.plan_tools as pt
+        import Mnemo.tools.memory_tools as mt
+        monkeypatch.setattr(pt, "get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(mt, "get_data_dir", lambda: tmp_path)
         result = _router_result(route="plan")
-        with patch("Mnemo.crew.ConversationCrew") as mock_conv, \
-             patch("Mnemo.crew.ShellCrew"), \
-             patch("Mnemo.crew.CalendarWriteCrew"), \
-             patch("Mnemo.crew.SchedulerCrew"), \
-             patch("Mnemo.crew.NoteWriterCrew"):
-            mock_conv.return_value.crew.return_value.kickoff.return_value = _mock_crew_result("conv")
-            res = dispatch(result, user_message="plan test", session_id="s1",
-                           temporal_ctx="", web_context="")
-        assert isinstance(res, str)
+        with patch("Mnemo.crew.PlannerCrew") as MockPlanner, \
+             patch("Mnemo.crew.ReconnaissanceCrew"):
+            MockPlanner.return_value.run.return_value = "Plan créé."
+            res = dispatch(result, user_message="construis le classifier",
+                           session_id="s1", temporal_ctx="", web_context="")
+        assert MockPlanner.called
+        assert res == "Plan créé."
+
+    def test_dispatch_plan_avec_recon_appelle_recon_crew(self, tmp_path, monkeypatch):
+        """needs_recon=True → ReconnaissanceCrew appelé avant PlannerCrew."""
+        import Mnemo.tools.plan_tools as pt
+        import Mnemo.tools.memory_tools as mt
+        monkeypatch.setattr(pt, "get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(mt, "get_data_dir", lambda: tmp_path)
+        result = _router_result(route="plan", needs_recon=True)
+        with patch("Mnemo.crew.PlannerCrew") as MockPlanner, \
+             patch("Mnemo.crew.ReconnaissanceCrew") as MockRecon:
+            MockRecon.return_value.run.return_value = {"summary": "module X trouvé"}
+            MockPlanner.return_value.run.return_value = "Plan créé."
+            dispatch(result, user_message="construis memory_tools",
+                     session_id="s1", temporal_ctx="", web_context="")
+        assert MockRecon.called
+        assert MockPlanner.called
+
+    def test_dispatch_plan_sans_recon_skip_recon_crew(self, tmp_path, monkeypatch):
+        """needs_recon=False → ReconnaissanceCrew NON appelé."""
+        import Mnemo.tools.plan_tools as pt
+        import Mnemo.tools.memory_tools as mt
+        monkeypatch.setattr(pt, "get_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(mt, "get_data_dir", lambda: tmp_path)
+        result = _router_result(route="plan", needs_recon=False)
+        with patch("Mnemo.crew.PlannerCrew") as MockPlanner, \
+             patch("Mnemo.crew.ReconnaissanceCrew") as MockRecon:
+            MockPlanner.return_value.run.return_value = "Plan créé."
+            dispatch(result, user_message="construis le classifier",
+                     session_id="s1", temporal_ctx="", web_context="")
+        assert not MockRecon.called
 
     def test_needs_recon_set_on_complex_plan(self):
         """LLMHandler doit setter needs_recon=True si route=plan et complexity=complex."""

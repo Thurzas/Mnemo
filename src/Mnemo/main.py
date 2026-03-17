@@ -641,6 +641,25 @@ def run():
     # 2. Rattrape les sessions orphelines des runs précédents
     consolidate_orphan_sessions()
 
+    # 3. Plans actifs — propose la reprise si un plan est en cours
+    try:
+        from Mnemo.tools.plan_tools import check_active_plans, PlanRunner
+        active_plans = check_active_plans()
+        if active_plans:
+            plan = active_plans[0]
+            print(f"\n📋 Plan en cours détecté : `{plan.name}`")
+            print("   Veux-tu reprendre ce plan ? (o/n)")
+            try:
+                answer = input("   > ").strip().lower()
+                if answer in ("o", "oui", "y", "yes"):
+                    print("\n▶️  Reprise du plan...")
+                    summary = PlanRunner().run(plan)
+                    print(f"\n{summary}\n")
+            except (EOFError, KeyboardInterrupt):
+                pass
+    except Exception as _plan_e:
+        print(f"[WARN] Vérification plans actifs échouée : {_plan_e}")
+
     session_id = new_session_id()
     print(f"\n🧠 Agent démarré — session : {session_id}")
     print("Tape 'exit' pour terminer proprement.")

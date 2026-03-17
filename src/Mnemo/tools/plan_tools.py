@@ -253,3 +253,167 @@ class PlanStore:
                 text = text.replace(f"**Statut** : {s}", f"**Statut** : {status}", 1)
                 break
         plan.write_text(text, encoding="utf-8")
+
+
+# ── PlanRunner ────────────────────────────────────────────────
+
+# Regex pour extraire le crew cible annoté dans le plan
+# ex: "Lire le fichier — crew : shell" → "shell"
+_RE_CREW_TARGET = re.compile(r"—\s*crew\s*:\s*(\w+)", re.IGNORECASE)
+
+
+def _build_step_executor() -> dict:
+    """
+    Construit le registre d'exécuteurs d'étapes à la demande (imports différés).
+    Chaque exécuteur reçoit (step_text, session_id, base_inputs) → str.
+    """
+    def _run_conversation(step: str, session_id: str, inputs: dict) -> str:
+        from Mnemo.crew import ConversationCrew
+        result = ConversationCrew().crew().kickoff(inputs={
+            **inputs,
+            "user_message": step,
+            "session_id":   session_id,
+            "memory_context": "",
+        })
+        return result.raw or ""
+
+    def _run_shell(step: str, session_id: str, inputs: dict) -> str:
+        from Mnemo.crew import ShellCrew
+        return ShellCrew().run({**inputs, "user_message": step, "shell_command": step})
+
+    def _run_note(step: str, session_id: str, inputs: dict) -> str:
+        from Mnemo.crew import NoteWriterCrew
+        return NoteWriterCrew().run({"user_message": step})
+
+    def _run_scheduler(step: str, session_id: str, inputs: dict) -> str:
+        from Mnemo.crew import SchedulerCrew
+        return SchedulerCrew().run({**inputs, "user_message": step})
+
+    def _run_recon(step: str, session_id: str, inputs: dict) -> str:
+        from Mnemo.crew import ReconnaissanceCrew
+        goal  = inputs.get("goal", step)
+        hints = inputs.get("hints", [])
+        result = ReconnaissanceCrew().run({"goal": goal, "hints": hints})
+        return result.get("summary", "Reconnaissance terminée.")
+
+    def _run_curiosity(step: str, session_id: str, inputs: dict) -> str:
+        # Curiosity en mode PlanRunner : pas d'interaction utilisateur directe
+        # Retourne une invitation à lancer la session manuelle
+        return (
+            f"Étape de remplissage mémoire : '{step}'. "
+            "Lance une session pour combler ces lacunes avant de continuer."
+        )
+
+    return {
+        "conversation":    _run_conversation,
+        "shell":           _run_shell,
+        "note":            _run_note,
+        "scheduler":       _run_scheduler,
+        "reconnaissance":  _run_recon,
+        "curiosity":       _run_curiosity,
+    }
+
+
+class StepExecutionError(Exception):
+    """Levée quand une étape échoue et bloque le plan."""
+
+
+class PlanRunner:
+    """
+    Exécute un plan.md étape par étape.
+
+    Comportement :
+    - Reprend à la première étape [ ] (crash recovery automatique)
+    - Marque chaque étape [x] après succès
+    - Arrêt au premier bloquant : add_blocker() + status ❌
+    - Retourne un résumé de l'exécution
+
+    Option B — _STEP_EXECUTOR dict : pas de couplage avec dispatch() / middleware.
+    """
+
+    def __init__(self) -> None:
+        self._executors = _build_step_executor()
+
+    @staticmethod
+    def _get_crew_target(step_text: str) -> str:
+        """Extrait le crew cible depuis l'annotation '— crew : xxx'."""
+        m = _RE_CREW_TARGET.search(step_text)
+        return m.group(1).lower() if m else "conversation"
+
+    @staticmethod
+    def _clean_step(step_text: str) -> str:
+        """Retire l'annotation crew de l'affichage."""
+        return _RE_CREW_TARGET.sub("", step_text).strip(" —")
+
+    def run(
+        self,
+        plan: Path,
+        session_id: str = "",
+        base_inputs: dict | None = None,
+    ) -> str:
+        """
+        Exécute le plan jusqu'à complétion ou premier bloquant.
+
+        Args:
+            plan        : chemin du plan.md
+            session_id  : session courante (pour les crews qui en ont besoin)
+            base_inputs : inputs de base transmis à chaque crew
+
+        Returns:
+            Résumé de l'exécution (étapes faites, bloquant éventuel).
+        """
+        inputs   = base_inputs or {}
+        executed = 0
+        blocked  = False
+
+        while True:
+            step_raw = PlanStore.get_next_step(plan)
+            if step_raw is None:
+                break  # toutes les étapes sont faites
+
+            crew_target = self._get_crew_target(step_raw)
+            step_clean  = self._clean_step(step_raw)
+            executor    = self._executors.get(crew_target, self._executors["conversation"])
+
+            PlanStore.append_log(plan, f"Début étape : {step_clean} (crew : {crew_target})")
+
+            try:
+                response = executor(step_raw, session_id, inputs)
+
+                # Détecte un bloquant via la réponse (erreur explicite)
+                if response and any(
+                    marker in response.lower()
+                    for marker in ("erreur", "bloqué", "impossible", "échoué", "failed")
+                ):
+                    raise StepExecutionError(response[:200])
+
+                PlanStore.mark_done(plan, step_raw)
+                executed += 1
+
+            except Exception as e:
+                blocker = f"{step_clean} — {e}"
+                PlanStore.add_blocker(plan, blocker)
+                blocked = True
+                break
+
+        status = PlanStore.get_status(plan)
+        if blocked:
+            return (
+                f"Plan arrêté après {executed} étape(s). "
+                f"Bloquant enregistré dans `{plan.name}`. "
+                f"Statut : {status}"
+            )
+        if PlanStore.is_complete(plan):
+            return (
+                f"Plan terminé — {executed} étape(s) complétée(s). "
+                f"Statut : {status}"
+            )
+        return f"{executed} étape(s) exécutée(s). Plan en cours : `{plan.name}`."
+
+
+def check_active_plans() -> list[Path]:
+    """
+    Retourne les plans actifs (⏳ en cours).
+    Appelé au démarrage de session pour proposer la reprise.
+    """
+    return PlanStore.get_active()

@@ -12,7 +12,23 @@ GOAP-ready : CREW_REGISTRY est l'embryon d'ActionLibrary.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date as _date
+
+
+def _extract_hints(message: str) -> list[str]:
+    """
+    Extrait les noms de fichiers/modules mentionnés dans le message utilisateur.
+    Cherche les patterns : fichier.py, module_name, src/..., tests/...
+    """
+    hints = []
+    # Fichiers .py explicites
+    hints += re.findall(r'\b[\w/]+\.py\b', message)
+    # Chemins src/ ou tests/
+    hints += re.findall(r'\b(?:src|tests)/[\w/]+\b', message)
+    # Noms snake_case qui ressemblent à des modules (ex: memory_tools, plan_tools)
+    hints += re.findall(r'\b[a-z][a-z0-9]+(?:_[a-z0-9]+){1,}\b', message)
+    return list(dict.fromkeys(hints))[:5]  # déduplique, max 5
 
 from .context import RouterResult
 
@@ -115,20 +131,25 @@ def dispatch(
         return NoteWriterCrew().run({"user_message": user_message})
 
     if route == "plan":
-        # Phase 6 — PlannerCrew + ReconnaissanceCrew (étapes 4-5)
-        # needs_recon est transmis via metadata pour les handlers en aval.
-        try:
-            from Mnemo.crew import PlannerCrew
-            needs_recon = metadata.get("needs_recon", False)
-            return PlannerCrew().run({
-                **base_inputs,
-                "needs_recon": needs_recon,
+        from Mnemo.crew import PlannerCrew, ReconnaissanceCrew
+        needs_recon   = metadata.get("needs_recon", False)
+        recon_context = "(non disponible)"
+
+        # Si needs_recon : reconnaissance pré-planification
+        if needs_recon:
+            # Les hints sont extraits du message utilisateur (noms de modules/fichiers)
+            hints = _extract_hints(user_message)
+            recon_result  = ReconnaissanceCrew().run({
+                "goal":  user_message,
+                "hints": hints,
             })
-        except ImportError:
-            return (
-                "La planification (PlannerCrew) n'est pas encore disponible. "
-                "Peux-tu reformuler ta demande ?"
-            )
+            recon_context = recon_result.get("summary", "(non disponible)")
+
+        return PlannerCrew().run({
+            **base_inputs,
+            "needs_recon":   needs_recon,
+            "recon_context": recon_context,
+        })
 
     # Tous les autres crews (calendar, scheduler, briefing) — interface uniforme .run()
     crew_cls = registry.get(route)
