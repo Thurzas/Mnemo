@@ -863,44 +863,143 @@ class TestActionWeekly:
 # ══════════════════════════════════════════════════════════════════
 
 class TestDispatch:
+    """dispatch() — tâches système via goap_dispatch, tâches user via _ACTION_MAP."""
 
-    def test_dispatch_reminder(self, sched_env):
+    def test_dispatch_reminder_appelle_action_reminder(self, sched_env):
         from Mnemo.scheduler import dispatch
         task = {"action": "reminder", "payload": '{"message": "Test dispatch"}'}
         with patch("Mnemo.scheduler.action_reminder") as mock_fn:
             dispatch(task)
             mock_fn.assert_called_once()
 
-    def test_dispatch_briefing(self, sched_env):
+    def test_dispatch_briefing_passe_par_goap(self, sched_env):
         from Mnemo.scheduler import dispatch
         task = {"action": "briefing", "payload": "{}"}
-        with patch("Mnemo.scheduler.action_briefing") as mock_fn:
+        with patch("Mnemo.scheduler.goap_dispatch") as mock_goap:
             dispatch(task)
-            mock_fn.assert_called_once()
+            mock_goap.assert_called_once_with({"briefing_fresh": True})
 
-    def test_dispatch_weekly(self, sched_env):
+    def test_dispatch_weekly_passe_par_goap(self, sched_env):
         from Mnemo.scheduler import dispatch
         task = {"action": "weekly", "payload": "{}"}
-        with patch("Mnemo.scheduler.action_weekly") as mock_fn:
+        with patch("Mnemo.scheduler.goap_dispatch") as mock_goap:
             dispatch(task)
-            mock_fn.assert_called_once()
+            mock_goap.assert_called_once_with({"weekly_generated": True})
 
-    def test_dispatch_deadline_alert(self, sched_env):
+    def test_dispatch_deadline_alert_passe_par_goap(self, sched_env):
         from Mnemo.scheduler import dispatch
         task = {"action": "deadline_alert", "payload": "{}"}
-        with patch("Mnemo.scheduler.action_deadline_alert") as mock_fn:
+        with patch("Mnemo.scheduler.goap_dispatch") as mock_goap:
             dispatch(task)
-            mock_fn.assert_called_once()
+            mock_goap.assert_called_once_with({"deadline_alerts_sent": True})
 
     def test_dispatch_action_inconnue_ne_plante_pas(self, sched_env):
         from Mnemo.scheduler import dispatch
-        dispatch({"action": "action_inexistante", "payload": "{}"})  # ne doit pas lever
+        dispatch({"action": "action_inexistante", "payload": "{}"})
 
     def test_dispatch_payload_malformed_ne_plante_pas(self, sched_env):
         from Mnemo.scheduler import dispatch
         task = {"action": "reminder", "payload": "pas du json {{{"}
         with patch("Mnemo.scheduler.action_reminder"):
-            dispatch(task)  # ne doit pas lever
+            dispatch(task)
+
+
+class TestGOAPDispatch:
+    """goap_dispatch() — orchestration GOAP dans le contexte scheduler."""
+
+    def test_goal_deja_atteint_aucune_action(self, sched_env):
+        from Mnemo.scheduler import goap_dispatch
+        # briefing_fresh=True dans le world state → aucune action
+        with patch("Mnemo.scheduler._build_scheduler_world_state",
+                   return_value={"briefing_fresh": True,
+                                 "calendar_fetched": True,
+                                 "memory_synced": True,
+                                 "memory_gaps_known": True,
+                                 "user_online": False,
+                                 "weekly_generated": False,
+                                 "deadline_alerts_sent": False,
+                                 "memory_blocking_gaps": False,
+                                 "knows_module": False}), \
+             patch("Mnemo.scheduler.action_briefing") as mock_briefing:
+            goap_dispatch({"briefing_fresh": True})
+        assert not mock_briefing.called
+
+    def test_briefing_appelle_executeurs_dans_l_ordre(self, sched_env):
+        from Mnemo.scheduler import goap_dispatch
+        ws = {
+            "briefing_fresh":       False,
+            "calendar_fetched":     True,   # déjà ok
+            "memory_synced":        True,   # déjà ok
+            "memory_gaps_known":    True,   # déjà ok
+            "memory_blocking_gaps": False,
+            "user_online":          False,
+            "weekly_generated":     False,
+            "deadline_alerts_sent": False,
+            "knows_module":         False,
+        }
+        called = []
+        with patch("Mnemo.scheduler._build_scheduler_world_state", return_value=ws), \
+             patch.dict("Mnemo.scheduler._SCHEDULER_EXECUTORS", {
+                 "GenerateBriefing": lambda: called.append("GenerateBriefing"),
+             }):
+            goap_dispatch({"briefing_fresh": True})
+        assert "GenerateBriefing" in called
+
+    def test_fetch_calendar_insere_si_absent(self, sched_env):
+        from Mnemo.scheduler import goap_dispatch
+        ws = {
+            "briefing_fresh":       False,
+            "calendar_fetched":     False,  # manquant
+            "memory_synced":        True,
+            "memory_gaps_known":    True,
+            "memory_blocking_gaps": False,
+            "user_online":          False,
+            "weekly_generated":     False,
+            "deadline_alerts_sent": False,
+            "knows_module":         False,
+        }
+        called = []
+        with patch("Mnemo.scheduler._build_scheduler_world_state", return_value=ws), \
+             patch.dict("Mnemo.scheduler._SCHEDULER_EXECUTORS", {
+                 "FetchCalendar":    lambda: called.append("FetchCalendar"),
+                 "GenerateBriefing": lambda: called.append("GenerateBriefing"),
+             }):
+            goap_dispatch({"briefing_fresh": True})
+        assert "FetchCalendar" in called
+        assert called.index("FetchCalendar") < called.index("GenerateBriefing")
+
+    def test_fill_blocking_gaps_non_execute_sans_user(self, sched_env):
+        """user_online=False → FillBlockingGaps jamais dans le plan."""
+        from Mnemo.scheduler import goap_dispatch
+        ws = {
+            "briefing_fresh":       False,
+            "calendar_fetched":     True,
+            "memory_synced":        True,
+            "memory_gaps_known":    True,
+            "memory_blocking_gaps": True,   # gaps bloquants présents
+            "user_online":          False,  # pas d'utilisateur
+            "weekly_generated":     False,
+            "deadline_alerts_sent": False,
+            "knows_module":         False,
+        }
+        called = []
+        with patch("Mnemo.scheduler._build_scheduler_world_state", return_value=ws), \
+             patch.dict("Mnemo.scheduler._SCHEDULER_EXECUTORS", {
+                 "FillBlockingGaps": lambda: called.append("FillBlockingGaps"),
+                 "GenerateBriefing": lambda: called.append("GenerateBriefing"),
+             }):
+            goap_dispatch({"briefing_fresh": True})
+        # FillBlockingGaps ne doit jamais être appelé (user_online=False)
+        assert "FillBlockingGaps" not in called
+        assert "GenerateBriefing" in called
+
+    def test_goal_inatteignable_ne_plante_pas(self, sched_env):
+        """PlanningError loggée sans lever d'exception vers la boucle."""
+        from Mnemo.scheduler import goap_dispatch
+        ws = {"user_online": False}
+        # goal inatteignable depuis ce world state
+        with patch("Mnemo.scheduler._build_scheduler_world_state", return_value=ws):
+            goap_dispatch({"cle_inexistante": True})  # ne doit pas lever
 
 
 # ══════════════════════════════════════════════════════════════════
