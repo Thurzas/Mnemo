@@ -26,7 +26,9 @@ def init_db(db_path: Path = None):
             updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
             source_line      INTEGER,
             importance_weight REAL DEFAULT 1.0,
-            category         TEXT DEFAULT 'connaissance'
+            category         TEXT DEFAULT 'connaissance',
+            use_count        INTEGER  DEFAULT 0,
+            last_used_at     DATETIME
         );
 
         CREATE TABLE IF NOT EXISTS embeddings (
@@ -117,6 +119,18 @@ def init_db(db_path: Path = None):
             tokenize = "unicode61"
         );
 
+        -- ── Phase 5.3 : Mémoire procédurale — tracking d'usage des chunks ──
+        -- used_score : similarité cosinus réponse/chunk (0.0–1.0)
+        -- confirmed  : 1 si used_score > USAGE_THRESHOLD (défaut 0.60)
+        CREATE TABLE IF NOT EXISTS chunk_usage (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            chunk_id     TEXT     REFERENCES chunks(id) ON DELETE CASCADE,
+            session_id   TEXT,
+            retrieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            used_score   REAL,
+            confirmed    INTEGER  DEFAULT 0
+        );
+
         -- ── CuriosityCrew — questions skippées ────────────────────────
         CREATE TABLE IF NOT EXISTS curiosity_skipped (
             id          TEXT PRIMARY KEY,
@@ -201,6 +215,17 @@ def migrate_db(db_path: Path = None):
             id          TEXT PRIMARY KEY,
             question    TEXT NOT NULL,
             skipped_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        # Phase 5.3 — mémoire procédurale
+        "ALTER TABLE chunks ADD COLUMN use_count    INTEGER  DEFAULT 0",
+        "ALTER TABLE chunks ADD COLUMN last_used_at DATETIME",
+        """CREATE TABLE IF NOT EXISTS chunk_usage (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            chunk_id     TEXT     REFERENCES chunks(id) ON DELETE CASCADE,
+            session_id   TEXT,
+            retrieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            used_score   REAL,
+            confirmed    INTEGER  DEFAULT 0
         )""",
         # Scheduler
         """CREATE TABLE IF NOT EXISTS scheduled_tasks (

@@ -4,6 +4,7 @@ import sqlite3
 import numpy as np
 import ollama
 import os
+from dataclasses import dataclass, field
 # Client Ollama explicite — lit OLLAMA_HOST ou API_BASE depuis l'env.
 # Sans ça, le client Python se connecte toujours à localhost:11434
 # ce qui échoue dans un conteneur Docker où Ollama est sur l'hôte.
@@ -47,7 +48,19 @@ def _sessions_dir() -> Path:
 EMBED_MODEL   = "nomic-embed-text"
 TOP_K_SEARCH  = 10
 TOP_K_FINAL   = 5
-HALF_LIFE_DAYS = 30.0  # Fraîcheur : un chunk vieux de 30j a un score de ~0.37
+
+# Demi-vie par catégorie (en jours) — remplace l'ancien HALF_LIFE_DAYS unique de 30j
+HALF_LIFE_BY_CATEGORY: dict[str, float] = {
+    "identité":           365.0,  # change rarement — stable sur des années
+    "décision":           180.0,
+    "projet":              90.0,
+    "préférence":          90.0,
+    "connaissance":        60.0,
+    "historique_session":  14.0,  # périme vite
+}
+
+# Un chunk ne descend jamais sous ce score de fraîcheur (évite l'écrasement multiplicatif)
+FRESHNESS_FLOOR = 0.15
 
 # Poids statiques par catégorie — ajustables selon tes préférences
 CATEGORY_WEIGHTS: dict[str, float] = {
@@ -57,6 +70,42 @@ CATEGORY_WEIGHTS: dict[str, float] = {
     "préférence":         1.1,  # habitudes, style de communication
     "connaissance":       1.0,  # faits appris en session (défaut)
     "historique_session": 0.7,  # résumés de sessions passées
+}
+
+
+# ── Phase 5.3 — Buffer de retrieval du tour courant ──────────────
+# Vidé par handle_message() avant chaque kickoff ConversationCrew.
+# Rempli par RetrieveMemoryTool._run() pendant l'exécution de l'agent.
+# Lu par handle_message() après le kickoff pour persister les IDs dans le session JSON.
+_retrieved_this_turn: list[dict] = []
+
+
+@dataclass
+class WeightProfile:
+    """Profil de pondération contextuel — passé à retrieve_all() selon le crew appelant."""
+    category_overrides:   dict[str, float] = field(default_factory=dict)
+    half_life_multiplier: float = 1.0       # < 1 → decay plus rapide, > 1 → plus lent
+    freshness_floor:      float = FRESHNESS_FLOOR
+    top_k_override:       int | None = None  # None → utilise top_k_final du caller
+
+
+PROFILES: dict[str, WeightProfile] = {
+    "conversation": WeightProfile(),
+    "briefing": WeightProfile(
+        category_overrides   = {"historique_session": 2.0, "projet": 1.5, "décision": 1.3},
+        half_life_multiplier = 0.25,   # fraîcheur très privilégiée
+        freshness_floor      = 0.30,   # les vieux chunks sont vraiment écartés
+        top_k_override       = 8,      # le briefing a besoin de plus de contexte
+    ),
+    "curiosity": WeightProfile(
+        category_overrides = {"identité": 2.5, "préférence": 2.0},
+    ),
+    "scheduler": WeightProfile(
+        category_overrides = {"décision": 1.8, "projet": 1.6},
+    ),
+    "shell": WeightProfile(
+        category_overrides = {"projet": 1.4, "décision": 1.2},
+    ),
 }
 
 
@@ -100,18 +149,21 @@ def build_chunk_text(section: str, subsection: str, content: str) -> str:
 # Pondération — fraîcheur & importance
 # ══════════════════════════════════════════════════════════════
 
-def freshness_score(updated_at: str, half_life_days: float = HALF_LIFE_DAYS) -> float:
+def freshness_score(updated_at: str, category: str = "connaissance",
+                    half_life_multiplier: float = 1.0) -> float:
     """
-    Score de fraîcheur entre 0 et 1, décroissance exponentielle.
-    half_life_days=30 → chunk vieux de 30j = 0.37, 60j = 0.14, 90j = 0.05.
-    Configurable via HALF_LIFE_DAYS en tête de fichier.
+    Score de fraîcheur entre 0 et 1, décroissance exponentielle par catégorie.
+    Demi-vies : identité=365j · connaissance=60j · historique_session=14j.
+    half_life_multiplier < 1 accélère le decay (ex: profil briefing = 0.25).
     """
+    half_life = HALF_LIFE_BY_CATEGORY.get(category, HALF_LIFE_BY_CATEGORY["connaissance"])
+    half_life *= half_life_multiplier
     try:
         updated = datetime.fromisoformat(updated_at)
     except (ValueError, TypeError):
         return 1.0  # Pas de date → on ne pénalise pas
     age_days = max(0, (datetime.now() - updated).days)
-    return math.exp(-age_days / half_life_days)
+    return math.exp(-age_days / half_life)
 
 
 def importance_score(category: str, weight: float | None = None) -> float:
@@ -194,11 +246,24 @@ def search_vector(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH)
 
 
 def adaptive_weights(query: str) -> tuple[float, float]:
-    return (0.6, 0.4) if len(query.split()) <= 2 else (0.3, 0.7)
+    """
+    Poids FTS/vector selon la longueur de la query.
+    Interpolation linéaire : 1 mot → (0.70, 0.30) · 10+ mots → (0.25, 0.75).
+    """
+    n   = len(query.split())
+    t   = min(n / 10.0, 1.0)
+    w_kw = round(0.70 - 0.45 * t, 3)
+    return (w_kw, round(1.0 - w_kw, 3))
 
 
-def reciprocal_rank_fusion(kw: list[dict], vec: list[dict], k: int = 60) -> list[dict]:
-    w_fts, w_vec = adaptive_weights(" ".join(c["content"] for c in kw[:1]))
+def reciprocal_rank_fusion(kw: list[dict], vec: list[dict],
+                           query: str = "", k: int = 60,
+                           profile: WeightProfile | None = None) -> list[dict]:
+    p = profile or PROFILES["conversation"]
+    w_fts, w_vec = adaptive_weights(query)
+    # Priorité : profil override > poids appris > poids statiques
+    effective_cat_weights = {**CATEGORY_WEIGHTS, **_load_learned_weights(), **p.category_overrides}
+
     scores: dict[str, float] = {}
     all_chunks: dict[str, dict] = {}
 
@@ -213,15 +278,27 @@ def reciprocal_rank_fusion(kw: list[dict], vec: list[dict], k: int = 60) -> list
 
     results = []
     for cid, rrf_score in scores.items():
-        chunk      = all_chunks[cid]
-        importance = importance_score(chunk.get("category"), chunk.get("importance_weight"))
-        freshness  = freshness_score(chunk.get("updated_at", datetime.now().isoformat()))
+        chunk = all_chunks[cid]
+        cat   = chunk.get("category") or "connaissance"
+
+        # Importance : poids explicite DB > catégorie effective (base + overrides profil)
+        explicit = chunk.get("importance_weight")
+        imp = explicit if explicit is not None else effective_cat_weights.get(cat, 1.0)
+
+        # Fraîcheur : demi-vie par catégorie × multiplicateur profil, plancher garanti
+        freshness = max(
+            freshness_score(chunk.get("updated_at", datetime.now().isoformat()),
+                            category=cat,
+                            half_life_multiplier=p.half_life_multiplier),
+            p.freshness_floor,
+        )
+
         results.append({
             **chunk,
-            "score_rrf":       rrf_score,
-            "score_importance": importance,
+            "score_rrf":        rrf_score,
+            "score_importance": imp,
             "score_freshness":  freshness,
-            "score_final":      rrf_score * importance * freshness,
+            "score_final":      rrf_score * imp * freshness,
         })
 
     results.sort(key=lambda x: x["score_final"], reverse=True)
@@ -233,21 +310,26 @@ def retrieve(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     db = get_db()
     kw  = search_keyword(db, query)
     vec = search_vector(db, query)
-    merged = reciprocal_rank_fusion(kw, vec)
+    merged = reciprocal_rank_fusion(kw, vec, query=query)
     db.close()
     return merged[:top_k_final]
 
 
-def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
+def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL,
+                 profile: str = "conversation") -> list[dict]:
     """
     Recherche hybride globale : mémoire personnelle + documents ingérés.
     Fusionne les deux sources via RRF avant de retourner le top_k_final.
 
+    profile : clé dans PROFILES — ajuste les poids catégorie, demi-vies et top_k.
     Les chunks mémoire et les doc_chunks sont normalisés dans le même format
     avant la fusion — le champ 'source_type' permet de les distinguer dans le prompt.
     """
     # Import ici pour éviter la dépendance circulaire (ingest_tools importe memory_tools)
     from Mnemo.tools.ingest_tools import search_docs_keyword, search_docs_vector
+
+    p = PROFILES.get(profile, PROFILES["conversation"])
+    effective_top_k = p.top_k_override or top_k_final
 
     db = get_db()
 
@@ -267,13 +349,13 @@ def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     db.close()
 
     # ── Fusion RRF globale ─────────────────────────────────────
-    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem)
-    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc)
+    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem, query=query, profile=p)
+    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc, query=query, profile=p)
 
     all_results = merged_mem + merged_doc
     all_results.sort(key=lambda x: x["score_final"], reverse=True)
 
-    return all_results[:top_k_final]
+    return all_results[:effective_top_k]
 
 
 def format_chunks_for_prompt(chunks: list[dict]) -> str:
@@ -289,6 +371,195 @@ def format_chunks_for_prompt(chunks: list[dict]) -> str:
             header = f"[🧠 {c.get('section', '')} > {c.get('subsection', '')}]"
         parts.append(f"{header}\n{c['content']}")
     return "\n\n---\n\n".join(parts) if parts else "Aucun souvenir pertinent trouvé."
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 5.3 — Scoring d'usage des chunks (mémoire procédurale)
+# ══════════════════════════════════════════════════════════════
+
+USAGE_THRESHOLD = 0.60  # similarité cosinus min pour considérer un chunk "utilisé"
+
+
+def score_and_record_chunk_usage(session: dict, session_id: str) -> None:
+    """
+    Appelé en fin de session (end_session), après ConsolidationCrew.
+    Pour chaque tour agent avec retrieved_chunk_ids :
+      1. Embed la réponse agent
+      2. Calcule cosine_similarity(response_vec, chunk_vec) pour chaque chunk récupéré
+      3. Insère dans chunk_usage
+      4. Met à jour chunks.use_count + last_used_at pour les chunks confirmés
+    Silencieux sur les tours sans retrieved_chunk_ids (sessions pré-5.3 ou non-conversation).
+    """
+    messages = session.get("messages", [])
+    if not messages:
+        return
+
+    db   = get_db()
+    now  = datetime.now().isoformat()
+
+    try:
+        for msg in messages:
+            if msg.get("role") != "agent":
+                continue
+            chunk_ids = msg.get("retrieved_chunk_ids")
+            if not chunk_ids:
+                continue
+
+            response_text = msg.get("content", "").strip()
+            if not response_text:
+                continue
+
+            # Embed la réponse — peut échouer si Ollama est offline (fin de session)
+            try:
+                response_vec = embed(response_text, prefix="search_document")
+            except Exception:
+                continue
+
+            for chunk_id in chunk_ids:
+                # Récupère le vecteur du chunk depuis la DB
+                row = db.execute(
+                    "SELECT vector FROM embeddings WHERE chunk_id = ?", (chunk_id,)
+                ).fetchone()
+                if row is None:
+                    continue
+
+                chunk_vec  = np.frombuffer(row[0], dtype=np.float32)
+                score      = float(cosine_similarity(response_vec, chunk_vec))
+                confirmed  = 1 if score >= USAGE_THRESHOLD else 0
+
+                db.execute(
+                    "INSERT INTO chunk_usage (chunk_id, session_id, retrieved_at, used_score, confirmed)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (chunk_id, session_id, now, score, confirmed),
+                )
+
+                if confirmed:
+                    db.execute(
+                        "UPDATE chunks SET use_count = use_count + 1, last_used_at = ?"
+                        " WHERE id = ?",
+                        (now, chunk_id),
+                    )
+
+        db.commit()
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 5.4 — Active learning sur les poids
+# ══════════════════════════════════════════════════════════════
+
+MIN_SESSIONS  = 20    # sessions minimum avant toute adaptation
+LEARNING_RATE = 0.15  # amortissement — max 15% de changement par cycle
+WEIGHT_MIN    = 0.30  # plancher absolu
+WEIGHT_MAX    = 3.00  # plafond absolu
+MIN_RETRIEVED = 10    # nb minimum de retrievals pour qu'une catégorie soit ajustée
+
+
+def compute_category_stats(db: sqlite3.Connection) -> dict[str, dict]:
+    """
+    Lit chunk_usage JOIN chunks et retourne par catégorie :
+      retrieved : nb de fois récupéré
+      confirmed : nb de fois utilisé (confirmed=1)
+      utility   : confirmed / retrieved  (0.0 si retrieved == 0)
+    """
+    rows = db.execute("""
+        SELECT c.category,
+               COUNT(*)                                    AS retrieved,
+               SUM(cu.confirmed)                           AS confirmed
+        FROM chunk_usage cu
+        JOIN chunks c ON cu.chunk_id = c.id
+        GROUP BY c.category
+    """).fetchall()
+
+    stats: dict[str, dict] = {}
+    for category, retrieved, confirmed in rows:
+        cat = category or "connaissance"
+        stats[cat] = {
+            "retrieved": retrieved,
+            "confirmed": int(confirmed or 0),
+            "utility":   (confirmed or 0) / retrieved if retrieved else 0.0,
+        }
+    return stats
+
+
+def suggest_weight_adjustments(stats: dict[str, dict],
+                                current_weights: dict[str, float]) -> dict[str, float]:
+    """
+    Calcule les nouveaux poids par catégorie.
+    Principe : nudge proportionnel à l'écart entre l'utilité observée et la baseline.
+      baseline  = utilité moyenne toutes catégories avec retrieved >= MIN_RETRIEVED
+      gap       = utility(cat) / baseline
+      new_weight = old_weight × (1 + LEARNING_RATE × (gap - 1))
+    Clampé entre WEIGHT_MIN et WEIGHT_MAX.
+    Catégories avec retrieved < MIN_RETRIEVED : inchangées.
+    """
+    eligible = {
+        cat: s for cat, s in stats.items()
+        if s["retrieved"] >= MIN_RETRIEVED
+    }
+    if not eligible:
+        return dict(current_weights)
+
+    baseline = sum(s["utility"] for s in eligible.values()) / len(eligible)
+    if baseline == 0:
+        return dict(current_weights)
+
+    new_weights = dict(current_weights)
+    for cat, s in eligible.items():
+        old = current_weights.get(cat, 1.0)
+        gap = s["utility"] / baseline
+        adjusted = old * (1.0 + LEARNING_RATE * (gap - 1.0))
+        new_weights[cat] = round(max(WEIGHT_MIN, min(WEIGHT_MAX, adjusted)), 4)
+
+    return new_weights
+
+
+def _load_learned_weights() -> dict[str, float]:
+    """
+    Charge learned_weights.json depuis data_dir si présent.
+    Retourne {} en cas d'absence ou d'erreur (fallback silencieux sur CATEGORY_WEIGHTS).
+    """
+    path = get_data_dir() / "learned_weights.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {k: float(v) for k, v in data.get("weights", {}).items()}
+    except Exception:
+        return {}
+
+
+def adapt_weights_if_ready() -> bool:
+    """
+    Vérifie si on a suffisamment de données (MIN_SESSIONS sessions avec chunk_usage),
+    calcule les nouveaux poids et écrit learned_weights.json.
+    Retourne True si une adaptation a été effectuée, False sinon.
+    """
+    db = get_db()
+    try:
+        session_count = db.execute(
+            "SELECT COUNT(DISTINCT session_id) FROM chunk_usage"
+        ).fetchone()[0]
+
+        if session_count < MIN_SESSIONS:
+            return False
+
+        stats       = compute_category_stats(db)
+        new_weights = suggest_weight_adjustments(stats, CATEGORY_WEIGHTS)
+
+        path = get_data_dir() / "learned_weights.json"
+        path.write_text(
+            json.dumps({
+                "updated_at":        datetime.now().isoformat(),
+                "sessions_analyzed": session_count,
+                "weights":           new_weights,
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return True
+    finally:
+        db.close()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -559,7 +830,8 @@ def load_session_json(session_id: str) -> dict:
         return {}
 
 
-def update_session_memory(session_id: str, user_message: str, agent_response: str):
+def update_session_memory(session_id: str, user_message: str, agent_response: str,
+                          retrieved_chunk_ids: list[str] | None = None):
     session = load_session_json(session_id)
     session.setdefault("session_id", session_id)
     session.setdefault("messages", [])
@@ -568,7 +840,10 @@ def update_session_memory(session_id: str, user_message: str, agent_response: st
     session.setdefault("to_persist", [])
     # Sanitize avant écriture — certains modèles Ollama retournent des surrogates invalides
     session["messages"].append({"role": "user", "content": sanitize_str(user_message)})
-    session["messages"].append({"role": "agent", "content": sanitize_str(agent_response)})
+    agent_msg: dict = {"role": "agent", "content": sanitize_str(agent_response)}
+    if retrieved_chunk_ids:
+        agent_msg["retrieved_chunk_ids"] = retrieved_chunk_ids
+    session["messages"].append(agent_msg)
     path = _sessions_dir() / f"{session_id}.json"
     path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -663,9 +938,12 @@ class RetrieveMemoryTool(BaseTool):
         "Les résultats indiquent leur source : 🧠 = mémoire personnelle, 📄 = document."
     )
     args_schema: Type[BaseModel] = RetrieveMemoryInput
+    profile: str = "conversation"  # profil de pondération contextuel
 
     def _run(self, query: str) -> str:
-        chunks = retrieve_all(query)
+        global _retrieved_this_turn
+        chunks = retrieve_all(query, profile=self.profile)
+        _retrieved_this_turn.extend(chunks)
         return format_chunks_for_prompt(chunks)
 
 

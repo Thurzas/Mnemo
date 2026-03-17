@@ -296,7 +296,8 @@ class TestHandleMessage:
              patch.object(mn, "get_temporal_context", return_value="ctx"), \
              patch.object(mn, "update_session_memory") as mock_update:
             mn.handle_message("test", "session_42")
-        mock_update.assert_called_once_with("session_42", "test", "réponse")
+        mock_update.assert_called_once_with("session_42", "test", "réponse",
+                                             retrieved_chunk_ids=None)
 
     def test_unknown_route_silently_handled(self):
         """Route inconnue → dispatch gère le fallback, pas d'exception."""

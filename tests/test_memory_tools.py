@@ -25,8 +25,7 @@ from Mnemo.tools.memory_tools import (
     update_session_memory,
     get_file_hash,
     CATEGORY_WEIGHTS,
-    HALF_LIFE_DAYS,
-    SESSIONS_DIR,
+    HALF_LIFE_BY_CATEGORY,
 )
 
 
@@ -62,10 +61,10 @@ Stack : CrewAI, SQLite, nomic-embed-text, Ollama en Docker.
 
 @pytest.fixture
 def tmp_session_dir(tmp_path: Path, monkeypatch) -> Path:
-    """Dossier sessions temporaire, remplace SESSIONS_DIR globalement."""
+    """Dossier sessions temporaire — patch get_data_dir pour pointer sur tmp_path."""
     sessions = tmp_path / "sessions"
     sessions.mkdir()
-    monkeypatch.setattr("Mnemo.tools.memory_tools.SESSIONS_DIR", sessions)
+    monkeypatch.setattr("Mnemo.tools.memory_tools.get_data_dir", lambda: tmp_path)
     return sessions
 
 
@@ -166,15 +165,17 @@ class TestFreshnessScore:
         assert score > 0.99
 
     def test_score_demi_vie_environ_0_37(self):
-        """À t = half_life_days, le score doit être ≈ e^-1 ≈ 0.368."""
-        past = (datetime.now() - timedelta(days=HALF_LIFE_DAYS)).isoformat()
-        score = freshness_score(past)
+        """À t = half_life(connaissance), le score doit être ≈ e^-1 ≈ 0.368."""
+        half_life = HALF_LIFE_BY_CATEGORY["connaissance"]
+        past = (datetime.now() - timedelta(days=half_life)).isoformat()
+        score = freshness_score(past, category="connaissance")
         assert abs(score - math.exp(-1)) < 0.01
 
     def test_score_double_demi_vie(self):
-        """À t = 2 × half_life_days, score ≈ e^-2 ≈ 0.135."""
-        past = (datetime.now() - timedelta(days=HALF_LIFE_DAYS * 2)).isoformat()
-        score = freshness_score(past)
+        """À t = 2 × half_life(connaissance), score ≈ e^-2 ≈ 0.135."""
+        half_life = HALF_LIFE_BY_CATEGORY["connaissance"]
+        past = (datetime.now() - timedelta(days=half_life * 2)).isoformat()
+        score = freshness_score(past, category="connaissance")
         assert abs(score - math.exp(-2)) < 0.01
 
     def test_score_entre_0_et_1(self):
@@ -195,14 +196,13 @@ class TestFreshnessScore:
     def test_date_none_retourne_1(self):
         assert freshness_score(None) == 1.0
 
-    def test_half_life_personnalise(self):
-        """Vérifier que le paramètre half_life_days est bien pris en compte."""
+    def test_half_life_multiplier_personnalise(self):
+        """half_life_multiplier < 1 accélère le decay → score plus bas."""
         past = (datetime.now() - timedelta(days=10)).isoformat()
-        score_30 = freshness_score(past, half_life_days=30)
-        score_10 = freshness_score(past, half_life_days=10)
-        # Avec half_life=10, le chunk de 10j est à ≈0.37 (demi-vie atteinte)
-        # Avec half_life=30, le même chunk est encore plus frais
-        assert score_30 > score_10
+        score_normal = freshness_score(past, category="connaissance", half_life_multiplier=1.0)
+        score_accel  = freshness_score(past, category="connaissance", half_life_multiplier=0.25)
+        # Demi-vie réduite à 15j → le chunk de 10j est plus « périmé »
+        assert score_normal > score_accel
 
 
 # ══════════════════════════════════════════════════════════════

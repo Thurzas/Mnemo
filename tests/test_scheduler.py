@@ -62,8 +62,7 @@ def db_env(tmp_path, monkeypatch):
     conn.close()
 
     import Mnemo.tools.scheduler_tasks as st
-    monkeypatch.setattr(st, "DB_PATH",  db_path)
-    monkeypatch.setattr(st, "TASKS_MD", tasks_md)
+    monkeypatch.setattr(st, "get_data_dir", lambda: tmp_path)
 
     return {"db": db_path, "md": tasks_md, "tmp": tmp_path}
 
