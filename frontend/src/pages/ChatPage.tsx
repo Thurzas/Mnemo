@@ -20,6 +20,32 @@ type WsStatus = 'connecting' | 'ready' | 'error'
 const SID_KEY = 'mnemo_sid'
 const WS_URL  = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/message`
 
+// ── TTS helpers ────────────────────────────────────────────────────
+
+/** Supprime les éléments markdown qui rendraient la synthèse bizarre. */
+function cleanForTts(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')                      // blocs de code
+    .replace(/`[^`]*`/g, '')                              // code inline
+    .replace(/#{1,6}\s*/g, '')                            // titres
+    .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, '$1')           // gras / italique
+    .replace(/_{1,3}([^_\n]+)_{1,3}/g, '$1')             // soulignement
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')             // liens → texte seul
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')                 // images
+    .trim()
+}
+
+/**
+ * Découpe un texte en phrases jouables.
+ * Chaque phrase doit faire ≥ 4 caractères pour éviter les artefacts Piper.
+ */
+function splitSentences(text: string): string[] {
+  const cleaned = cleanForTts(text)
+  // Coupe après . ! ? suivi d'un espace, ou sur double saut de ligne
+  const parts = cleaned.split(/(?<=[.!?…])\s+|\n{2,}/)
+  return parts.map(s => s.trim()).filter(s => s.length >= 4)
+}
+
 export function ChatPage() {
   const [messages, setMessages]       = useState<Message[]>([
     { role: 'mnemo', content: 'Bonjour. Comment puis-je t\'aider ?' },
@@ -40,6 +66,8 @@ export function ChatPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef   = useRef<Blob[]>([])
   const ttsEnabledRef    = useRef(false)
+  const ttsAbortRef      = useRef<AbortController | null>(null)
+  const currentAudioRef  = useRef<HTMLAudioElement | null>(null)
 
   // Keep ref in sync with state (readable inside WS callbacks without closure stale issue)
   useEffect(() => { ttsEnabledRef.current = ttsEnabled }, [ttsEnabled])
@@ -199,14 +227,57 @@ export function ChatPage() {
   // ── TTS ──────────────────────────────────────────────────────────
 
   const playTts = useCallback(async (text: string) => {
-    try {
-      const blob = await api.tts(text)
+    // Interrompt toute lecture en cours (message précédent)
+    ttsAbortRef.current?.abort()
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause()
+      currentAudioRef.current.src = ''
+      currentAudioRef.current = null
+    }
+
+    const abort = new AbortController()
+    ttsAbortRef.current = abort
+
+    const sentences = splitSentences(text)
+    if (sentences.length === 0) return
+
+    // Pool de concurrence : prefetch 1 phrase en avance seulement.
+    // Pendant que la phrase N est en cours de lecture, la phrase N+1 se
+    // télécharge en arrière-plan. On n'envoie JAMAIS plus de 2 requêtes
+    // simultanées au serveur — évite la race condition sur le singleton Kokoro.
+    let nextFetch: Promise<Blob | null> = api.tts(sentences[0]).catch(() => null)
+
+    for (let i = 0; i < sentences.length; i++) {
+      if (abort.signal.aborted) break
+
+      const fetchPromise = nextFetch
+      // Lance le prefetch de la phrase suivante dès que la requête courante est en vol
+      nextFetch = i + 1 < sentences.length
+        ? api.tts(sentences[i + 1]).catch(() => null)
+        : Promise.resolve(null)
+
+      let blob: Blob | null
+      try { blob = await fetchPromise } catch { blob = null }
+      if (!blob || abort.signal.aborted) continue
+
       const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      audio.onended = () => URL.revokeObjectURL(url)
-      await audio.play()
-    } catch {
-      // TTS errors are non-critical — silent fail
+      await new Promise<void>(resolve => {
+        const audio = new Audio(url)
+        currentAudioRef.current = audio
+        const cleanup = () => {
+          URL.revokeObjectURL(url)
+          if (currentAudioRef.current === audio) currentAudioRef.current = null
+          resolve()
+        }
+        audio.onended = cleanup
+        audio.onerror = cleanup
+        abort.signal.addEventListener('abort', () => {
+          audio.pause()
+          audio.src = ''
+          cleanup()
+        }, { once: true })
+        audio.play().catch(cleanup)
+      })
     }
   }, [])
 

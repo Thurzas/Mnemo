@@ -36,10 +36,13 @@ import asyncio
 import contextvars
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
 import uuid
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -64,6 +67,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Nouveau fichier → 600 (rw-------), nouveau répertoire → 700 (rwx------)
 # Protège les données utilisateurs contre les autres comptes OS sur l'hôte.
 os.umask(0o077)
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
 
@@ -186,106 +191,63 @@ def _handle_message_web(
 ) -> str | dict:
     """
     Variante de handle_message sans stdin — destinée à l'API web.
-
-    Différences vs handle_message() :
-    - route=shell          → refus explicite (sécurité)
-    - needs_clarification  → ignoré (pas d'input utilisateur possible)
+    Utilise la même CoR que le CLI (build_router) avec des adaptations web :
+    - route=shell          → refus explicite (sécurité, pas de confirmation possible)
+    - needs_clarification  → ignoré
     - needs_web=True       → retourne {"__web_confirm__": True, "web_query": ...}
                              si web_confirmed is None (premier appel).
                              Si web_confirmed=True  → lance la recherche.
                              Si web_confirmed=False → skip la recherche.
     """
-    from Mnemo.main import (
-        _parse_eval_json,
-        _route_message,
-        _detect_shell_intent,
-        _detect_calendar_write_intent,
-        _detect_note_intent,
-        _detect_scheduler_intent,
-        _ml_detect_intent,
-    )
-    from Mnemo.crew import EvaluationCrew
+    from Mnemo.routing import build_router, RouterContext, dispatch
+    from Mnemo.routing.handlers.keyword import _detect_shell_intent
+    from Mnemo.routing.context import RouterResult
     from Mnemo.tools.memory_tools import update_session_memory
     from Mnemo.tools.calendar_tools import get_temporal_context
 
     temporal_ctx = get_temporal_context()
 
-    # Sécurité rapide : keywords shell → refus immédiat sans LLM
+    # Sécurité rapide : keywords shell → refus immédiat sans passer par la CoR
     if _detect_shell_intent(user_message):
         return _SHELL_BLOCKED
 
-    # ML pre-check : shell à haute confiance → refus
-    ml_route, ml_conf = _ml_detect_intent(user_message)
-    if ml_route == "shell" and ml_conf >= 0.80:
+    # Routing via la chaîne de responsabilité
+    ctx    = RouterContext(message=user_message, session_id=session_id, temporal_context=temporal_ctx)
+    router = build_router()
+    result = router.handle(ctx)
+
+    if result is None:
+        result = RouterResult("conversation", 0.0, "fallback")
+
+    # API : shell toujours bloqué, même si le ML/LLM l'a choisi
+    if result.route == "shell":
         return _SHELL_BLOCKED
 
-    # Pre-check note : keywords forts → bypass LLM
-    if _detect_note_intent(user_message):
-        eval_json = {"route": "note", "needs_memory": False, "needs_web": False,
-                     "needs_clarification": False, "_web_mode": True}
-        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
-        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
-        update_session_memory(session_id, user_message, response)
-        return response
-
-    # Pre-check scheduler : keywords forts → bypass LLM
-    kw_scheduler_strong, kw_scheduler_weak = _detect_scheduler_intent(user_message)
-    if kw_scheduler_strong:
-        eval_json = {"route": "scheduler", "needs_memory": False, "needs_web": False,
-                     "needs_clarification": False, "_web_mode": True}
-        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
-        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
-        update_session_memory(session_id, user_message, response)
-        return response
-
-    # Pre-check calendar : keywords → force route=calendar sans passer par le LLM
-    kw_calendar = _detect_calendar_write_intent(user_message)
-    ml_calendar  = ml_route == "calendar" and ml_conf >= 0.92
-
-    if kw_calendar or ml_calendar:
-        eval_json = {"route": "calendar", "needs_memory": False, "needs_web": False,
-                     "needs_clarification": False, "_web_mode": True}
-        print(f"[EVAL] (bypass kw) {json.dumps(eval_json, ensure_ascii=False)}")
-        response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
-        update_session_memory(session_id, user_message, response)
-        return response
-
-    # EvaluationCrew (LLM) — analyse sémantique complète
-    eval_result = EvaluationCrew().crew().kickoff(inputs={
-        "user_message": user_message,
-        "temporal_context": temporal_ctx,
-    })
-    eval_json = _parse_eval_json(eval_result.raw.strip())
-
-    # Dernier filet : si le LLM a quand même routé vers shell
-    if eval_json.get("route") == "shell":
-        return _SHELL_BLOCKED
+    meta = result.metadata
 
     # Coercion : web_query non-null implique needs_web = True
-    if eval_json.get("web_query") and not eval_json.get("needs_web"):
-        eval_json["needs_web"] = True
+    if meta.get("web_query") and not meta.get("needs_web"):
+        meta["needs_web"] = True
 
-    # Gestion de la recherche web interactive
+    # Gestion de la confirmation web interactive (remplace stdin)
     web_context = ""
-    if eval_json.get("needs_web") and eval_json.get("web_query"):
+    if meta.get("needs_web") and meta.get("web_query"):
         if web_confirmed is None:
-            # Premier appel : demander confirmation au client
-            return {"__web_confirm__": True, "web_query": eval_json["web_query"]}
+            return {"__web_confirm__": True, "web_query": meta["web_query"]}
         elif web_confirmed:
-            # Confirmé : lancer la recherche
             from Mnemo.tools.web_tools import web_search, format_results_for_prompt
-            results = web_search(confirmed_web_query or eval_json["web_query"])
+            results = web_search(confirmed_web_query or meta["web_query"])
             web_context = format_results_for_prompt(results) if results else ""
         else:
-            # Refusé : désactiver la recherche
-            eval_json["needs_web"] = False
-            eval_json["web_query"] = None
+            meta["needs_web"] = False
+            meta["web_query"] = None
 
-    eval_json["needs_clarification"] = False
-    eval_json["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
+    meta["needs_clarification"] = False
+    meta["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
 
-    print(f"[EVAL] (LLM) {json.dumps(eval_json, ensure_ascii=False)}")
-    response = _route_message(eval_json, user_message, session_id, temporal_ctx, web_context)
+    print(f"[EVAL] ({result.handler}) {json.dumps({'route': result.route, 'conf': round(result.confidence, 2), **meta}, ensure_ascii=False)}")
+    response = dispatch(result, user_message=user_message, session_id=session_id,
+                        temporal_ctx=temporal_ctx, web_context=web_context)
     update_session_memory(session_id, user_message, response)
     return response
 
@@ -766,20 +728,251 @@ async def text_to_speech(
 ):
     """
     Synthétise `text` en audio WAV.
-    Nécessite piper-tts installé (sinon 503).
+    Nécessite kokoro installé (sinon 503).
     Retourne audio/wav (bytes).
     """
     try:
         from Mnemo.tools.audio_tools import synthesize_speech  # noqa: PLC0415
-    except ImportError:
-        raise HTTPException(503, "Module TTS non disponible — installez piper-tts")
+    except Exception as exc:
+        raise HTTPException(503, f"Module TTS non disponible : {exc}")
 
     loop = asyncio.get_running_loop()
     try:
         wav_bytes = await loop.run_in_executor(None, lambda: synthesize_speech(req.text))
     except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).error("TTS synthesis failed: %s", exc, exc_info=True)
         raise HTTPException(500, f"Erreur TTS : {exc}") from exc
+    if not wav_bytes:
+        raise HTTPException(500, "TTS a retourné des bytes vides")
     return Response(content=wav_bytes, media_type="audio/wav")
+
+
+# ── Voix — paramétrage UI ──────────────────────────────────────────
+
+_VOICE_SETTINGS_FILE = DATA_PATH / "voice_settings.json"
+_RVC_MODELS_DIR = DATA_PATH / "models" / "rvc"
+
+
+def _list_rvc_models() -> list[dict]:
+    """Liste les modèles .pth disponibles dans DATA_PATH/models/rvc/."""
+    if not _RVC_MODELS_DIR.exists():
+        return []
+    models = []
+    for pth in sorted(_RVC_MODELS_DIR.glob("*.pth")):
+        stem = pth.stem
+        index_file = _RVC_MODELS_DIR / f"{stem}.index"
+        models.append({
+            "name":  stem,
+            "pth":   pth.name,
+            "index": index_file.name if index_file.exists() else None,
+        })
+    return models
+
+
+def _load_voice_settings_on_startup() -> None:
+    """Charge voice_settings.json au démarrage de l'API (si présent)."""
+    import json
+    try:
+        from Mnemo.tools.audio_tools import apply_voice_settings
+        if _VOICE_SETTINGS_FILE.exists():
+            apply_voice_settings(json.loads(_VOICE_SETTINGS_FILE.read_text()))
+            log.info("Paramètres voix chargés depuis %s", _VOICE_SETTINGS_FILE)
+    except Exception as exc:
+        log.warning("Impossible de charger voice_settings.json : %s", exc)
+
+
+# Charge les settings au démarrage du module (uvicorn import)
+_load_voice_settings_on_startup()
+
+
+class VoiceSettingsRequest(BaseModel):
+    rvc_enabled:       bool  | None = None
+    kokoro_voice_fr:   str   | None = None
+    kokoro_voice_ja:   str   | None = None
+    kokoro_speed:      float | None = None
+    rvc_f0_method:     str   | None = None
+    rvc_f0_up_key:     int   | None = None
+    rvc_index_rate:    float | None = None
+    rvc_filter_radius: int   | None = None
+    rvc_rms_mix_rate:  float | None = None
+    rvc_protect:       float | None = None
+
+
+@app.get("/api/voice/settings")
+async def voice_settings_get(_: Auth):
+    """Retourne les paramètres voix actifs + les voix disponibles."""
+    from Mnemo.tools.audio_tools import (  # noqa: PLC0415
+        get_voice_settings, KOKORO_VOICES_FR, KOKORO_VOICES_JA,
+    )
+    s = get_voice_settings()
+    s["available_voices_fr"] = KOKORO_VOICES_FR
+    s["available_voices_ja"] = KOKORO_VOICES_JA
+    s["rvc_service_url"]     = os.getenv("RVC_SERVICE_URL") or None
+    s["available_models"]    = _list_rvc_models()
+    return s
+
+
+@app.post("/api/voice/settings")
+async def voice_settings_post(req: VoiceSettingsRequest, _: Auth):
+    """Met à jour les paramètres voix et les persiste dans voice_settings.json."""
+    import json
+    from Mnemo.tools.audio_tools import (  # noqa: PLC0415
+        get_voice_settings, apply_voice_settings, KOKORO_VOICES_FR, KOKORO_VOICES_JA,
+    )
+    update = {k: v for k, v in req.model_dump().items() if v is not None}
+    apply_voice_settings(update)
+    current = get_voice_settings()
+    try:
+        _VOICE_SETTINGS_FILE.write_text(json.dumps(current, indent=2))
+    except Exception as exc:
+        log.warning("Impossible de persister voice_settings.json : %s", exc)
+    current["available_voices_fr"] = KOKORO_VOICES_FR
+    current["available_voices_ja"] = KOKORO_VOICES_JA
+    current["rvc_service_url"]     = os.getenv("RVC_SERVICE_URL") or None
+    current["available_models"]    = _list_rvc_models()
+    return current
+
+
+class VoiceTestRequest(BaseModel):
+    text:              str   | None = None
+    # Paramètres optionnels — appliqués au runtime sans persistance
+    rvc_enabled:       bool  | None = None
+    kokoro_voice_fr:   str   | None = None
+    kokoro_voice_ja:   str   | None = None
+    kokoro_speed:      float | None = None
+    rvc_f0_method:     str   | None = None
+    rvc_f0_up_key:     int   | None = None
+    rvc_index_rate:    float | None = None
+    rvc_filter_radius: int   | None = None
+    rvc_rms_mix_rate:  float | None = None
+    rvc_protect:       float | None = None
+    rvc_active_model:  str   | None = None
+
+
+@app.post("/api/voice/test")
+async def voice_test(req: VoiceTestRequest, _: Auth):
+    """
+    Synthétise une phrase de test.
+    Si des paramètres sont fournis dans le body, ils sont appliqués au runtime
+    avant la synthèse (sans persistance sur disque) — permet de tester sans sauvegarder.
+    """
+    try:
+        from Mnemo.tools.audio_tools import apply_voice_settings, synthesize_speech  # noqa: PLC0415
+    except Exception as exc:
+        raise HTTPException(503, f"Module TTS non disponible : {exc}")
+
+    # Applique les settings du form au runtime (profil intermédiaire, non persisté)
+    patch = {k: v for k, v in req.model_dump().items() if k != "text" and v is not None}
+    if patch:
+        apply_voice_settings(patch)
+
+    phrase = req.text or "Bonjour, je suis ta voix personnalisée."
+    loop = asyncio.get_running_loop()
+    try:
+        wav = await loop.run_in_executor(None, lambda: synthesize_speech(phrase))
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur test voix : {exc}") from exc
+    if not wav:
+        raise HTTPException(500, "Test voix retourné vide")
+    return Response(content=wav, media_type="audio/wav")
+
+
+@app.post("/api/voice/model", status_code=201)
+def voice_model_upload(
+    pth_file:   UploadFile,
+    _: Auth,
+    index_file: UploadFile | None = None,
+):
+    """
+    Upload un modèle RVC (.pth requis, .index optionnel).
+    Sauvegarde dans DATA_PATH/models/rvc/.
+    Retourne {"name": stem, "pth": filename, "index": filename|null}.
+    """
+    if not pth_file.filename or not pth_file.filename.endswith(".pth"):
+        raise HTTPException(400, "Fichier .pth requis")
+    if index_file and index_file.filename and not index_file.filename.endswith(".index"):
+        raise HTTPException(400, "Le fichier index doit avoir l'extension .index")
+
+    _RVC_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Sécuriser les noms de fichier (pas de path traversal)
+    import re as _re
+    safe_pth   = _re.sub(r"[^\w.\-]", "_", pth_file.filename)
+    stem       = safe_pth[:-4]  # sans ".pth"
+
+    pth_dest = _RVC_MODELS_DIR / safe_pth
+    pth_data = pth_file.file.read()
+    if not pth_data:
+        raise HTTPException(400, "Fichier .pth vide")
+    pth_dest.write_bytes(pth_data)
+
+    index_dest = None
+    if index_file and index_file.filename:
+        safe_idx   = _re.sub(r"[^\w.\-]", "_", index_file.filename)
+        index_dest = _RVC_MODELS_DIR / safe_idx
+        idx_data   = index_file.file.read()
+        if idx_data:
+            index_dest.write_bytes(idx_data)
+        else:
+            index_dest = None
+
+    log.info("Modèle RVC uploadé : %s (index=%s)", safe_pth, index_dest)
+    return {
+        "name":  stem,
+        "pth":   safe_pth,
+        "index": index_dest.name if index_dest else None,
+    }
+
+
+@app.post("/api/voice/model/{model_name}/activate")
+async def voice_model_activate(model_name: str, _: Auth):
+    """
+    Active un modèle RVC uploadé en appelant /reload sur le service RVC.
+    Persiste le modèle actif dans voice_settings.json.
+    """
+    import json
+
+    # Validation nom
+    import re as _re
+    if not _re.match(r"^[\w.\-]+$", model_name):
+        raise HTTPException(400, "Nom de modèle invalide")
+
+    pth_path   = _RVC_MODELS_DIR / f"{model_name}.pth"
+    index_path = _RVC_MODELS_DIR / f"{model_name}.index"
+    if not pth_path.exists():
+        raise HTTPException(404, f"Modèle '{model_name}.pth' introuvable")
+
+    rvc_url = os.getenv("RVC_SERVICE_URL", "").rstrip("/")
+    if rvc_url:
+        # Les chemins dans le container RVC sont sous /models/
+        rvc_model_path = f"/models/{pth_path.name}"
+        rvc_index_path = f"/models/{index_path.name}" if index_path.exists() else ""
+        qs = f"?model_path={urllib.parse.quote(rvc_model_path)}"
+        if rvc_index_path:
+            qs += f"&index_path={urllib.parse.quote(rvc_index_path)}"
+        req = urllib.request.Request(
+            f"{rvc_url}/reload{qs}",
+            data=b"",
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read())
+        except Exception as exc:
+            raise HTTPException(500, f"Erreur reload RVC : {exc}") from exc
+
+    # Persiste le modèle actif
+    from Mnemo.tools.audio_tools import apply_voice_settings  # noqa: PLC0415
+    apply_voice_settings({"rvc_active_model": model_name})
+    try:
+        current_settings = json.loads(_VOICE_SETTINGS_FILE.read_text()) if _VOICE_SETTINGS_FILE.exists() else {}
+        current_settings["rvc_active_model"] = model_name
+        _VOICE_SETTINGS_FILE.write_text(json.dumps(current_settings, indent=2))
+    except Exception as exc:
+        log.warning("Impossible de persister rvc_active_model : %s", exc)
+
+    return {"ok": True, "active_model": model_name}
 
 
 # ── WebSocket streaming ────────────────────────────────────────────
@@ -906,6 +1099,97 @@ async def ws_message(websocket: WebSocket):
 
     except WebSocketDisconnect:
         pass
+
+
+# ── Base de connaissances (ingestion de fichiers) ──────────────────
+
+@app.get("/api/documents")
+def documents_list(_: Auth):
+    """Liste tous les documents ingérés avec leurs métadonnées."""
+    try:
+        from Mnemo.context import get_data_dir
+        from Mnemo.tools.ingest_tools import list_ingested_documents
+        docs = list_ingested_documents(db_path=get_data_dir() / "memory.db")
+        return {"documents": docs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Formats acceptés pour l'ingestion (sync avec ingest_file dispatcher)
+_INGEST_EXTENSIONS = {
+    ".pdf", ".docx", ".txt", ".md",
+    ".py", ".js", ".ts", ".c", ".cpp", ".h",
+    ".cs", ".java", ".sh", ".bash", ".ps1",
+}
+
+
+@app.post("/api/ingest", status_code=200)
+def ingest_upload(file: UploadFile, _: Auth):
+    """
+    Ingère un fichier uploadé dans la base de connaissances.
+    Le fichier est sauvegardé temporairement, ingéré, puis supprimé.
+    Retourne {status, filename, pages, chunks, doc_id}.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+    from Mnemo.context import get_data_dir
+    from Mnemo.tools.ingest_tools import ingest_file
+
+    filename = file.filename or "upload"
+    ext = _Path(filename).suffix.lower()
+    if ext not in _INGEST_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Format non supporté : {ext}. Acceptés : {', '.join(sorted(_INGEST_EXTENSIONS))}",
+        )
+
+    try:
+        raw = file.file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lecture du fichier échouée : {e}")
+
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+
+    # Sauvegarde temporaire avec l'extension correcte (ingest_file en a besoin)
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp.write(raw)
+            tmp_path = _Path(tmp.name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur temporaire : {e}")
+
+    try:
+        result = ingest_file(tmp_path, db_path=get_data_dir() / "memory.db")
+        result["filename"] = filename   # remplace le nom tmp par le nom original
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+@app.delete("/api/documents/{doc_id}", status_code=200)
+def document_delete(doc_id: str, _: Auth):
+    """Supprime un document ingéré et tous ses chunks de la base."""
+    if not doc_id or len(doc_id) > 64 or any(c in doc_id for c in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail="doc_id invalide.")
+    try:
+        from Mnemo.context import get_data_dir
+        from Mnemo.tools.ingest_tools import delete_document
+        ok = delete_document(doc_id, db_path=get_data_dir() / "memory.db")
+        if not ok:
+            raise HTTPException(status_code=404, detail="Document introuvable.")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──

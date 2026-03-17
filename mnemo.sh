@@ -9,10 +9,14 @@
 #   ./mnemo.sh scheduler    # démarre le scheduler seul
 #   ./mnemo.sh api          # démarre l'API seule
 #   ./mnemo.sh stop         # arrête scheduler + API
+#   ./mnemo.sh rebuild      # stop → build → redémarre (+ RVC si actif)
 #   ./mnemo.sh briefing     # génère le briefing maintenant
 #   ./mnemo.sh weekly       # génère le weekly maintenant
+#   ./mnemo.sh deadline     # scanne les deadlines J-1/J-3
 #   ./mnemo.sh logs         # logs du scheduler en temps réel
 #   ./mnemo.sh logs-api     # logs de l'API en temps réel
+#   ./mnemo.sh rvc          # build + démarre le service RVC (voix custom)
+#   ./mnemo.sh logs-rvc     # logs du service RVC en temps réel
 #   ./mnemo.sh ingest <f>   # ingère un fichier dans la mémoire
 #   ./mnemo.sh adduser <n>  # crée un utilisateur et affiche son token
 #   ./mnemo.sh fix-perms    # chmod 600/700 sur /data (migration données existantes)

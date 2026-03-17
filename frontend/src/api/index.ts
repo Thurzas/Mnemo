@@ -109,12 +109,59 @@ export interface OnboardingStatusResponse {
   questions: OnboardingQuestion[]
 }
 
+export interface IngestedDocument {
+  filename: string
+  pages: number
+  chunks: number
+  ingested_at: string
+  doc_id?: string   // présent si on l'expose plus tard via la route list
+}
+
+export interface DocumentsResponse {
+  documents: IngestedDocument[]
+}
+
+export interface IngestResult {
+  status: 'ingested' | 'already_ingested' | 'empty'
+  doc_id: string
+  filename: string
+  pages: number
+  chunks: number
+}
+
 export interface OnboardingAnswerItem {
   id: string
   answer: string
   section: string
   subsection: string
   label: string
+}
+
+export interface RvcModel {
+  name: string
+  pth: string
+  index: string | null
+}
+
+export interface VoiceSettings {
+  rvc_enabled: boolean
+  kokoro_voice_fr: string
+  kokoro_voice_ja: string
+  kokoro_speed: number
+  rvc_f0_method: string
+  rvc_f0_up_key: number
+  rvc_index_rate: number
+  rvc_filter_radius: number
+  rvc_rms_mix_rate: number
+  rvc_protect: number
+  rvc_active_model: string
+}
+
+export interface VoiceSettingsResponse extends VoiceSettings {
+  available_voices_fr: string[]
+  available_voices_ja: string[]
+  rvc_service_url: string | null
+  available_models: RvcModel[]
 }
 
 // ── Auth token ───────────────────────────────────────────────────
@@ -218,6 +265,29 @@ export const api = {
   whoami: () =>
     request<{ username: string; calendar_source: string; created_at: string | null }>('/api/auth/whoami'),
 
+  getDocuments: () =>
+    request<DocumentsResponse>('/api/documents'),
+
+  deleteDocument: (docId: string) =>
+    request<{ ok: boolean }>(`/api/documents/${encodeURIComponent(docId)}`, {
+      method: 'DELETE',
+    }),
+
+  ingestFile: async (file: File): Promise<IngestResult> => {
+    const token = auth.getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch('/api/ingest', { method: 'POST', headers, body })
+    if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(detail?.detail ?? res.statusText)
+    }
+    return res.json()
+  },
+
   onboardingStatus: () =>
     request<OnboardingStatusResponse>('/api/onboarding/status'),
 
@@ -250,6 +320,56 @@ export const api = {
       method: 'POST',
       headers,
       body: JSON.stringify({ text }),
+    })
+    if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(detail?.detail ?? res.statusText)
+    }
+    return res.blob()
+  },
+
+  getVoiceSettings: () =>
+    request<VoiceSettingsResponse>('/api/voice/settings'),
+
+  updateVoiceSettings: (settings: Partial<VoiceSettings>) =>
+    request<VoiceSettings>('/api/voice/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    }),
+
+  getVoiceModels: () =>
+    request<{ models: RvcModel[] }>('/api/voice/models'),
+
+  uploadVoiceModel: async (pthFile: File, indexFile?: File): Promise<RvcModel> => {
+    const token = auth.getToken()
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const body = new FormData()
+    body.append('pth_file', pthFile)
+    if (indexFile) body.append('index_file', indexFile)
+    const res = await fetch('/api/voice/model', { method: 'POST', headers, body })
+    if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(detail?.detail ?? res.statusText)
+    }
+    return res.json()
+  },
+
+  activateVoiceModel: (name: string) =>
+    request<{ ok: boolean; active_model: string }>(`/api/voice/model/${encodeURIComponent(name)}/activate`, {
+      method: 'POST',
+    }),
+
+  testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
+    const token = auth.getToken()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    const res = await fetch('/api/voice/test', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ text: text ?? null, ...settings }),
     })
     if (res.status === 401) { auth.clear(); throw new Error('Non authentifié') }
     if (!res.ok) {

@@ -21,8 +21,9 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s — %(message)s")
@@ -109,11 +110,58 @@ async def health():
     return {"status": "ok", "model_loaded": _rvc is not None}
 
 
-@app.post("/convert")
-async def convert(request: Request) -> Response:
+@app.get("/params")
+async def get_params():
+    """Retourne les paramètres RVC actifs (valeurs env par défaut)."""
+    return {
+        "f0_method":     _RVC_F0_METHOD,
+        "f0_up_key":     _RVC_F0_UP_KEY,
+        "index_rate":    _RVC_INDEX_RATE,
+        "filter_radius": 3,
+        "rms_mix_rate":  0.25,
+        "protect":       0.33,
+    }
+
+
+@app.post("/reload")
+async def reload_model(
+    model_path: str = Query(...),
+    index_path: str = Query(""),
+) -> dict:
     """
-    Reçoit un WAV brut (body = bytes), applique la conversion RVC,
-    retourne le WAV converti (audio/wav).
+    Recharge le modèle RVC depuis les chemins donnés.
+    Utilisé par l'API Mnemo après upload d'un nouveau modèle via l'UI.
+    """
+    global _rvc
+    p = Path(model_path)
+    if not p.exists():
+        raise HTTPException(400, f"Modèle introuvable : {model_path}")
+    log.info("Rechargement du modèle RVC '%s'…", model_path)
+    _rvc = None
+    os.environ["RVC_MODEL_PATH"] = model_path
+    os.environ["RVC_INDEX_PATH"] = index_path
+    try:
+        _load_model()
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur chargement modèle : {exc}") from exc
+    return {"ok": True, "model_path": model_path, "index_path": index_path}
+
+
+@app.post("/convert")
+async def convert(
+    request: Request,
+    f0_method:     Optional[str]   = Query(None),
+    f0_up_key:     Optional[int]   = Query(None),
+    index_rate:    Optional[float] = Query(None),
+    filter_radius: Optional[int]   = Query(None),
+    rms_mix_rate:  Optional[float] = Query(None),
+    protect:       Optional[float] = Query(None),
+) -> Response:
+    """
+    Reçoit un WAV brut (body = bytes), applique la conversion RVC.
+
+    Query params optionnels — surchargent les valeurs env pour cette requête :
+      ?f0_method=rmvpe&f0_up_key=0&index_rate=0.75
     """
     try:
         rvc = _load_model()
@@ -123,6 +171,16 @@ async def convert(request: Request) -> Response:
     wav_bytes = await request.body()
     if not wav_bytes:
         raise HTTPException(400, "Body vide — attendu : bytes WAV")
+
+    override: dict = {}
+    if f0_method     is not None: override["f0method"]      = f0_method
+    if f0_up_key     is not None: override["f0up_key"]      = f0_up_key
+    if index_rate    is not None: override["index_rate"]    = index_rate
+    if filter_radius is not None: override["filter_radius"] = filter_radius
+    if rms_mix_rate  is not None: override["rms_mix_rate"]  = rms_mix_rate
+    if protect       is not None: override["protect"]       = protect
+    if override:
+        rvc.set_params(**override)
 
     in_tmp = out_tmp = None
     try:

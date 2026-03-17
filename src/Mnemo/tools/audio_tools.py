@@ -1,13 +1,14 @@
 """
-audio_tools.py — STT (Whisper) + TTS (Piper → RVC) pour Mnemo
+audio_tools.py — STT (Whisper) + TTS (Kokoro → RVC) pour Mnemo
 
 Pipeline :
   STT : audio  →  faster-whisper  →  texte
-  TTS : texte  →  Piper (voix neutre)  →  RVC (conversion voix custom)  →  audio
+  TTS : texte  →  Kokoro-82M (voix neutre, FR ou JA)  →  RVC (conversion voix custom)  →  audio
 
 Modèles :
   Whisper  : tiny (~39 MB), téléchargé dans /data/models/whisper/ au 1er usage
-  Piper    : fr_FR-siwis-medium (~65 MB), téléchargé dans /data/models/piper/ au 1er usage
+  Kokoro   : ~82 MB total, téléchargé automatiquement par le package au 1er usage
+             Langues supportées : fr, ja, en, ko, zh, es, pt, hi, it (un seul modèle)
   RVC      : résolution automatique (voir _rvc_paths())
 
 Résolution des fichiers RVC (ordre de priorité) :
@@ -16,23 +17,35 @@ Résolution des fichiers RVC (ordre de priorité) :
   3. <package>/../../Voices/*.pth + *.index  (bundlé dans l'image, pour les tests)
 
 Dépendances optionnelles :
-  pip install faster-whisper piper-tts rvc-python
+  pip install faster-whisper kokoro rvc-python
+  pip install misaki[ja]          # phonémisation japonaise
+  apt-get install espeak-ng       # phonémisation française (Linux / Docker)
 """
 from __future__ import annotations
 
 import io
 import logging
 import os
+import re
 import tempfile
+import threading
 import urllib.request
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 # ── Lazy singletons ────────────────────────────────────────────────
-_whisper_model = None
-_piper_voice   = None
-_rvc_infer     = None          # RVCInference instance, None si non configuré
+_whisper_model       = None
+_kokoro_pipeline_fr  = None   # KPipeline(lang_code='f') — français
+_kokoro_pipeline_ja  = None   # KPipeline(lang_code='j') — japonais
+_rvc_infer           = None   # RVCInference instance, None si non configuré
+
+# Verrous pour l'initialisation thread-safe des singletons Kokoro.
+# Le frontend envoie toutes les phrases TTS en parallèle → plusieurs threads
+# peuvent appeler _get_kokoro_*() simultanément ; sans lock chacun instancierait
+# le modèle séparément (gaspillage mémoire + écriture concurrente dans HF cache).
+_kokoro_fr_lock = threading.Lock()
+_kokoro_ja_lock = threading.Lock()
 
 
 def _models_dir() -> Path:
@@ -102,69 +115,127 @@ def transcribe_audio(audio_bytes: bytes, language: str = "fr") -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# TTS étape 1 — Piper (texte → WAV neutre)
+# TTS étape 1 — Kokoro-82M (texte → WAV neutre, multilingue)
 # ══════════════════════════════════════════════════════════════════
+#
+# Voix disponibles :
+#   Français  : ff_siwis (féminine, neutre)  ff_emma  fm_galvani (masculine)
+#   Japonais  : jf_alpha  jf_nezumi  jf_tebukuro  jm_kumo (masculine)
+#   Anglais   : af_heart  af_bella  am_adam  ...
+#
+# Kokoro télécharge automatiquement ses poids (~82 MB) au 1er appel.
+# Toutes les voix partagent le même modèle.
 
-_PIPER_VOICE      = os.getenv("PIPER_VOICE", "fr_FR-siwis-medium")
-_PIPER_VOICE_REPO = "rhasspy/piper-voices"
-_PIPER_VOICE_TAG  = "v1.0.0"
-_PIPER_VOICE_HF   = "fr/fr_FR/siwis/medium/fr_FR-siwis-medium"
+_KOKORO_VOICE_FR    = os.getenv("KOKORO_VOICE_FR",  "ff_siwis")
+_KOKORO_VOICE_JA    = os.getenv("KOKORO_VOICE_JA",  "jf_alpha")
+_KOKORO_SPEED       = float(os.getenv("KOKORO_SPEED", "1.0"))
+_KOKORO_REPO_ID     = "hexgrad/Kokoro-82M"
+_KOKORO_SAMPLE_RATE = 24_000   # constant — toutes les voix Kokoro sortent en 24 kHz
+
+# Voix disponibles (exposées à l'UI)
+# Kokoro-82M n'a qu'une seule voix française confirmée.
+KOKORO_VOICES_FR = ["ff_siwis"]
+KOKORO_VOICES_JA = ["jf_alpha", "jf_nezumi", "jf_tebukuro", "jm_kumo"]
+
+# ── Paramètres runtime (modifiables depuis l'UI sans redémarrer) ────
+# Surchargent les valeurs env ; persistés dans /data/voice_settings.json.
+_runtime_settings: dict = {}
+_settings_lock = threading.Lock()
 
 
-def _piper_voice_paths() -> tuple[Path, Path]:
+def get_voice_settings() -> dict:
+    """Retourne les paramètres voix effectifs (runtime > env defaults)."""
+    with _settings_lock:
+        return {
+            "rvc_enabled":       _runtime_settings.get("rvc_enabled",       True),
+            "kokoro_voice_fr":   _runtime_settings.get("kokoro_voice_fr",   _KOKORO_VOICE_FR),
+            "kokoro_voice_ja":   _runtime_settings.get("kokoro_voice_ja",   _KOKORO_VOICE_JA),
+            "kokoro_speed":      _runtime_settings.get("kokoro_speed",      _KOKORO_SPEED),
+            # RVC — lit les env vars directement pour éviter la dépendance à l'ordre de définition
+            "rvc_f0_method":     _runtime_settings.get("rvc_f0_method",     os.getenv("RVC_F0_METHOD",  "harvest")),
+            "rvc_f0_up_key":     _runtime_settings.get("rvc_f0_up_key",     int(os.getenv("RVC_F0_UP_KEY",  "0"))),
+            "rvc_index_rate":    _runtime_settings.get("rvc_index_rate",    float(os.getenv("RVC_INDEX_RATE", "0.75"))),
+            "rvc_filter_radius": _runtime_settings.get("rvc_filter_radius", 3),
+            "rvc_rms_mix_rate":  _runtime_settings.get("rvc_rms_mix_rate",  0.25),
+            "rvc_protect":       _runtime_settings.get("rvc_protect",       0.33),
+            "rvc_active_model":  _runtime_settings.get("rvc_active_model",  ""),
+        }
+
+
+def apply_voice_settings(settings: dict) -> None:
+    """Met à jour les paramètres runtime (appelé depuis l'API)."""
+    with _settings_lock:
+        _runtime_settings.update(settings)
+
+
+def _get_kokoro_fr():
+    """Pipeline Kokoro français (lazy singleton, thread-safe)."""
+    global _kokoro_pipeline_fr
+    if _kokoro_pipeline_fr is None:
+        with _kokoro_fr_lock:
+            if _kokoro_pipeline_fr is None:   # double-check après acquisition du lock
+                from kokoro import KPipeline  # noqa: PLC0415
+                log.info("Chargement du pipeline Kokoro FR…")
+                _kokoro_pipeline_fr = KPipeline(lang_code="f", repo_id=_KOKORO_REPO_ID)
+                log.info("Pipeline Kokoro FR chargé.")
+    return _kokoro_pipeline_fr
+
+
+def _get_kokoro_ja():
+    """Pipeline Kokoro japonais (lazy singleton, thread-safe)."""
+    global _kokoro_pipeline_ja
+    if _kokoro_pipeline_ja is None:
+        with _kokoro_ja_lock:
+            if _kokoro_pipeline_ja is None:   # double-check après acquisition du lock
+                from kokoro import KPipeline  # noqa: PLC0415
+                log.info("Chargement du pipeline Kokoro JA…")
+                _kokoro_pipeline_ja = KPipeline(lang_code="j", repo_id=_KOKORO_REPO_ID)
+                log.info("Pipeline Kokoro JA chargé.")
+    return _kokoro_pipeline_ja
+
+
+def _contains_japanese(text: str) -> bool:
+    """True si le texte contient des caractères hiragana, katakana ou kanji."""
+    for ch in text:
+        cp = ord(ch)
+        if (0x3040 <= cp <= 0x30FF    # hiragana + katakana
+                or 0x4E00 <= cp <= 0x9FFF    # CJK unifié (kanji communs)
+                or 0xFF65 <= cp <= 0xFF9F):   # katakana demi-chasse
+            return True
+    return False
+
+
+def _kokoro_to_wav_bytes(text: str, pipeline, voice: str, speed: float = 1.0) -> bytes:
     """
-    Priorité : /app/models/piper (baked au build) →
-               /data/models/piper (volume, fallback download)
+    Kokoro pipeline → WAV bytes (PCM 16-bit mono 24 000 Hz).
+
+    Kokoro retourne un générateur de (graphèmes, phonèmes, audio_np).
+    Les segments audio sont concaténés puis convertis en WAV.
     """
-    bundled_dir = _APP_MODELS / "piper"
-    onnx_b   = bundled_dir / f"{_PIPER_VOICE}.onnx"
-    config_b = bundled_dir / f"{_PIPER_VOICE}.onnx.json"
-    if onnx_b.exists() and config_b.exists():
-        return onnx_b, config_b
-
-    # Fallback : volume /data (et téléchargement si absent)
-    voice_dir = _models_dir() / "piper"
-    voice_dir.mkdir(parents=True, exist_ok=True)
-    onnx   = voice_dir / f"{_PIPER_VOICE}.onnx"
-    config = voice_dir / f"{_PIPER_VOICE}.onnx.json"
-    if not onnx.exists() or not config.exists():
-        _download_piper_voice(onnx, config)
-    return onnx, config
-
-
-def _download_piper_voice(onnx: Path, config: Path) -> None:
-    base = (
-        f"https://huggingface.co/{_PIPER_VOICE_REPO}/resolve/"
-        f"{_PIPER_VOICE_TAG}/{_PIPER_VOICE_HF}"
-    )
-    log.info("Téléchargement de la voix Piper '%s'…", _PIPER_VOICE)
-    for path, suffix in [(onnx, ".onnx"), (config, ".onnx.json")]:
-        log.info("  GET %s%s", base, suffix)
-        urllib.request.urlretrieve(f"{base}{suffix}", str(path))
-    log.info("Voix Piper téléchargée.")
-
-
-def _get_piper():
-    global _piper_voice
-    if _piper_voice is None:
-        from piper import PiperVoice  # noqa: PLC0415
-        onnx, config = _piper_voice_paths()
-        log.info("Chargement de la voix Piper '%s'…", _PIPER_VOICE)
-        _piper_voice = PiperVoice.load(str(onnx), config_path=str(config), use_cuda=False)
-        log.info("Voix Piper chargée.")
-    return _piper_voice
-
-
-def _piper_to_wav_bytes(text: str) -> bytes:
-    """Piper : texte → bytes WAV (voix neutre française)."""
     import wave
-    voice = _get_piper()
+    import numpy as np
+
+    parts: list[np.ndarray] = []
+    for _gs, _ps, audio in pipeline(text, voice=voice, speed=speed):
+        if audio is not None and len(audio) > 0:
+            # Kokoro retourne des torch.Tensor — convertir en numpy pour wave/numpy ops
+            if hasattr(audio, "numpy"):
+                audio = audio.numpy()
+            parts.append(audio)
+
+    if not parts:
+        return b""
+
+    combined = np.concatenate(parts) if len(parts) > 1 else parts[0]
+    # float32 [-1, 1] → int16
+    pcm = (combined * 32_767).clip(-32_768, 32_767).astype(np.int16)
+
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)
-        wf.setsampwidth(2)          # 16-bit PCM
-        wf.setframerate(voice.config.sample_rate)
-        voice.synthesize_wav(text, wf)
+        wf.setsampwidth(2)
+        wf.setframerate(_KOKORO_SAMPLE_RATE)
+        wf.writeframes(pcm.tobytes())
     return buf.getvalue()
 
 
@@ -257,15 +328,25 @@ def _rvc_convert(wav_bytes: bytes) -> bytes:
     Applique la conversion RVC sur un WAV en entrée. Retourne le WAV converti.
 
     Stratégie (ordre de priorité) :
-      1. RVC_SERVICE_URL définie → appel HTTP vers le micro-service dédié
+      1. RVC_SERVICE_URL définie → appel HTTP avec params en query string
       2. rvc-python installé localement → conversion in-process
-      3. Aucun → retourne Piper brut sans conversion
+      3. Aucun → retourne le WAV Kokoro brut sans conversion
     """
+    s = get_voice_settings()
+
     # ── 1. Service HTTP distant (conteneur mnemo-rvc) ──────────────
     if _RVC_SERVICE_URL:
         import urllib.error
+        qs = (
+            f"?f0_method={s['rvc_f0_method']}"
+            f"&f0_up_key={s['rvc_f0_up_key']}"
+            f"&index_rate={s['rvc_index_rate']}"
+            f"&filter_radius={s['rvc_filter_radius']}"
+            f"&rms_mix_rate={s['rvc_rms_mix_rate']}"
+            f"&protect={s['rvc_protect']}"
+        )
         req = urllib.request.Request(
-            f"{_RVC_SERVICE_URL}/convert",
+            f"{_RVC_SERVICE_URL}/convert{qs}",
             data=wav_bytes,
             headers={"Content-Type": "audio/wav"},
             method="POST",
@@ -275,15 +356,15 @@ def _rvc_convert(wav_bytes: bytes) -> bytes:
                 return resp.read()
         except urllib.error.HTTPError as exc:
             log.error("RVC service HTTP %s : %s", exc.code, exc.reason)
-            return wav_bytes   # fallback Piper brut
+            return wav_bytes   # fallback Kokoro brut
         except Exception as exc:
-            log.warning("Appel RVC service échoué (%s) — retour Piper brut", exc)
+            log.warning("Appel RVC service échoué (%s) — retour Kokoro brut", exc)
             return wav_bytes
 
     # ── 2. rvc-python local (fallback hors-conteneur) ──────────────
     rvc = _get_rvc()
     if rvc is None:
-        return wav_bytes   # pas de RVC → retourne Piper brut
+        return wav_bytes   # pas de RVC → retourne Kokoro brut
 
     in_tmp = out_tmp = None
     try:
@@ -293,15 +374,15 @@ def _rvc_convert(wav_bytes: bytes) -> bytes:
         out_tmp = in_tmp.replace(".wav", "_rvc.wav")
 
         rvc.infer_file(
-            input_path  = in_tmp,
-            output_path = out_tmp,
-            f0method    = _RVC_F0_METHOD,
-            f0up_key    = _RVC_F0_UP_KEY,
-            index_rate  = _RVC_INDEX_RATE,
-            filter_radius = 3,
+            input_path    = in_tmp,
+            output_path   = out_tmp,
+            f0method      = s["rvc_f0_method"],
+            f0up_key      = s["rvc_f0_up_key"],
+            index_rate    = s["rvc_index_rate"],
+            filter_radius = s["rvc_filter_radius"],
             resample_sr   = 0,
-            rms_mix_rate  = 0.25,
-            protect       = 0.33,
+            rms_mix_rate  = s["rvc_rms_mix_rate"],
+            protect       = s["rvc_protect"],
         )
         with open(out_tmp, "rb") as f:
             return f.read()
@@ -318,10 +399,125 @@ def _rvc_convert(wav_bytes: bytes) -> bytes:
 # Point d'entrée public
 # ══════════════════════════════════════════════════════════════════
 
+# Ponctuation de fin de phrase : FR + JP
+_SENTENCE_END = re.compile(r'(?<=[.!?;。！？])\s+')
+
+
+def _split_into_chunks(text: str) -> list[str]:
+    """
+    Découpe le texte en unités synthétisables.
+
+    Stratégie :
+    1. Split par ligne (les items numérotés, les sauts de paragraphe)
+    2. Split intra-ligne sur la ponctuation de fin de phrase
+    Filtre les chunks vides.
+    """
+    chunks: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = _SENTENCE_END.split(line)
+        chunks.extend(p.strip() for p in parts if p.strip())
+    return chunks
+
+
+def _resample_pcm(frames: bytes, src_rate: int, dst_rate: int, sampwidth: int = 2) -> bytes:
+    """
+    Rééchantillonne des frames PCM 16-bit mono de src_rate vers dst_rate.
+    Utilise numpy (déjà en dépendance du projet).
+    Fallback : retourne les frames non modifiées si numpy n'est pas disponible.
+    """
+    if src_rate == dst_rate:
+        return frames
+    try:
+        import numpy as np
+        pcm = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+        ratio = dst_rate / src_rate
+        new_len = int(len(pcm) * ratio)
+        # Rééchantillonnage linéaire — suffisant pour de la voix
+        indices = np.linspace(0, len(pcm) - 1, new_len)
+        resampled = np.interp(indices, np.arange(len(pcm)), pcm).astype(np.int16)
+        return resampled.tobytes()
+    except ImportError:
+        log.warning("numpy absent — rééchantillonnage impossible, audio peut être désynchronisé")
+        return frames
+
+
+def _concat_wavs(wav_parts: list[bytes]) -> bytes:
+    """
+    Concatène plusieurs WAV PCM en un seul.
+
+    Le format de référence est celui du premier chunk valide.
+    Les chunks avec un sample rate différent sont rééchantillonnés (numpy).
+    Les chunks avec channels ou sampwidth différents sont ignorés.
+    """
+    import wave
+
+    all_frames = b""
+    ref: tuple[int, int, int] | None = None  # (channels, sampwidth, framerate)
+
+    for wav_bytes in wav_parts:
+        try:
+            buf = io.BytesIO(wav_bytes)
+            with wave.open(buf, "rb") as wf:
+                ch, sw, fr = wf.getnchannels(), wf.getsampwidth(), wf.getframerate()
+                frames = wf.readframes(wf.getnframes())
+                if ref is None:
+                    ref = (ch, sw, fr)
+                if ch != ref[0] or sw != ref[1]:
+                    log.warning(
+                        "Chunk WAV incompatible (channels/sampwidth), ignoré : ch=%d sw=%d", ch, sw
+                    )
+                    continue
+                if fr != ref[2]:
+                    frames = _resample_pcm(frames, fr, ref[2], sw)
+                all_frames += frames
+        except Exception as exc:
+            log.warning("Impossible de lire un chunk WAV : %s", exc)
+
+    if not all_frames or ref is None:
+        return wav_parts[0] if wav_parts else b""
+
+    out = io.BytesIO()
+    with wave.open(out, "wb") as wf:
+        wf.setnchannels(ref[0])
+        wf.setsampwidth(ref[1])
+        wf.setframerate(ref[2])
+        wf.writeframes(all_frames)
+    return out.getvalue()
+
+
 def synthesize_speech(text: str) -> bytes:
     """
     Texte → WAV bytes.
-    Pipeline : Piper TTS  →  RVC conversion (si modèle disponible)
+
+    Le texte est découpé en phrases. Chaque phrase est synthétisée
+    indépendamment avec la voix Kokoro appropriée :
+    - Phrase contenant du japonais → pipeline JA → RVC (si activé)
+    - Phrase en français (ou autre) → pipeline FR → RVC (si activé)
+
+    Tous les WAVs Kokoro sortent à 24 000 Hz — pas de rééchantillonnage nécessaire
+    entre les chunks FR et JA (sauf si RVC change le sample rate en sortie).
     """
-    piper_wav = _piper_to_wav_bytes(text)
-    return _rvc_convert(piper_wav)
+    s = get_voice_settings()
+    chunks = _split_into_chunks(text)
+    if not chunks:
+        return b""
+
+    wav_parts: list[bytes] = []
+    for chunk in chunks:
+        if _contains_japanese(chunk):
+            raw = _kokoro_to_wav_bytes(chunk, _get_kokoro_ja(), s["kokoro_voice_ja"], s["kokoro_speed"])
+        else:
+            raw = _kokoro_to_wav_bytes(chunk, _get_kokoro_fr(), s["kokoro_voice_fr"], s["kokoro_speed"])
+        wav = _rvc_convert(raw) if s["rvc_enabled"] else raw
+        if wav:
+            wav_parts.append(wav)
+
+    if not wav_parts:
+        return b""
+    if len(wav_parts) == 1:
+        return wav_parts[0]
+
+    return _concat_wavs(wav_parts)

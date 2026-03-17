@@ -67,28 +67,25 @@ main_task:
       demandée, dire honnêtement qu'on n'a pas l'information.
 
     Pour les questions sur le présent ou le futur (planning, programme, agenda) :
-    → SOURCE PRIMAIRE : la section "Agenda - 7 prochains jours" dans temporal_context.
-      Elle liste chaque événement avec son jour nommé, sa date ISO et son heure.
+    → SOURCE UNIQUE : le champ "Calendrier" ci-dessus (calendar_context).
+      Il est pré-chargé uniquement quand la question concerne le planning.
       C'est la vérité calendrier — elle prime sur tout ce qui est dans memory_context.
-    → SOURCE SECONDAIRE : le champ "Calendrier" ci-dessus (calendar_context), si renseigné.
     → memory_context ne contient PAS les événements calendrier — ne jamais y chercher
       le programme d'un jour. Les mentions de tâches ou projets dans memory_context sont
       des notes mémorisées, pas des événements agendés.
     → Pour "prochaine session X" : chercher la première occurrence de X dont la date > aujourd'hui.
-    → Ne jamais répondre "vérifiez votre calendrier" si temporal_context contient la réponse.
+    → Si calendar_context est vide et que l'utilisateur demande son planning, dire honnêtement
+      qu'on n'a pas l'information calendrier pour cette requête.
     → Ne jamais confondre l'événement d'aujourd'hui avec "le prochain" si l'utilisateur
       précise qu'il veut l'occurrence suivante.
 
     Ne pas inventer d'événements ou d'activités non présents dans le contexte.
     Ne pas répondre avec des événements d'une date différente de celle demandée.
 
-    CONSCIENCE DES DEADLINES :
-    Si le contexte temporel contient une section "Deadlines et evenements proches",
-    et que la réponse porte sur un sujet lié (planning, organisation, travail à faire),
-    mentionner naturellement les événements pertinents — sans les lister de façon mécanique.
-    Exemple : si l'utilisateur parle d'un projet et qu'une deadline tombe demain,
-    le signaler en fin de réponse de façon brève et naturelle.
-    Ne pas mentionner les deadlines si la question est sans rapport (météo, conversation, etc.).
+    RÈGLE CALENDRIER :
+    Le calendrier n'est visible que si l'utilisateur a demandé son planning.
+    Si calendar_context est vide → ne pas mentionner le calendrier, ne pas inventer d'événements.
+    Ne jamais inférer ou supposer des événements depuis memory_context.
 
     Ne préfixe pas ta réponse avec des labels comme "Réponse :" ou "Assistant :".
   expected_output: >
