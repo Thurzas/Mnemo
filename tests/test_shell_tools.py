@@ -566,12 +566,12 @@ class TestShellExecuteTool:
 
 
 # ══════════════════════════════════════════════════════════════════
-# 6. _confirm_shell_command (main.py)
+# 6. _confirm_shell_command (routing/confirmation.py)
 # ══════════════════════════════════════════════════════════════════
 
 class TestConfirmShellCommand:
     def _get_fn(self):
-        from Mnemo.main import _confirm_shell_command
+        from Mnemo.routing.confirmation import _confirm_shell_command
         return _confirm_shell_command
 
     def test_oui_confirms(self):
@@ -613,56 +613,57 @@ class TestConfirmShellCommand:
 
 
 # ══════════════════════════════════════════════════════════════════
-# 7. _handle_shell_confirmation (main.py)
+# 7. _handle_shell_confirmation (routing/confirmation.py)
 # ══════════════════════════════════════════════════════════════════
 
 class TestHandleShellConfirmation:
     def _get_fn(self):
-        from Mnemo.main import _handle_shell_confirmation
+        from Mnemo.routing.confirmation import _handle_shell_confirmation
         return _handle_shell_confirmation
+
+    def _rr(self, route="shell", shell_command="ls /data"):
+        from Mnemo.routing.context import RouterResult
+        metadata = {"shell_command": shell_command} if shell_command is not None else {}
+        return RouterResult(route=route, confidence=1.0, handler="test", metadata=metadata)
 
     def test_non_shell_route_unchanged(self):
         fn = self._get_fn()
-        eval_json = {"route": "conversation"}
-        result, cmd = fn(eval_json)
-        assert result["route"] == "conversation"
+        result, cmd = fn(self._rr(route="conversation", shell_command=None), "test")
+        assert result.route == "conversation"
         assert cmd == ""
 
     def test_shell_confirmed(self):
         fn = self._get_fn()
-        eval_json = {"route": "shell", "shell_command": "ls /data"}
-        with patch("Mnemo.main._confirm_shell_command", return_value=True):
-            result, cmd = fn(eval_json)
-        assert result["route"] == "shell"
+        with patch("Mnemo.routing.confirmation._confirm_shell_command", return_value=True):
+            result, cmd = fn(self._rr("shell", "ls /data"), "test")
+        assert result.route == "shell"
         assert cmd == "ls /data"
 
     def test_shell_refused_reverts_to_conversation(self):
         fn = self._get_fn()
-        eval_json = {"route": "shell", "shell_command": "ls /data"}
-        with patch("Mnemo.main._confirm_shell_command", return_value=False):
-            result, cmd = fn(eval_json)
-        assert result["route"] == "conversation"
+        with patch("Mnemo.routing.confirmation._confirm_shell_command", return_value=False):
+            result, cmd = fn(self._rr("shell", "ls /data"), "test")
+        assert result.route == "conversation"
         assert cmd == ""
 
     def test_shell_no_command_reverts(self):
         fn = self._get_fn()
-        eval_json = {"route": "shell", "shell_command": ""}
-        result, cmd = fn(eval_json)
-        assert result["route"] == "conversation"
+        with patch("Mnemo.routing.confirmation._extract_shell_command", return_value=""):
+            result, cmd = fn(self._rr("shell", ""), "test")
+        assert result.route == "conversation"
         assert cmd == ""
 
     def test_shell_missing_command_key_reverts(self):
         fn = self._get_fn()
-        eval_json = {"route": "shell"}
-        result, cmd = fn(eval_json)
-        assert result["route"] == "conversation"
+        with patch("Mnemo.routing.confirmation._extract_shell_command", return_value=""):
+            result, cmd = fn(self._rr("shell", shell_command=None), "test")
+        assert result.route == "conversation"
         assert cmd == ""
 
     def test_command_stripped(self):
         fn = self._get_fn()
-        eval_json = {"route": "shell", "shell_command": "  ls /data  "}
-        with patch("Mnemo.main._confirm_shell_command", return_value=True):
-            result, cmd = fn(eval_json)
+        with patch("Mnemo.routing.confirmation._confirm_shell_command", return_value=True):
+            result, cmd = fn(self._rr("shell", "  ls /data  "), "test")
         assert cmd == "ls /data"
 
 

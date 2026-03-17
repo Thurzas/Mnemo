@@ -261,7 +261,8 @@ def reciprocal_rank_fusion(kw: list[dict], vec: list[dict],
                            profile: WeightProfile | None = None) -> list[dict]:
     p = profile or PROFILES["conversation"]
     w_fts, w_vec = adaptive_weights(query)
-    effective_cat_weights = {**CATEGORY_WEIGHTS, **p.category_overrides}
+    # Priorité : profil override > poids appris > poids statiques
+    effective_cat_weights = {**CATEGORY_WEIGHTS, **_load_learned_weights(), **p.category_overrides}
 
     scores: dict[str, float] = {}
     all_chunks: dict[str, dict] = {}
@@ -440,6 +441,123 @@ def score_and_record_chunk_usage(session: dict, session_id: str) -> None:
                     )
 
         db.commit()
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 5.4 — Active learning sur les poids
+# ══════════════════════════════════════════════════════════════
+
+MIN_SESSIONS  = 20    # sessions minimum avant toute adaptation
+LEARNING_RATE = 0.15  # amortissement — max 15% de changement par cycle
+WEIGHT_MIN    = 0.30  # plancher absolu
+WEIGHT_MAX    = 3.00  # plafond absolu
+MIN_RETRIEVED = 10    # nb minimum de retrievals pour qu'une catégorie soit ajustée
+
+
+def compute_category_stats(db: sqlite3.Connection) -> dict[str, dict]:
+    """
+    Lit chunk_usage JOIN chunks et retourne par catégorie :
+      retrieved : nb de fois récupéré
+      confirmed : nb de fois utilisé (confirmed=1)
+      utility   : confirmed / retrieved  (0.0 si retrieved == 0)
+    """
+    rows = db.execute("""
+        SELECT c.category,
+               COUNT(*)                                    AS retrieved,
+               SUM(cu.confirmed)                           AS confirmed
+        FROM chunk_usage cu
+        JOIN chunks c ON cu.chunk_id = c.id
+        GROUP BY c.category
+    """).fetchall()
+
+    stats: dict[str, dict] = {}
+    for category, retrieved, confirmed in rows:
+        cat = category or "connaissance"
+        stats[cat] = {
+            "retrieved": retrieved,
+            "confirmed": int(confirmed or 0),
+            "utility":   (confirmed or 0) / retrieved if retrieved else 0.0,
+        }
+    return stats
+
+
+def suggest_weight_adjustments(stats: dict[str, dict],
+                                current_weights: dict[str, float]) -> dict[str, float]:
+    """
+    Calcule les nouveaux poids par catégorie.
+    Principe : nudge proportionnel à l'écart entre l'utilité observée et la baseline.
+      baseline  = utilité moyenne toutes catégories avec retrieved >= MIN_RETRIEVED
+      gap       = utility(cat) / baseline
+      new_weight = old_weight × (1 + LEARNING_RATE × (gap - 1))
+    Clampé entre WEIGHT_MIN et WEIGHT_MAX.
+    Catégories avec retrieved < MIN_RETRIEVED : inchangées.
+    """
+    eligible = {
+        cat: s for cat, s in stats.items()
+        if s["retrieved"] >= MIN_RETRIEVED
+    }
+    if not eligible:
+        return dict(current_weights)
+
+    baseline = sum(s["utility"] for s in eligible.values()) / len(eligible)
+    if baseline == 0:
+        return dict(current_weights)
+
+    new_weights = dict(current_weights)
+    for cat, s in eligible.items():
+        old = current_weights.get(cat, 1.0)
+        gap = s["utility"] / baseline
+        adjusted = old * (1.0 + LEARNING_RATE * (gap - 1.0))
+        new_weights[cat] = round(max(WEIGHT_MIN, min(WEIGHT_MAX, adjusted)), 4)
+
+    return new_weights
+
+
+def _load_learned_weights() -> dict[str, float]:
+    """
+    Charge learned_weights.json depuis data_dir si présent.
+    Retourne {} en cas d'absence ou d'erreur (fallback silencieux sur CATEGORY_WEIGHTS).
+    """
+    path = get_data_dir() / "learned_weights.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {k: float(v) for k, v in data.get("weights", {}).items()}
+    except Exception:
+        return {}
+
+
+def adapt_weights_if_ready() -> bool:
+    """
+    Vérifie si on a suffisamment de données (MIN_SESSIONS sessions avec chunk_usage),
+    calcule les nouveaux poids et écrit learned_weights.json.
+    Retourne True si une adaptation a été effectuée, False sinon.
+    """
+    db = get_db()
+    try:
+        session_count = db.execute(
+            "SELECT COUNT(DISTINCT session_id) FROM chunk_usage"
+        ).fetchone()[0]
+
+        if session_count < MIN_SESSIONS:
+            return False
+
+        stats       = compute_category_stats(db)
+        new_weights = suggest_weight_adjustments(stats, CATEGORY_WEIGHTS)
+
+        path = get_data_dir() / "learned_weights.json"
+        path.write_text(
+            json.dumps({
+                "updated_at":        datetime.now().isoformat(),
+                "sessions_analyzed": session_count,
+                "weights":           new_weights,
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return True
     finally:
         db.close()
 

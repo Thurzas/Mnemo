@@ -50,6 +50,7 @@ from Mnemo.tools.memory_tools import (
     update_markdown_section, sync_markdown_to_db,
     _sessions_dir, _markdown_path,
     score_and_record_chunk_usage,
+    adapt_weights_if_ready,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
@@ -448,6 +449,12 @@ def end_session(session_id: str) -> tuple:
     # Phase 5.3 — scoring d'usage des chunks (silencieux si Ollama offline)
     try:
         score_and_record_chunk_usage(session, session_id)
+    except Exception:
+        pass
+
+    # Phase 5.4 — adaptation des poids si données suffisantes
+    try:
+        adapt_weights_if_ready()
     except Exception:
         pass
 

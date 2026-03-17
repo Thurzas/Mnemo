@@ -70,7 +70,7 @@ def _make_ics(tmp_path: Path) -> Path:
 def ics_env(tmp_path, monkeypatch):
     """Fixture : pointe CALENDAR_SOURCE sur un ICS temporaire, remet le cache à zéro."""
     ics_path = _make_ics(tmp_path)
-    monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_path))
+    monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_path))
     ct._cache["data"]       = None
     ct._cache["fetched_at"] = None
     return ics_path
@@ -83,19 +83,19 @@ def ics_env(tmp_path, monkeypatch):
 class TestCalendarIsWritable:
 
     def test_local_path_is_writable(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "/data/agenda.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "/data/agenda.ics")
         assert ct.calendar_is_writable() is True
 
     def test_http_url_is_not_writable(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "http://example.com/cal.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "http://example.com/cal.ics")
         assert ct.calendar_is_writable() is False
 
     def test_https_url_is_not_writable(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://calendar.google.com/xxx")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://calendar.google.com/xxx")
         assert ct.calendar_is_writable() is False
 
     def test_empty_source_is_not_writable(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "")
         assert ct.calendar_is_writable() is False
 
 
@@ -120,11 +120,12 @@ class TestFormatEventsWithUid:
     def test_empty_list_returns_no_events_message(self):
         assert "Aucun" in ct.format_events_with_uid([])
 
-    def test_uid_truncated_to_12_chars(self):
+    def test_index_shown_instead_of_uid(self):
+        """format_events_with_uid expose [#N] — pas l'UID brut."""
         ev  = self._make_ev("abcdefghijklmnopqrstuvwxyz", "Réunion")
         out = ct.format_events_with_uid([ev])
-        assert "abcdefghijkl" in out
-        assert "abcdefghijklm" not in out
+        assert "[#0]" in out
+        assert "abcdefghijkl" not in out
 
     def test_time_appears_when_datetime_set(self):
         ev  = self._make_ev("uid-abc", "Déjeuner", days=2, with_time=True)
@@ -182,7 +183,7 @@ class TestAddEvent:
             ct.add_event("X", "not-a-date")
 
     def test_add_raises_if_not_writable(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://example.com/cal.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://example.com/cal.ics")
         with pytest.raises(ValueError):
             ct.add_event("X", "2026-04-01")
 
@@ -213,7 +214,7 @@ class TestDeleteEvent:
         assert ct._cache["data"] is None
 
     def test_delete_raises_if_not_writable(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://example.com/cal.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://example.com/cal.ics")
         with pytest.raises(ValueError):
             ct.delete_event("uid-alpha-1234")
 
@@ -248,7 +249,7 @@ class TestUpdateEvent:
         assert ct._cache["data"] is None
 
     def test_update_raises_if_not_writable(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://example.com/cal.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://example.com/cal.ics")
         with pytest.raises(ValueError):
             ct.update_event("uid-alpha-1234", title="X")
 
@@ -269,7 +270,7 @@ class TestGetEventsWithUid:
         assert "uid-alpha-1234" in uids
 
     def test_empty_when_no_source(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "")
         events = ct.get_events_with_uid(days=30)
         assert events == []
 
@@ -393,7 +394,7 @@ class TestCalendarWriteCrewRun:
         assert "reformuler" in result.lower() or "interpréter" in result.lower()
 
     def test_read_only_source_blocked(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://example.com/cal.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://example.com/cal.ics")
         ct._cache["data"] = None
         ct._cache["fetched_at"] = None
         from Mnemo.crew import CalendarWriteCrew
