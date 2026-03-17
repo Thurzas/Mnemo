@@ -128,7 +128,8 @@ def init_db(db_path: Path = None):
             session_id   TEXT,
             retrieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             used_score   REAL,
-            confirmed    INTEGER  DEFAULT 0
+            confirmed    INTEGER  DEFAULT 0,
+            profile      TEXT     DEFAULT 'conversation'
         );
 
         -- ── CuriosityCrew — questions skippées ────────────────────────
@@ -225,8 +226,11 @@ def migrate_db(db_path: Path = None):
             session_id   TEXT,
             retrieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             used_score   REAL,
-            confirmed    INTEGER  DEFAULT 0
+            confirmed    INTEGER  DEFAULT 0,
+            profile      TEXT     DEFAULT 'conversation'
         )""",
+        # Phase 5.5 — profil par retrieval
+        "ALTER TABLE chunk_usage ADD COLUMN profile TEXT DEFAULT 'conversation'",
         # Scheduler
         """CREATE TABLE IF NOT EXISTS scheduled_tasks (
             id          TEXT PRIMARY KEY,

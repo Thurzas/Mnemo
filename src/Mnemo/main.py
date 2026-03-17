@@ -266,7 +266,7 @@ def _collect_answers(questions: list[dict]) -> list[dict]:
     return answers
 
 
-def curiosity_session(session_content: str) -> None:
+def curiosity_session(session_content: str, session_id: str = "") -> None:
     """
     Lance une session de questionnement proactif post-consolidation.
 
@@ -301,12 +301,32 @@ def curiosity_session(session_content: str) -> None:
     if remaining_slots > 0 and session_content:
         print("\n🔍 Analyse contextuelle en cours...")
         try:
+            from Mnemo.tools.memory_tools import (
+                _build_memory_overview, retrieve_all,
+                _compress_chunks, _record_retrieved_chunks,
+            )
+            memory_overview = _build_memory_overview()
+            chunks_recent   = retrieve_all(
+                session_content[:400], top_k_final=3, profile="curiosity"
+            )
+            if session_id and chunks_recent:
+                _record_retrieved_chunks(
+                    session_id, [c["id"] for c in chunks_recent], profile="curiosity"
+                )
+            memory_recent = _compress_chunks(chunks_recent, max_tokens=300)
+        except Exception as e:
+            print(f"  ⚠️  Retrieval curiosity ignoré : {e}")
+            memory_overview = memory_content[:1500]
+            memory_recent   = ""
+
+        try:
             structural_summary = "\n".join(
                 f"- {g['question']}" for g in structural_gaps
             ) or "Aucun trou structurel détecté."
 
             result = CuriosityCrew().crew().kickoff(inputs={
-                "memory_content":     memory_content[:6000],
+                "memory_overview":    memory_overview,
+                "memory_recent":      memory_recent,
                 "session_summary":    session_content,
                 "skipped_questions":  skipped_text,
                 "structural_gaps":    structural_summary,
@@ -452,9 +472,11 @@ def end_session(session_id: str) -> tuple:
     except Exception:
         pass
 
-    # Phase 5.4 — adaptation des poids si données suffisantes
+    # Phase 5.5 — adaptation des poids par profil si données suffisantes
     try:
-        adapt_weights_if_ready()
+        adapt_weights_if_ready("global")
+        for _profile in ("conversation", "briefing", "curiosity"):
+            adapt_weights_if_ready(_profile)
     except Exception:
         pass
 
@@ -644,7 +666,7 @@ def run():
         # Questionnement proactif — déclenché même si le résumé est vide
         # (les trous structurels sont détectés par Python, pas par le LLM)
         try:
-            curiosity_session(session_text or session_summary or "")
+            curiosity_session(session_text or session_summary or "", session_id=session_id)
         except Exception as e:
             print(f"  ⚠️  Questionnement ignoré : {e}")
 
@@ -763,7 +785,7 @@ def debug_curiosity() -> None:
     print()
 
     # Lance le questionnaire avec un résumé de test
-    curiosity_session("Session de debug — test du questionnement proactif.")
+    curiosity_session("Session de debug — test du questionnement proactif.", session_id="debug")
 
 
 

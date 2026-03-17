@@ -7,8 +7,11 @@ gap_detection_task:
     détectées automatiquement et sont listées ici — ne les répète pas :
     {structural_gaps}
 
-    Voici le contenu actuel de memory.md :
-    {memory_content}
+    Structure actuelle de memory.md (sections présentes/vides) :
+    {memory_overview}
+
+    Extraits pertinents liés à la session (chunks les plus proches) :
+    {memory_recent}
 
     Voici le résumé de la session qui vient de se terminer :
     {session_summary}

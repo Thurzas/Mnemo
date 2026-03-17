@@ -101,7 +101,29 @@ def _get_last_session_summary() -> str:
     return "Aucune session récente disponible."
 
 
-def _get_memory_highlights() -> str:
+def _get_memory_highlights(session_id: str = "", context_query: str = "") -> str:
+    """
+    Récupère les highlights mémoire pour le briefing.
+    Phase 5.5 : utilise retrieve_all(profile="briefing") + _compress_chunks()
+    pour un retrieval traçable dans chunk_usage (données pour l'Axe A).
+    Fallback sur lecture directe de memory.md si le pipeline échoue.
+    """
+    try:
+        from Mnemo.tools.memory_tools import (
+            retrieve_all, _compress_chunks, _record_retrieved_chunks,
+        )
+        query  = context_query or "projets décisions préférences identité"
+        chunks = retrieve_all(query, top_k_final=4, profile="briefing")
+        if session_id and chunks:
+            _record_retrieved_chunks(
+                session_id, [c["id"] for c in chunks], profile="briefing"
+            )
+        result = _compress_chunks(chunks, max_tokens=600)
+        return result if result else "Mémoire vide ou non structurée."
+    except Exception as e:
+        log.warning(f"retrieve_all briefing : {e} — fallback lecture directe")
+
+    # Fallback : lecture directe des sections clés (comportement pré-5.5)
     if not MARKDOWN_PATH.exists():
         return "Mémoire non initialisée."
     content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore")
@@ -158,13 +180,18 @@ def action_briefing() -> None:
         log.warning(f"Calendrier : {e}")
         calendar_today = "Calendrier non disponible."
 
-    now = datetime.now()
+    now        = datetime.now()
+    session_id = f"briefing_{now.strftime('%Y%m%d_%H%M%S')}"
+    last_sess  = _get_last_session_summary()
     try:
         result  = BriefingCrew().crew().kickoff(inputs={
             "temporal_context":     get_temporal_context(),
             "calendar_today":       calendar_today,
-            "last_session_summary": _get_last_session_summary(),
-            "memory_highlights":    _get_memory_highlights(),
+            "last_session_summary": last_sess,
+            "memory_highlights":    _get_memory_highlights(
+                session_id=session_id,
+                context_query=f"{calendar_today[:200]} {last_sess[:200]}",
+            ),
             "date_str":             _date_fr(now),
             "datetime_str":         now.strftime("%Y-%m-%d %H:%M"),
         })
@@ -219,13 +246,17 @@ def action_weekly() -> None:
                     pass
     sessions_summary = "\n".join(session_lines) if session_lines else "Aucune session cette semaine."
 
-    date_str = f"semaine du {_date_fr(week_start)} au {_date_fr(week_end)}"
+    date_str   = f"semaine du {_date_fr(week_start)} au {_date_fr(week_end)}"
+    session_id = f"weekly_{now.strftime('%Y%m%d_%H%M%S')}"
     try:
         result  = BriefingCrew().crew().kickoff(inputs={
             "temporal_context":     f"Date actuelle : {now.strftime('%Y-%m-%d %H:%M')}",
             "calendar_today":       calendar_week,
             "last_session_summary": sessions_summary,
-            "memory_highlights":    _get_memory_highlights(),
+            "memory_highlights":    _get_memory_highlights(
+                session_id=session_id,
+                context_query=f"{sessions_summary[:200]} {calendar_week[:200]}",
+            ),
             "date_str":             date_str,
             "datetime_str":         now.strftime("%Y-%m-%d %H:%M"),
         })
