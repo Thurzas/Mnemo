@@ -261,6 +261,207 @@ def format_results_for_prompt(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Deep fetch — récupération complète de page + extraction de liens
+# ══════════════════════════════════════════════════════════════════════════════
+
+_FETCH_MAX_CHARS = 60_000   # taille max du texte extrait (caractères)
+_FETCH_MAX_BYTES = 300_000  # limite download brute (bytes HTML)
+
+# Domaines de confiance → bonus de pertinence
+_TRUSTED_DOMAINS = {
+    "wikipedia.org", "developer.mozilla.org", "react.dev", "reactjs.org",
+    "docs.python.org", "fastapi.tiangolo.com", "github.com", "stackoverflow.com",
+    "w3schools.com", "css-tricks.com", "freecodecamp.org", "mdn.io",
+    "devdocs.io", "vuejs.org", "angular.io", "svelte.dev", "nextjs.org",
+    "tailwindcss.com", "typescriptlang.org", "nodejs.org",
+}
+
+
+def fetch_page_content(url: str) -> dict:
+    """
+    Fetche une page web et retourne son contenu nettoyé + ses liens.
+
+    Retourne :
+        {
+          "title" : str,
+          "text"  : str,           # texte lisible, < _FETCH_MAX_CHARS
+          "links" : list[dict],    # [{title, url}]
+          "error" : str | None,
+        }
+    """
+    import html as _html
+
+    if _is_private_url(url):
+        return {"title": "", "text": "", "links": [], "error": "URL privée"}
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent":      "Mozilla/5.0 (compatible; Mnemo-Agent/2.0; +local)",
+                "Accept":          "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "fr,en;q=0.8",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=WEB_TIMEOUT) as resp:
+            ct = resp.headers.get("Content-Type", "")
+            if "text/" not in ct:
+                return {"title": "", "text": "", "links": [],
+                        "error": f"Type non supporté : {ct.split(';')[0]}"}
+            charset = "utf-8"
+            if "charset=" in ct:
+                charset = ct.split("charset=")[-1].split(";")[0].strip() or "utf-8"
+            raw = resp.read(_FETCH_MAX_BYTES)
+            body = raw.decode(charset, errors="replace")
+    except Exception as exc:
+        return {"title": "", "text": "", "links": [], "error": str(exc)}
+
+    # Titre
+    tm = re.search(r"<title[^>]*>(.*?)</title>", body, re.I | re.S)
+    title = _html.unescape(tm.group(1).strip()) if tm else ""
+
+    # Base URL pour résolution liens relatifs
+    parsed_parts = url.split("/")
+    base = "/".join(parsed_parts[:3])          # "https://domain.com"
+
+    # Liens <a href>
+    links: list[dict] = []
+    seen_urls: set[str] = set()
+    for m in re.finditer(
+        r'<a\b[^>]*\bhref=["\']([^"\'#][^"\']*)["\'][^>]*>(.*?)</a>',
+        body, re.I | re.S,
+    ):
+        href = m.group(1).strip()
+        lt   = re.sub(r"<[^>]+>", " ", m.group(2)).strip()
+        lt   = _html.unescape(re.sub(r"\s+", " ", lt))[:150]
+        if not lt:
+            continue
+        if href.startswith("//"):
+            href = "https:" + href
+        elif href.startswith("/"):
+            href = base + href
+        elif not href.startswith("http"):
+            continue
+        if _is_private_url(href) or href in seen_urls:
+            continue
+        seen_urls.add(href)
+        links.append({"title": lt, "url": href})
+
+    # Nettoyage HTML → texte
+    # Supprime scripts / styles / balises nav / commentaires
+    body = re.sub(r"<!--.*?-->", " ", body, flags=re.S)
+    body = re.sub(r"<(script|style|nav|footer|header|aside)[^>]*>.*?</\1>",
+                  " ", body, flags=re.I | re.S)
+    body = re.sub(r"<[^>]+>", " ", body)
+    body = _html.unescape(body)
+    body = re.sub(r"[ \t]+", " ", body)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+
+    if len(body) > _FETCH_MAX_CHARS:
+        body = body[:_FETCH_MAX_CHARS].rsplit(" ", 1)[0] + " […]"
+
+    return {"title": title, "text": body, "links": links, "error": None}
+
+
+def _score_link(link: dict, query_terms: set[str]) -> float:
+    """Score de pertinence 0.0–1.0 d'un lien par rapport aux termes de la requête."""
+    title_words = set(re.findall(r"\w+", link.get("title", "").lower()))
+    url_words   = set(re.findall(r"\w+", link.get("url",   "").lower()))
+    if not query_terms:
+        return 0.0
+
+    title_overlap = len(query_terms & title_words) / len(query_terms)
+    url_overlap   = len(query_terms & url_words)   / len(query_terms)
+    score = title_overlap * 0.65 + url_overlap * 0.35
+
+    # Bonus domaine de confiance
+    try:
+        domain = urllib.parse.urlparse(link["url"]).netloc.lower()
+        if any(td in domain for td in _TRUSTED_DOMAINS):
+            score = min(score + 0.2, 1.0)
+    except Exception:
+        pass
+
+    # Malus liens de navigation génériques
+    nav_words = {"home", "accueil", "login", "register", "contact", "about",
+                 "privacy", "terms", "cookie", "404", "sitemap"}
+    if title_words & nav_words:
+        score *= 0.2
+
+    return round(score, 3)
+
+
+def extract_relevant_links(
+    links: list[dict],
+    query: str,
+    threshold: float = 0.25,
+    max_n: int = 4,
+) -> list[dict]:
+    """
+    Retourne les liens les plus pertinents pour la requête.
+
+    Chaque élément retourné : {title, url, score, context}
+    context = label affiché dans la confirmation ("site:react.dev · react hooks")
+    """
+    query_terms = set(re.findall(r"\w+", query.lower())) - {
+        "le", "la", "les", "de", "du", "des", "un", "une",
+        "et", "ou", "en", "je", "tu", "il", "nous", "vous", "ils",
+        "sur", "pour", "avec", "dans", "par", "qui", "que",
+    }
+    scored = []
+    seen_urls: set[str] = set()
+    for link in links:
+        url = link.get("url", "")
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        s = _score_link(link, query_terms)
+        if s >= threshold:
+            try:
+                domain = urllib.parse.urlparse(url).netloc.replace("www.", "")
+            except Exception:
+                domain = url
+            # Construit le label de contexte
+            kw_in_title = [w for w in query_terms if w in link.get("title", "").lower()]
+            kw_label    = " · ".join(kw_in_title[:3]) if kw_in_title else query[:30]
+            context     = f"site:{domain} · {kw_label}"
+            scored.append({**link, "score": s, "context": context})
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:max_n]
+
+
+def save_web_page(text: str, title: str, url: str, query: str) -> Optional[Path]:
+    """
+    Sauvegarde le texte d'une page fetchée dans /data/web_docs/.
+    Retourne le Path écrit, ou None si erreur.
+    """
+    try:
+        from Mnemo.context import get_data_dir
+        web_docs = get_data_dir() / "web_docs"
+        web_docs.mkdir(exist_ok=True)
+
+        slug = re.sub(r"[^\w\s-]", "", title.lower())[:40].strip().replace(" ", "_")
+        date = datetime.now().strftime("%Y%m%d_%H%M")
+        fname = f"{slug}_{date}.md" if slug else f"web_{date}.md"
+
+        content = (
+            f"---\n"
+            f"source: {url}\n"
+            f"query: {query}\n"
+            f"fetched: {datetime.now().isoformat(timespec='seconds')}\n"
+            f"---\n\n"
+            f"# {title}\n\n"
+            f"{text}\n"
+        )
+        path = web_docs / fname
+        path.write_text(content, encoding="utf-8")
+        return path
+    except Exception:
+        return None
+
+
 def format_result_for_memory(result: dict, query: str) -> str:
     """
     Formate un résultat individuel pour stockage dans ## Sources web de memory.md.

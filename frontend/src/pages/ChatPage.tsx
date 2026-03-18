@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { MessageBubble } from '@/components/MessageBubble'
 import { ConfirmModal } from '@/components/ConfirmModal'
+import { WebSuggestPanel, type WebSuggestion } from '@/components/WebSuggestPanel'
 import { auth, api } from '@/api'
 import styles from './ChatPage.module.css'
 
@@ -57,9 +58,10 @@ export function ChatPage() {
   const [sessionId, setSessionId]     = useState<string | undefined>(
     sessionStorage.getItem(SID_KEY) ?? undefined
   )
-  const [webConfirm, setWebConfirm]   = useState<WebConfirmState | null>(null)
-  const [wsStatus, setWsStatus]       = useState<WsStatus>('connecting')
-  const [statusText, setStatusText]   = useState<string | null>(null)
+  const [webConfirm, setWebConfirm]     = useState<WebConfirmState | null>(null)
+  const [webSuggestions, setWebSuggestions] = useState<{ suggestions: WebSuggestion[], sessionId: string, originalQuery: string } | null>(null)
+  const [wsStatus, setWsStatus]         = useState<WsStatus>('connecting')
+  const [statusText, setStatusText]     = useState<string | null>(null)
 
   // ── Audio state ───────────────────────────────────────────────────
   const [recording, setRecording]     = useState(false)
@@ -156,6 +158,14 @@ export function ChatPage() {
           setStreamBuffer('')
           break
 
+        case 'web_suggest':
+          setWebSuggestions({
+            suggestions:   (data.suggestions as WebSuggestion[]) ?? [],
+            sessionId:     String(data.session_id ?? ''),
+            originalQuery: String(data.original_query ?? ''),
+          })
+          break
+
         case 'error':
           setMessages(prev => [
             ...prev, { role: 'mnemo', content: `⚠ ${data.detail ?? 'Erreur inconnue'}` },
@@ -220,6 +230,18 @@ export function ChatPage() {
       ...(planWeb ? { plan_web: planWeb } : {}),
     })
   }, [])
+
+  const handleExploreLink = useCallback((suggestion: WebSuggestion) => {
+    const sid = webSuggestions?.sessionId
+    sendWs({
+      type:           'web_link_explore',
+      url:            suggestion.url,
+      title:          suggestion.title,
+      original_query: webSuggestions?.originalQuery ?? suggestion.title,
+      session_id:     sid,
+    })
+    setWebSuggestions(null)
+  }, [webSuggestions])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -432,6 +454,16 @@ export function ChatPage() {
           {loading ? '…' : '↑'}
         </button>
       </div>
+
+      {webSuggestions && webSuggestions.suggestions.length > 0 && (
+        <WebSuggestPanel
+          suggestions={webSuggestions.suggestions}
+          originalQuery={webSuggestions.originalQuery}
+          sessionId={webSuggestions.sessionId}
+          onExplore={handleExploreLink}
+          onDismiss={() => setWebSuggestions(null)}
+        />
+      )}
 
       {webConfirm && (
         <ConfirmModal

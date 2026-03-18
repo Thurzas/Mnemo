@@ -235,9 +235,53 @@ def _handle_message_web(
         if web_confirmed is None:
             return {"__web_confirm__": True, "web_query": meta["web_query"]}
         elif web_confirmed:
-            from Mnemo.tools.web_tools import web_search, format_results_for_prompt
-            results = web_search(confirmed_web_query or meta["web_query"])
+            from Mnemo.tools.web_tools import (
+                web_search, format_results_for_prompt,
+                fetch_page_content, extract_relevant_links, save_web_page,
+            )
+            import Mnemo.status as _status_mod_web
+            query = confirmed_web_query or meta["web_query"]
+
+            _status_mod_web.emit(session_id, f"Recherche : {query}…")
+            results = web_search(query)
             web_context = format_results_for_prompt(results) if results else ""
+
+            # Deep fetch — récupère le contenu complet des résultats + liens
+            suggestions: list[dict] = []
+            for r in results[:2]:   # max 2 pages fetchées pour limiter le temps
+                page_url = r.get("url", "")
+                if not page_url:
+                    continue
+                _status_mod_web.emit(session_id, f"Lecture de la page : {r.get('title', page_url)[:50]}…")
+                page = fetch_page_content(page_url)
+                if page.get("error") or not page.get("text"):
+                    continue
+                saved = save_web_page(page["text"], page["title"] or r["title"], page_url, query)
+                if saved:
+                    _status_mod_web.emit(session_id, f"Sauvegardé : {saved.name}")
+                # Liens pertinents
+                links = page.get("links", [])
+                page_suggestions = extract_relevant_links(links, query, threshold=0.25, max_n=3)
+                suggestions.extend(page_suggestions)
+
+            # Déduplique + trie les suggestions globales
+            seen: set[str] = set()
+            deduped: list[dict] = []
+            for s in sorted(suggestions, key=lambda x: x["score"], reverse=True):
+                if s["url"] not in seen:
+                    seen.add(s["url"])
+                    deduped.append(s)
+            suggestions = deduped[:4]
+
+            # Stocke les suggestions dans world_state pour le WS handler
+            if suggestions:
+                from Mnemo.tools.memory_tools import load_world_state
+                from Mnemo.context import get_data_dir as _gdd
+                ws = load_world_state()
+                ws["pending_web_suggestions"] = suggestions
+                (_gdd() / "world_state.json").write_text(
+                    json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
         else:
             meta["needs_web"] = False
             meta["web_query"] = None
@@ -292,6 +336,20 @@ def _handle_message_web(
                 return {"__plan_created__": True, "response": response, "plan_step": pending}
         except Exception:
             pass
+
+    # Suggestions de liens (deep fetch après search confirmée)
+    try:
+        from Mnemo.tools.memory_tools import load_world_state
+        from Mnemo.context import get_data_dir
+        ws = load_world_state()
+        suggestions = ws.pop("pending_web_suggestions", None)
+        if suggestions:
+            (get_data_dir() / "world_state.json").write_text(
+                json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            return {"__web_suggestions__": True, "response": response, "suggestions": suggestions}
+    except Exception:
+        pass
 
     return response
 
@@ -1152,10 +1210,14 @@ async def ws_message(websocket: WebSocket):
             return
 
         # Déclenchement immédiat du plan — extrait avant streaming
-        plan_step = None
+        plan_step    = None
+        web_suggests = None
         if isinstance(result, dict) and result.get("__plan_created__"):
             plan_step = result.get("plan_step")
             result    = result["response"]
+        elif isinstance(result, dict) and result.get("__web_suggestions__"):
+            web_suggests = result.get("suggestions")
+            result       = result["response"]
 
         words = (result or "").split(" ")
         for i, word in enumerate(words):
@@ -1168,6 +1230,12 @@ async def ws_message(websocket: WebSocket):
         # Émis après done — le frontend peut ouvrir le modal sans interrompre le streaming
         if plan_step:
             await websocket.send_json({"type": "plan_step_ready", **plan_step})
+        if web_suggests:
+            await websocket.send_json({
+                "type":        "web_suggest",
+                "session_id":  sid,
+                "suggestions": web_suggests,
+            })
 
     async def _execute_plan_web_search(
         sid: str,
@@ -1258,6 +1326,68 @@ async def ws_message(websocket: WebSocket):
                     await _execute_plan_web_search(sid, plan_web, confirmed, wq)
                 else:
                     await _run_and_stream(original, sid, confirmed, wq)
+
+            elif msg_type == "web_link_explore":
+                # Exploration d'un lien suggéré (Phase 6.5 deep fetch)
+                link_url   = msg.get("url", "")
+                link_title = msg.get("title", link_url)
+                link_query = msg.get("original_query", link_title)
+                sid        = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+
+                await websocket.send_json({"type": "thinking"})
+
+                import Mnemo.status as _status_mod_lnk
+                sq: asyncio.Queue = asyncio.Queue()
+                _status_mod_lnk.set_session(sid, sq, loop)
+
+                def _do_link_explore() -> str:
+                    from Mnemo.tools.web_tools import (
+                        fetch_page_content, extract_relevant_links,
+                        save_web_page, format_results_for_prompt,
+                    )
+                    _status_mod_lnk.emit(sid, f"Lecture : {link_title[:60]}…")
+                    page = fetch_page_content(link_url)
+                    if page.get("error") or not page.get("text"):
+                        return f"Impossible de lire la page : {page.get('error', 'contenu vide')}"
+                    saved = save_web_page(page["text"], page["title"] or link_title, link_url, link_query)
+                    if saved:
+                        _status_mod_lnk.emit(sid, f"Sauvegardé : {saved.name}")
+                    # Extrait un résumé (premiers 2000 caractères + compte des liens)
+                    excerpt = page["text"][:2000].strip()
+                    n_links = len(page.get("links", []))
+                    reply = (
+                        f"**{page['title'] or link_title}**\n"
+                        f"Source : {link_url}\n\n"
+                        f"{excerpt}{'…' if len(page['text']) > 2000 else ''}\n\n"
+                        f"_{n_links} liens trouvés sur la page._"
+                    )
+                    if saved:
+                        reply += f"\n\n📄 Contenu sauvegardé dans `{saved.name}`."
+                    return reply
+
+                fut2 = loop.run_in_executor(None, lambda: user_context.run(_do_link_explore))
+                while not fut2.done():
+                    try:
+                        ev = sq.get_nowait()
+                        await websocket.send_json(ev)
+                    except asyncio.QueueEmpty:
+                        await asyncio.sleep(0.03)
+                while not sq.empty():
+                    await websocket.send_json(sq.get_nowait())
+                _status_mod_lnk.clear_session(sid)
+
+                try:
+                    link_result = fut2.result()
+                except Exception as e:
+                    await websocket.send_json({"type": "error", "detail": str(e)})
+                    continue
+
+                words = (link_result or "").split(" ")
+                for i, word in enumerate(words):
+                    chunk = word if i == len(words) - 1 else word + " "
+                    await websocket.send_json({"type": "token", "text": chunk})
+                    await asyncio.sleep(0.012)
+                await websocket.send_json({"type": "done", "session_id": sid})
 
     except WebSocketDisconnect:
         pass
