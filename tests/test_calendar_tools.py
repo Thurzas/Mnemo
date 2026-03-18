@@ -301,17 +301,17 @@ class TestFormatEventsForPrompt:
     def test_label_format(self):
         events = [_make_event(3, "Sprint review")]
         result = format_events_for_prompt(events)
-        assert "[Dans 3 jours]" in result
+        assert "Dans 3 jours" in result
 
     def test_today_label_format(self):
         events = [_make_event(0, "Standup")]
         result = format_events_for_prompt(events)
-        assert "[Aujourd'hui]" in result
+        assert "Aujourd'hui" in result
 
     def test_tomorrow_label_format(self):
         events = [_make_event(1, "Deploy")]
         result = format_events_for_prompt(events)
-        assert "[Demain]" in result
+        assert "Demain" in result
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -412,24 +412,27 @@ class TestGetTemporalContext:
         result = get_temporal_context()
         assert "Date et heure actuelles" in result
 
-    def test_without_calendar_says_no_events(self):
-        with patch.object(ct, "get_upcoming_events", return_value=[]):
-            result = get_temporal_context()
-        assert "Aucun evenement calendrier disponible" in result
+    def test_without_calendar_no_events_in_temporal(self):
+        """get_temporal_context() ne contient plus d'agenda — juste date/semaine/hier."""
+        result = get_temporal_context()
+        assert "Date et heure actuelles" in result
+        assert "Semaine en cours" in result
+        assert "Hier :" in result
 
-    def test_with_events_lists_them(self):
+    def test_deadline_context_lists_events(self):
+        """Les événements sont dans get_deadline_context(), pas dans get_temporal_context()."""
         fake_events = [_make_event(0, "Démo"), _make_event(1, "Réunion")]
         with patch.object(ct, "get_upcoming_events", return_value=fake_events):
-            result = get_temporal_context()
+            result = ct.get_deadline_context()
         assert "Démo" in result
         assert "Réunion" in result
-        assert "Agenda complet" in result
 
-    def test_with_events_shows_lookahead_days(self):
-        fake_events = [_make_event(0, "Event")]
-        with patch.object(ct, "get_upcoming_events", return_value=fake_events):
-            result = get_temporal_context()
-        assert str(ct.LOOKAHEAD_DAYS) in result
+    def test_lookahead_days_used_in_upcoming_events(self):
+        """LOOKAHEAD_DAYS est utilisé dans get_upcoming_events, pas dans temporal_context."""
+        assert ct.LOOKAHEAD_DAYS > 0
+        result = get_temporal_context()
+        # temporal_context est minimal — ne contient pas de chiffre LOOKAHEAD_DAYS
+        assert "Hier :" in result
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -439,21 +442,21 @@ class TestGetTemporalContext:
 class TestCalendarIsConfigured:
 
     def test_no_source_returns_false(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "")
         assert calendar_is_configured() is False
 
     def test_source_without_icalendar_returns_false(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "/path/to/agenda.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "/path/to/agenda.ics")
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", False)
         assert calendar_is_configured() is False
 
     def test_source_with_icalendar_returns_true(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "/path/to/agenda.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "/path/to/agenda.ics")
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         assert calendar_is_configured() is True
 
     def test_url_source_with_icalendar_returns_true(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://calendar.google.com/ical/xxx/basic.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://calendar.google.com/ical/xxx/basic.ics")
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         assert calendar_is_configured() is True
 
@@ -465,29 +468,29 @@ class TestCalendarIsConfigured:
 class TestFetchIcsRaw:
 
     def test_no_source_returns_none(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "")
         assert ct._fetch_ics_raw() is None
 
     def test_icalendar_unavailable_returns_none(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "/agenda.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "/agenda.ics")
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", False)
         assert ct._fetch_ics_raw() is None
 
     def test_local_file_exists_returns_bytes(self, tmp_path, monkeypatch):
         ics_file = tmp_path / "agenda.ics"
         ics_file.write_bytes(b"BEGIN:VCALENDAR\nEND:VCALENDAR")
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_file))
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_file))
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         result = ct._fetch_ics_raw()
         assert result == b"BEGIN:VCALENDAR\nEND:VCALENDAR"
 
     def test_local_file_missing_returns_none(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "/nonexistent/agenda.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "/nonexistent/agenda.ics")
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         assert ct._fetch_ics_raw() is None
 
     def test_url_source_returns_bytes(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://example.com/cal.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://example.com/cal.ics")
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         fake_response = MagicMock()
         fake_response.read.return_value = b"BEGIN:VCALENDAR\nEND:VCALENDAR"
@@ -498,14 +501,14 @@ class TestFetchIcsRaw:
         assert result == b"BEGIN:VCALENDAR\nEND:VCALENDAR"
 
     def test_url_network_error_returns_none(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://example.com/cal.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://example.com/cal.ics")
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         with patch("urllib.request.urlopen", side_effect=OSError("Network error")):
             result = ct._fetch_ics_raw()
         assert result is None
 
     def test_url_timeout_returns_none(self, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", "https://example.com/cal.ics")
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: "https://example.com/cal.ics")
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         import urllib.error
         with patch("urllib.request.urlopen", side_effect=TimeoutError("timeout")):
@@ -782,14 +785,14 @@ class TestICSIntegration:
         return f
 
     def test_parses_event_today(self, ics_file, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_file))
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_file))
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         events = get_upcoming_events(days=7)
         titles = [e["title"] for e in events]
         assert "Stand-up quotidien" in titles
 
     def test_parses_all_day_event(self, ics_file, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_file))
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_file))
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         events = get_upcoming_events(days=7)
         all_day = [e for e in events if e["title"] == "Journée off"]
@@ -797,28 +800,28 @@ class TestICSIntegration:
         assert all_day[0]["datetime"] is None
 
     def test_excludes_past_event(self, ics_file, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_file))
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_file))
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         events = get_upcoming_events(days=7)
         titles = [e["title"] for e in events]
         assert "Réunion passée" not in titles
 
     def test_excludes_far_future_event(self, ics_file, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_file))
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_file))
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         events = get_upcoming_events(days=7)
         titles = [e["title"] for e in events]
         assert "Événement lointain" not in titles
 
     def test_location_parsed(self, ics_file, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_file))
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_file))
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         events = get_upcoming_events(days=7)
         standup = next(e for e in events if e["title"] == "Stand-up quotidien")
         assert standup["location"] == "Remote"
 
     def test_full_prompt_output(self, ics_file, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_file))
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_file))
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         events = get_upcoming_events(days=7)
         prompt = format_events_for_prompt(events)
@@ -827,7 +830,7 @@ class TestICSIntegration:
         assert "à 10:00" in prompt
 
     def test_file_local_path_works(self, ics_file, monkeypatch):
-        monkeypatch.setattr(ct, "CALENDAR_SOURCE", str(ics_file))
+        monkeypatch.setattr(ct, "get_calendar_source", lambda: str(ics_file))
         monkeypatch.setattr(ct, "_ICALENDAR_AVAILABLE", True)
         raw = ct._fetch_ics_raw()
         assert raw is not None
@@ -984,38 +987,37 @@ class TestGetTemporalContextWithDeadlines:
             "label": label,
         }
 
-    def test_deadline_block_appears_before_agenda(self):
-        """Le bloc deadline doit précéder l'agenda complet."""
-        events = [self._ev(0, "Urgent"), self._ev(7, "Lointain")]
+    def test_deadline_block_present_when_urgent(self):
+        """get_deadline_context() contient 'Deadlines' quand il y a des événements urgents."""
+        events = [self._ev(0, "Urgent")]
         with patch.object(ct, "get_upcoming_events", return_value=events):
-            result = ct.get_temporal_context()
-        idx_deadline = result.index("Deadlines")
-        idx_agenda   = result.index("Agenda complet")
-        assert idx_deadline < idx_agenda
+            result = ct.get_deadline_context()
+        assert "Deadlines" in result
+        assert "Urgent" in result
 
     def test_no_deadline_block_when_no_urgent(self):
-        """Sans événement urgent, pas de section Deadlines dans le contexte."""
+        """Sans événement urgent (> 3j), get_deadline_context() retourne ''."""
         events = [self._ev(5, "Pas urgent"), self._ev(10, "Encore moins")]
         with patch.object(ct, "get_upcoming_events", return_value=events):
-            result = ct.get_temporal_context()
-        assert "Deadlines" not in result
-        assert "Agenda complet" in result
+            result = ct.get_deadline_context()
+        assert result == ""
 
-    def test_agenda_complet_label_present(self):
-        """Le nouveau label 'Agenda complet' remplace l'ancien."""
+    def test_temporal_context_is_minimal(self):
+        """get_temporal_context() est minimal — pas d'agenda, pas de deadlines."""
         events = [self._ev(2, "Event")]
         with patch.object(ct, "get_upcoming_events", return_value=events):
             result = ct.get_temporal_context()
-        assert "Agenda complet" in result
+        assert "Agenda complet" not in result
+        assert "Deadlines" not in result
+        assert "Date et heure actuelles" in result
 
     def test_no_agenda_when_no_events_no_deadlines(self):
-        """Sans aucun événement, ni deadline ni agenda dans le contexte."""
+        """Sans événement, get_deadline_context() retourne '' et temporal reste minimal."""
         with patch.object(ct, "get_upcoming_events", return_value=[]):
-            result = ct.get_temporal_context()
-        assert "Deadlines" not in result
-        assert "Agenda complet" not in result
-        assert "Aucun evenement" in result or "Aucun événement" in result or \
-               "calendrier" in result.lower()
+            deadline = ct.get_deadline_context()
+            temporal = ct.get_temporal_context()
+        assert deadline == ""
+        assert "Date et heure actuelles" in temporal
 
     def test_hier_always_present(self):
         """La ligne 'Hier :' doit toujours être présente dans le contexte."""

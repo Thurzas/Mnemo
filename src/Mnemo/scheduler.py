@@ -24,6 +24,9 @@ import os
 import sys
 import time
 import json
+
+# Permissions restrictives dès le démarrage — nouveau fichier 600, répertoire 700
+os.umask(0o077)
 import re
 import logging
 from datetime import datetime, date, timedelta
@@ -98,7 +101,29 @@ def _get_last_session_summary() -> str:
     return "Aucune session récente disponible."
 
 
-def _get_memory_highlights() -> str:
+def _get_memory_highlights(session_id: str = "", context_query: str = "") -> str:
+    """
+    Récupère les highlights mémoire pour le briefing.
+    Phase 5.5 : utilise retrieve_all(profile="briefing") + _compress_chunks()
+    pour un retrieval traçable dans chunk_usage (données pour l'Axe A).
+    Fallback sur lecture directe de memory.md si le pipeline échoue.
+    """
+    try:
+        from Mnemo.tools.memory_tools import (
+            retrieve_all, _compress_chunks, _record_retrieved_chunks,
+        )
+        query  = context_query or "projets décisions préférences identité"
+        chunks = retrieve_all(query, top_k_final=4, profile="briefing")
+        if session_id and chunks:
+            _record_retrieved_chunks(
+                session_id, [c["id"] for c in chunks], profile="briefing"
+            )
+        result = _compress_chunks(chunks, max_tokens=600)
+        return result if result else "Mémoire vide ou non structurée."
+    except Exception as e:
+        log.warning(f"retrieve_all briefing : {e} — fallback lecture directe")
+
+    # Fallback : lecture directe des sections clés (comportement pré-5.5)
     if not MARKDOWN_PATH.exists():
         return "Mémoire non initialisée."
     content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore")
@@ -133,6 +158,147 @@ def _write_fallback(path: Path, kind: str, error: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
+# GOAP — WorldState + orchestration
+# ══════════════════════════════════════════════════════════════════
+
+def _build_scheduler_world_state() -> dict:
+    """
+    Construit le WorldState courant pour le scheduler.
+
+    Sources :
+    - world_state.json (persisté par CuriosityCrew, AssessMemoryGaps, etc.)
+    - Vérifications légères en Python (fichiers présents, DB accessible)
+
+    user_online est toujours False dans le contexte scheduler —
+    les actions qui le requièrent (FillBlockingGaps) ne seront jamais planifiées.
+    """
+    from Mnemo.tools.memory_tools import load_world_state
+
+    ws_persisted = load_world_state()
+    now          = datetime.now()
+    today        = now.date()
+
+    # briefing_fresh : briefing.md existe et date d'aujourd'hui
+    briefing_fresh = False
+    if BRIEFING_OUT.exists():
+        mtime = datetime.fromtimestamp(BRIEFING_OUT.stat().st_mtime).date()
+        briefing_fresh = (mtime == today)
+
+    # weekly_generated : weekly.md existe et date de cette semaine
+    weekly_generated = False
+    if WEEKLY_OUT.exists():
+        mtime = datetime.fromtimestamp(WEEKLY_OUT.stat().st_mtime).date()
+        # Même semaine ISO
+        weekly_generated = (mtime.isocalendar()[:2] == today.isocalendar()[:2])
+
+    # memory_synced : memory.db accessible
+    memory_synced = (DATA_PATH / "memory.db").exists()
+
+    # calendar_fetched : calendrier configuré
+    calendar_fetched = False
+    try:
+        from Mnemo.tools.calendar_tools import calendar_is_configured
+        calendar_fetched = calendar_is_configured()
+    except Exception:
+        pass
+
+    return {
+        "calendar_fetched":      calendar_fetched,
+        "memory_synced":         memory_synced,
+        "memory_gaps_known":     ws_persisted.get("memory_gaps_known", False),
+        "memory_blocking_gaps":  ws_persisted.get("memory_blocking_gaps", False),
+        "user_online":           False,   # scheduler = pas d'utilisateur présent
+        "briefing_fresh":        briefing_fresh,
+        "weekly_generated":      weekly_generated,
+        "deadline_alerts_sent":  ws_persisted.get("deadline_alerts_sent", False),
+        "knows_module":          ws_persisted.get("knows_module", False),
+    }
+
+
+def _update_world_state(updates: dict) -> None:
+    """Applique des mises à jour partielles sur world_state.json."""
+    from Mnemo.tools.memory_tools import load_world_state
+    ws = load_world_state()
+    ws.update(updates)
+    path = DATA_PATH / "world_state.json"
+    path.write_text(
+        json.dumps(ws, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _scheduler_fetch_calendar() -> None:
+    """Précondition légère : vérifie que le calendrier est accessible."""
+    from Mnemo.tools.calendar_tools import get_upcoming_events
+    get_upcoming_events(days=7)  # lève une exception si indisponible
+    _update_world_state({"calendar_fetched": True})
+
+
+def _scheduler_sync_memory() -> None:
+    """Précondition légère : vérifie que memory.db est accessible."""
+    from Mnemo.tools.memory_tools import get_db
+    db = get_db()
+    db.close()
+    _update_world_state({"memory_synced": True})
+
+
+def _scheduler_assess_gaps() -> None:
+    """
+    AssessMemoryGaps dans le contexte scheduler (sans utilisateur).
+    Lit le world_state.json existant — ne relance pas de LLM si déjà frais.
+    """
+    from Mnemo.tools.memory_tools import load_world_state
+    ws = load_world_state()
+    if not ws.get("memory_gaps_known"):
+        log.info("memory_gaps_known=False — rapport de gaps absent ou obsolète")
+    _update_world_state({"memory_gaps_known": True})
+
+
+# Registre d'exécuteurs GOAP pour le scheduler
+# Chaque entrée : Action.name → callable sans argument
+_SCHEDULER_EXECUTORS: dict = {}  # initialisé après la définition des actions
+
+
+def goap_dispatch(goal: dict) -> None:
+    """
+    Orchestre l'exécution d'un goal via le planner GOAP.
+
+    1. Construit le WorldState courant
+    2. Demande au planner la séquence minimale d'actions
+    3. Exécute chaque action dans l'ordre
+
+    Les actions dont l'exécuteur est absent sont loggées et ignorées.
+    """
+    from Mnemo.goap.planner import plan as goap_plan, PlanningError
+
+    ws = _build_scheduler_world_state()
+    log.debug(f"WorldState : {ws}")
+
+    try:
+        actions = goap_plan(goal, ws)
+    except PlanningError as e:
+        log.warning(f"GOAP inatteignable pour {goal} : {e}")
+        return
+
+    if not actions:
+        log.info(f"Goal {goal} déjà atteint — aucune action nécessaire")
+        return
+
+    log.info(f"Plan GOAP : {[a.name for a in actions]}")
+    for action in actions:
+        executor = _SCHEDULER_EXECUTORS.get(action.name)
+        if executor is None:
+            log.warning(f"Pas d'exécuteur pour l'action GOAP : {action.name!r}")
+            continue
+        try:
+            log.info(f"→ {action.name}")
+            executor()
+        except Exception as e:
+            log.error(f"Action GOAP {action.name!r} échouée : {e}", exc_info=True)
+            raise  # arrêt — les actions suivantes dépendent de celle-ci
+
+
+# ══════════════════════════════════════════════════════════════════
 # Actions
 # ══════════════════════════════════════════════════════════════════
 
@@ -155,13 +321,18 @@ def action_briefing() -> None:
         log.warning(f"Calendrier : {e}")
         calendar_today = "Calendrier non disponible."
 
-    now = datetime.now()
+    now        = datetime.now()
+    session_id = f"briefing_{now.strftime('%Y%m%d_%H%M%S')}"
+    last_sess  = _get_last_session_summary()
     try:
         result  = BriefingCrew().crew().kickoff(inputs={
             "temporal_context":     get_temporal_context(),
             "calendar_today":       calendar_today,
-            "last_session_summary": _get_last_session_summary(),
-            "memory_highlights":    _get_memory_highlights(),
+            "last_session_summary": last_sess,
+            "memory_highlights":    _get_memory_highlights(
+                session_id=session_id,
+                context_query=f"{calendar_today[:200]} {last_sess[:200]}",
+            ),
             "date_str":             _date_fr(now),
             "datetime_str":         now.strftime("%Y-%m-%d %H:%M"),
         })
@@ -216,13 +387,17 @@ def action_weekly() -> None:
                     pass
     sessions_summary = "\n".join(session_lines) if session_lines else "Aucune session cette semaine."
 
-    date_str = f"semaine du {_date_fr(week_start)} au {_date_fr(week_end)}"
+    date_str   = f"semaine du {_date_fr(week_start)} au {_date_fr(week_end)}"
+    session_id = f"weekly_{now.strftime('%Y%m%d_%H%M%S')}"
     try:
         result  = BriefingCrew().crew().kickoff(inputs={
             "temporal_context":     f"Date actuelle : {now.strftime('%Y-%m-%d %H:%M')}",
             "calendar_today":       calendar_week,
             "last_session_summary": sessions_summary,
-            "memory_highlights":    _get_memory_highlights(),
+            "memory_highlights":    _get_memory_highlights(
+                session_id=session_id,
+                context_query=f"{sessions_summary[:200]} {calendar_week[:200]}",
+            ),
             "date_str":             date_str,
             "datetime_str":         now.strftime("%Y-%m-%d %H:%M"),
         })
@@ -302,21 +477,51 @@ def action_reminder(payload: dict) -> None:
 # Dispatch
 # ══════════════════════════════════════════════════════════════════
 
+# Initialisation du registre GOAP après les définitions d'actions
+_SCHEDULER_EXECUTORS.update({
+    "FetchCalendar":    _scheduler_fetch_calendar,
+    "SyncMemory":       _scheduler_sync_memory,
+    "AssessMemoryGaps": _scheduler_assess_gaps,
+    "GenerateBriefing": action_briefing,
+    "GenerateWeekly":   action_weekly,
+    "SendDeadlineAlert": action_deadline_alert,
+})
+
+# Goals GOAP par type de tâche système
+_SYSTEM_GOALS = {
+    "briefing":       {"briefing_fresh": True},
+    "weekly":         {"weekly_generated": True},
+    "deadline_alert": {"deadline_alerts_sent": True},
+}
+
+# _ACTION_MAP conservé pour les tâches utilisateur simples (reminder)
 _ACTION_MAP = {
-    "briefing":       lambda p: action_briefing(),
-    "weekly":         lambda p: action_weekly(),
-    "deadline_alert": lambda p: action_deadline_alert(),
-    "reminder":       lambda p: action_reminder(p),
+    "reminder": lambda p: action_reminder(p),
 }
 
 
 def dispatch(task: dict) -> None:
+    """
+    Dispatche une tâche vers le bon exécuteur.
+
+    Tâches système (briefing, weekly, deadline_alert) :
+      → GOAP planner résout le plan, exécute dans l'ordre
+    Tâches utilisateur (reminder) :
+      → _ACTION_MAP direct (pas de GOAP nécessaire)
+    """
     action  = task.get("action", "")
     payload = {}
     try:
         payload = json.loads(task.get("payload") or "{}")
     except Exception:
         pass
+
+    # Tâches système → GOAP
+    if action in _SYSTEM_GOALS:
+        goap_dispatch(_SYSTEM_GOALS[action])
+        return
+
+    # Tâches utilisateur → direct
     fn = _ACTION_MAP.get(action)
     if fn:
         fn(payload)

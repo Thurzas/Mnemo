@@ -36,11 +36,14 @@ evaluate_task:
     needs_web : true dans deux cas uniquement :
       (1) L'utilisateur demande EXPLICITEMENT une recherche web
           (mots-clés : "cherche", "recherche", "googler", "trouve sur internet",
+           "fouille le net", "fouille", "cherche sur internet", "cherche sur le web",
            "dernières news", "actualité", "c'est quoi", "quelle est la dernière version").
       (2) La question nécessite une information récente ou externe que la mémoire
           ne peut pas fournir : actualité, prix du jour, météo, documentation externe.
       TOUJOURS false si la mémoire personnelle ou le calendrier peuvent répondre.
       TOUJOURS false pour les conversations, mises à jour de faits personnels.
+      RÈGLE ABSOLUE : si web_query est non-null, needs_web DOIT être true.
+                      Ces deux champs sont couplés — l'un ne va pas sans l'autre.
 
     web_query : si needs_web est true, reformule la question en requête de recherche
       courte (2-5 mots), factuelle, sans données personnelles.
@@ -50,6 +53,7 @@ evaluate_task:
       Exemples :
         "c'est quoi la dernière version de Python ?"          → "Python latest version 2026"
         "cherche la doc FastAPI routing"                       → "FastAPI routing documentation"
+        "fouille le net sur le quadtree et son implémentation" → "quadtree algorithm implementation"
         "résume moi la page wikipedia sur le tri rapide"       → "quicksort algorithm wikipedia"
         "explique moi le théorème de Bayes"                    → "Bayes theorem"
         "dernières news sur l'intelligence artificielle"       → "AI news 2026"
@@ -99,8 +103,15 @@ evaluate_task:
           IMPORTANT : la LECTURE de l'agenda reste route "conversation" (needs_calendar=true).
           Seule l'ÉCRITURE → route "calendar".
       - "scheduler"    : l'utilisateur demande de planifier une tâche différée ou récurrente.
-          Exemples : "rappelle-moi demain matin", "fais ça tous les lundis",
-          "envoie-moi un résumé à 8h".
+          Signaux clés : présence d'une heure future + intention de rappel/automatisation.
+          Exemples :
+            "rappelle-moi ce matin à 11h de fermer le garage"  → scheduler
+            "rappelle-moi demain à 9h de relire mes notes"      → scheduler
+            "dans 3 jours, pense à appeler le médecin"          → scheduler
+            "fais ça tous les lundis à 8h"                      → scheduler
+            "envoie-moi un résumé à 8h"                         → scheduler
+            "demain matin, rappel pour le dentiste"             → scheduler
+          IMPORTANT : "rappelle-moi" + heure/date → TOUJOURS scheduler, jamais conversation.
       En cas de doute : "conversation".
 
     shell_command : si route est "shell", la commande EXACTE à exécuter,

@@ -4,6 +4,7 @@ import sqlite3
 import numpy as np
 import ollama
 import os
+from dataclasses import dataclass, field
 # Client Ollama explicite — lit OLLAMA_HOST ou API_BASE depuis l'env.
 # Sans ça, le client Python se connecte toujours à localhost:11434
 # ce qui échoue dans un conteneur Docker où Ollama est sur l'hôte.
@@ -14,26 +15,52 @@ _OLLAMA_HOST = (
 _ollama_client = ollama.Client(host=_OLLAMA_HOST)
 import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pathlib import Path
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 from typing import Type
 
-# ── Config paths ──────────────────────────────────────────────
-DB_PATH      = Path("memory.db")
-MARKDOWN_PATH = Path("memory.md")
-SESSIONS_DIR = Path("sessions")
-try:
-    SESSIONS_DIR.mkdir(exist_ok=True)
-except OSError:
-    pass  # /data pas encore monté — le mkdir sera retentré au premier usage
+# ── Config paths (dynamiques — résolus via ContextVar par requête) ────
+from Mnemo.context import get_data_dir
+
+
+def _db_path() -> Path:
+    """Chemin vers memory.db de l'utilisateur courant."""
+    return get_data_dir() / "memory.db"
+
+
+def _markdown_path() -> Path:
+    """Chemin vers memory.md de l'utilisateur courant."""
+    return get_data_dir() / "memory.md"
+
+
+def _sessions_dir() -> Path:
+    """Répertoire sessions/ de l'utilisateur courant (créé si absent)."""
+    d = get_data_dir() / "sessions"
+    try:
+        d.mkdir(exist_ok=True, parents=True)
+    except OSError:
+        pass
+    return d
 
 EMBED_MODEL   = "nomic-embed-text"
 TOP_K_SEARCH  = 10
 TOP_K_FINAL   = 5
-HALF_LIFE_DAYS = 30.0  # Fraîcheur : un chunk vieux de 30j a un score de ~0.37
+
+# Demi-vie par catégorie (en jours) — remplace l'ancien HALF_LIFE_DAYS unique de 30j
+HALF_LIFE_BY_CATEGORY: dict[str, float] = {
+    "identité":           365.0,  # change rarement — stable sur des années
+    "décision":           180.0,
+    "projet":              90.0,
+    "préférence":          90.0,
+    "connaissance":        60.0,
+    "historique_session":  14.0,  # périme vite
+}
+
+# Un chunk ne descend jamais sous ce score de fraîcheur (évite l'écrasement multiplicatif)
+FRESHNESS_FLOOR = 0.15
 
 # Poids statiques par catégorie — ajustables selon tes préférences
 CATEGORY_WEIGHTS: dict[str, float] = {
@@ -44,6 +71,158 @@ CATEGORY_WEIGHTS: dict[str, float] = {
     "connaissance":       1.0,  # faits appris en session (défaut)
     "historique_session": 0.7,  # résumés de sessions passées
 }
+
+
+# ── Phase 5.3 — Buffer de retrieval du tour courant ──────────────
+# Vidé par handle_message() avant chaque kickoff ConversationCrew.
+# Rempli par RetrieveMemoryTool._run() pendant l'exécution de l'agent.
+# Lu par handle_message() après le kickoff pour persister les IDs dans le session JSON.
+_retrieved_this_turn: list[dict] = []
+
+
+@dataclass
+class WeightProfile:
+    """Profil de pondération contextuel — passé à retrieve_all() selon le crew appelant."""
+    name:                 str = "global"     # clé du profil — utilisée pour learned_weights_{name}.json
+    category_overrides:   dict[str, float] = field(default_factory=dict)
+    half_life_multiplier: float = 1.0       # < 1 → decay plus rapide, > 1 → plus lent
+    freshness_floor:      float = FRESHNESS_FLOOR
+    top_k_override:       int | None = None  # None → utilise top_k_final du caller
+
+
+PROFILES: dict[str, WeightProfile] = {
+    "conversation": WeightProfile(name="conversation"),
+    "briefing": WeightProfile(
+        name                 = "briefing",
+        category_overrides   = {"historique_session": 2.0, "projet": 1.5, "décision": 1.3},
+        half_life_multiplier = 0.25,   # fraîcheur très privilégiée
+        freshness_floor      = 0.30,   # les vieux chunks sont vraiment écartés
+        top_k_override       = 8,      # le briefing a besoin de plus de contexte
+    ),
+    "curiosity": WeightProfile(
+        name               = "curiosity",
+        category_overrides = {"identité": 2.5, "préférence": 2.0},
+    ),
+    "scheduler": WeightProfile(
+        name               = "scheduler",
+        category_overrides = {"décision": 1.8, "projet": 1.6},
+    ),
+    "shell": WeightProfile(
+        name               = "shell",
+        category_overrides = {"projet": 1.4, "décision": 1.2},
+    ),
+}
+
+
+# ── Phase 5.6 — MemoryGapReport ───────────────────────────────
+
+@dataclass
+class MemoryGap:
+    """Un manque détecté dans memory.md."""
+    section:     str
+    subsection:  str
+    description: str
+    affects:     list[str] = field(default_factory=list)   # crews impactés
+    priority:    int = 3                                    # 1 (critique) → 5 (optionnel)
+    label:       str = ""                                   # label markdown si section atomique
+    question:    str = ""                                   # question à poser à l'utilisateur
+
+
+@dataclass
+class MemoryGapReport:
+    """
+    Rapport structuré produit par CuriosityCrew (AssessMemoryGaps).
+
+    Deux types de lacunes :
+    - blocking_gaps  : manques qui dégradent significativement un autre crew
+    - enriching_gaps : manques qui amélioreraient la qualité mais ne bloquent rien
+
+    Le rapport met à jour le World State via to_world_state().
+    Il est persisté dans world_state.json pour les crews en aval (PlannerCrew, etc.).
+    """
+    assessed_at:          str        = ""
+    memory_completeness:  float      = 0.0    # 0.0 → mémoire vide, 1.0 → complète
+    blocking_gaps:        list[MemoryGap] = field(default_factory=list)
+    enriching_gaps:       list[MemoryGap] = field(default_factory=list)
+    questions_ready:      list[dict] = field(default_factory=list)  # pour CuriosityCrew interactif
+
+    def to_world_state(self) -> dict:
+        """Flags GOAP dérivés du rapport."""
+        return {
+            "memory_gaps_known":    True,
+            "memory_blocking_gaps": len(self.blocking_gaps) > 0,
+            "memory_completeness":  round(self.memory_completeness, 2),
+        }
+
+    def to_json(self) -> str:
+        """Sérialise le rapport en JSON (pour world_state.json)."""
+        def _gap_to_dict(g: MemoryGap) -> dict:
+            return {
+                "section":     g.section,
+                "subsection":  g.subsection,
+                "description": g.description,
+                "affects":     g.affects,
+                "priority":    g.priority,
+                "label":       g.label,
+                "question":    g.question,
+            }
+        return json.dumps({
+            "assessed_at":         self.assessed_at,
+            "memory_completeness": self.memory_completeness,
+            "blocking_gaps":       [_gap_to_dict(g) for g in self.blocking_gaps],
+            "enriching_gaps":      [_gap_to_dict(g) for g in self.enriching_gaps],
+            "questions_ready":     self.questions_ready,
+        }, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def from_json(cls, raw: str | dict) -> "MemoryGapReport":
+        """Désérialise depuis une chaîne JSON ou un dict."""
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        def _dict_to_gap(d: dict) -> MemoryGap:
+            return MemoryGap(
+                section     = d.get("section", ""),
+                subsection  = d.get("subsection", ""),
+                description = d.get("description", ""),
+                affects     = d.get("affects", []),
+                priority    = d.get("priority", 3),
+                label       = d.get("label", ""),
+                question    = d.get("question", ""),
+            )
+        return cls(
+            assessed_at         = data.get("assessed_at", ""),
+            memory_completeness = data.get("memory_completeness", 0.0),
+            blocking_gaps       = [_dict_to_gap(g) for g in data.get("blocking_gaps", [])],
+            enriching_gaps      = [_dict_to_gap(g) for g in data.get("enriching_gaps", [])],
+            questions_ready     = data.get("questions_ready", []),
+        )
+
+
+def save_memory_gap_report(report: MemoryGapReport) -> None:
+    """Persiste le rapport + les flags WorldState dans data_dir/world_state.json."""
+    path = get_data_dir() / "world_state.json"
+    existing: dict = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    existing.update(report.to_world_state())
+    existing["last_gap_report"] = json.loads(report.to_json())
+    path.write_text(
+        json.dumps(existing, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_world_state() -> dict:
+    """Charge world_state.json, retourne {} si absent ou invalide."""
+    path = get_data_dir() / "world_state.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -62,7 +241,7 @@ TOP_K_FINAL  = 5
 # ══════════════════════════════════════════════════════════════
 
 def get_db() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(_db_path())
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -86,18 +265,21 @@ def build_chunk_text(section: str, subsection: str, content: str) -> str:
 # Pondération — fraîcheur & importance
 # ══════════════════════════════════════════════════════════════
 
-def freshness_score(updated_at: str, half_life_days: float = HALF_LIFE_DAYS) -> float:
+def freshness_score(updated_at: str, category: str = "connaissance",
+                    half_life_multiplier: float = 1.0) -> float:
     """
-    Score de fraîcheur entre 0 et 1, décroissance exponentielle.
-    half_life_days=30 → chunk vieux de 30j = 0.37, 60j = 0.14, 90j = 0.05.
-    Configurable via HALF_LIFE_DAYS en tête de fichier.
+    Score de fraîcheur entre 0 et 1, décroissance exponentielle par catégorie.
+    Demi-vies : identité=365j · connaissance=60j · historique_session=14j.
+    half_life_multiplier < 1 accélère le decay (ex: profil briefing = 0.25).
     """
+    half_life = HALF_LIFE_BY_CATEGORY.get(category, HALF_LIFE_BY_CATEGORY["connaissance"])
+    half_life *= half_life_multiplier
     try:
         updated = datetime.fromisoformat(updated_at)
     except (ValueError, TypeError):
         return 1.0  # Pas de date → on ne pénalise pas
     age_days = max(0, (datetime.now() - updated).days)
-    return math.exp(-age_days / half_life_days)
+    return math.exp(-age_days / half_life)
 
 
 def importance_score(category: str, weight: float | None = None) -> float:
@@ -180,11 +362,29 @@ def search_vector(db: sqlite3.Connection, query: str, top_k: int = TOP_K_SEARCH)
 
 
 def adaptive_weights(query: str) -> tuple[float, float]:
-    return (0.6, 0.4) if len(query.split()) <= 2 else (0.3, 0.7)
+    """
+    Poids FTS/vector selon la longueur de la query.
+    Interpolation linéaire : 1 mot → (0.70, 0.30) · 10+ mots → (0.25, 0.75).
+    """
+    n   = len(query.split())
+    t   = min(n / 10.0, 1.0)
+    w_kw = round(0.70 - 0.45 * t, 3)
+    return (w_kw, round(1.0 - w_kw, 3))
 
 
-def reciprocal_rank_fusion(kw: list[dict], vec: list[dict], k: int = 60) -> list[dict]:
-    w_fts, w_vec = adaptive_weights(" ".join(c["content"] for c in kw[:1]))
+def reciprocal_rank_fusion(kw: list[dict], vec: list[dict],
+                           query: str = "", k: int = 60,
+                           profile: WeightProfile | None = None) -> list[dict]:
+    p = profile or PROFILES["conversation"]
+    w_fts, w_vec = adaptive_weights(query)
+    # Priorité : profil override > learned profil > learned global > statiques
+    effective_cat_weights = {
+        **CATEGORY_WEIGHTS,
+        **_load_learned_weights("global"),
+        **_load_learned_weights(p.name),
+        **p.category_overrides,
+    }
+
     scores: dict[str, float] = {}
     all_chunks: dict[str, dict] = {}
 
@@ -199,15 +399,27 @@ def reciprocal_rank_fusion(kw: list[dict], vec: list[dict], k: int = 60) -> list
 
     results = []
     for cid, rrf_score in scores.items():
-        chunk      = all_chunks[cid]
-        importance = importance_score(chunk.get("category"), chunk.get("importance_weight"))
-        freshness  = freshness_score(chunk.get("updated_at", datetime.now().isoformat()))
+        chunk = all_chunks[cid]
+        cat   = chunk.get("category") or "connaissance"
+
+        # Importance : poids explicite DB > catégorie effective (base + overrides profil)
+        explicit = chunk.get("importance_weight")
+        imp = explicit if explicit is not None else effective_cat_weights.get(cat, 1.0)
+
+        # Fraîcheur : demi-vie par catégorie × multiplicateur profil, plancher garanti
+        freshness = max(
+            freshness_score(chunk.get("updated_at", datetime.now().isoformat()),
+                            category=cat,
+                            half_life_multiplier=p.half_life_multiplier),
+            p.freshness_floor,
+        )
+
         results.append({
             **chunk,
-            "score_rrf":       rrf_score,
-            "score_importance": importance,
+            "score_rrf":        rrf_score,
+            "score_importance": imp,
             "score_freshness":  freshness,
-            "score_final":      rrf_score * importance * freshness,
+            "score_final":      rrf_score * imp * freshness,
         })
 
     results.sort(key=lambda x: x["score_final"], reverse=True)
@@ -219,21 +431,26 @@ def retrieve(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     db = get_db()
     kw  = search_keyword(db, query)
     vec = search_vector(db, query)
-    merged = reciprocal_rank_fusion(kw, vec)
+    merged = reciprocal_rank_fusion(kw, vec, query=query)
     db.close()
     return merged[:top_k_final]
 
 
-def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
+def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL,
+                 profile: str = "conversation") -> list[dict]:
     """
     Recherche hybride globale : mémoire personnelle + documents ingérés.
     Fusionne les deux sources via RRF avant de retourner le top_k_final.
 
+    profile : clé dans PROFILES — ajuste les poids catégorie, demi-vies et top_k.
     Les chunks mémoire et les doc_chunks sont normalisés dans le même format
     avant la fusion — le champ 'source_type' permet de les distinguer dans le prompt.
     """
     # Import ici pour éviter la dépendance circulaire (ingest_tools importe memory_tools)
     from Mnemo.tools.ingest_tools import search_docs_keyword, search_docs_vector
+
+    p = PROFILES.get(profile, PROFILES["conversation"])
+    effective_top_k = p.top_k_override or top_k_final
 
     db = get_db()
 
@@ -253,13 +470,13 @@ def retrieve_all(query: str, top_k_final: int = TOP_K_FINAL) -> list[dict]:
     db.close()
 
     # ── Fusion RRF globale ─────────────────────────────────────
-    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem)
-    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc)
+    merged_mem = reciprocal_rank_fusion(kw_mem, vec_mem, query=query, profile=p)
+    merged_doc = reciprocal_rank_fusion(kw_doc, vec_doc, query=query, profile=p)
 
     all_results = merged_mem + merged_doc
     all_results.sort(key=lambda x: x["score_final"], reverse=True)
 
-    return all_results[:top_k_final]
+    return all_results[:effective_top_k]
 
 
 def format_chunks_for_prompt(chunks: list[dict]) -> str:
@@ -275,6 +492,401 @@ def format_chunks_for_prompt(chunks: list[dict]) -> str:
             header = f"[🧠 {c.get('section', '')} > {c.get('subsection', '')}]"
         parts.append(f"{header}\n{c['content']}")
     return "\n\n---\n\n".join(parts) if parts else "Aucun souvenir pertinent trouvé."
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 5.3 — Scoring d'usage des chunks (mémoire procédurale)
+# ══════════════════════════════════════════════════════════════
+
+USAGE_THRESHOLD = 0.60  # similarité cosinus min pour considérer un chunk "utilisé"
+
+
+def score_and_record_chunk_usage(
+    session: dict, session_id: str, profile: str = "conversation"
+) -> None:
+    """
+    Appelé en fin de session (end_session), après ConsolidationCrew.
+    Pour chaque tour agent avec retrieved_chunk_ids :
+      1. Embed la réponse agent
+      2. Calcule cosine_similarity(response_vec, chunk_vec) pour chaque chunk récupéré
+      3. Insère dans chunk_usage avec le profil actif
+      4. Met à jour chunks.use_count + last_used_at pour les chunks confirmés
+    Silencieux sur les tours sans retrieved_chunk_ids (sessions pré-5.3 ou non-conversation).
+    """
+    messages = session.get("messages", [])
+    if not messages:
+        return
+
+    db   = get_db()
+    now  = datetime.now().isoformat()
+
+    try:
+        for msg in messages:
+            if msg.get("role") != "agent":
+                continue
+            chunk_ids = msg.get("retrieved_chunk_ids")
+            if not chunk_ids:
+                continue
+
+            response_text = msg.get("content", "").strip()
+            if not response_text:
+                continue
+
+            # Embed la réponse — peut échouer si Ollama est offline (fin de session)
+            try:
+                response_vec = embed(response_text, prefix="search_document")
+            except Exception:
+                continue
+
+            for chunk_id in chunk_ids:
+                # Récupère le vecteur du chunk depuis la DB
+                row = db.execute(
+                    "SELECT vector FROM embeddings WHERE chunk_id = ?", (chunk_id,)
+                ).fetchone()
+                if row is None:
+                    continue
+
+                chunk_vec  = np.frombuffer(row[0], dtype=np.float32)
+                score      = float(cosine_similarity(response_vec, chunk_vec))
+                confirmed  = 1 if score >= USAGE_THRESHOLD else 0
+
+                db.execute(
+                    "INSERT INTO chunk_usage"
+                    " (chunk_id, session_id, retrieved_at, used_score, confirmed, profile)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (chunk_id, session_id, now, score, confirmed, profile),
+                )
+
+                if confirmed:
+                    db.execute(
+                        "UPDATE chunks SET use_count = use_count + 1, last_used_at = ?"
+                        " WHERE id = ?",
+                        (now, chunk_id),
+                    )
+
+        db.commit()
+    finally:
+        db.close()
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 5.4 — Active learning sur les poids
+# ══════════════════════════════════════════════════════════════
+
+MIN_SESSIONS            = 20    # sessions minimum avant toute adaptation (global)
+MIN_SESSIONS_PER_PROFILE = 10   # sessions minimum avant adaptation par profil
+LEARNING_RATE           = 0.15  # amortissement — max 15% de changement par cycle
+REGRESSION_RATE         = 0.05  # rappel vers les valeurs initiales — limite le drift
+WEIGHT_MIN              = 0.30  # plancher absolu
+WEIGHT_MAX              = 3.00  # plafond absolu
+MIN_RETRIEVED           = 10    # nb minimum de retrievals pour qu'une catégorie soit ajustée
+
+
+def compute_category_stats(
+    db: sqlite3.Connection, profile: str | None = None
+) -> dict[str, dict]:
+    """
+    Lit chunk_usage JOIN chunks et retourne par catégorie :
+      retrieved : nb de fois récupéré
+      confirmed : nb de fois utilisé (confirmed=1)
+      utility   : confirmed / retrieved  (0.0 si retrieved == 0)
+    Si profile est fourni, filtre sur chunk_usage.profile (données d'un seul profil).
+    Si profile est None, agrège toutes les données (comportement 5.4 — global).
+    """
+    if profile is not None:
+        rows = db.execute("""
+            SELECT c.category,
+                   COUNT(*)          AS retrieved,
+                   SUM(cu.confirmed) AS confirmed
+            FROM chunk_usage cu
+            JOIN chunks c ON cu.chunk_id = c.id
+            WHERE cu.profile = ?
+            GROUP BY c.category
+        """, (profile,)).fetchall()
+    else:
+        rows = db.execute("""
+            SELECT c.category,
+                   COUNT(*)          AS retrieved,
+                   SUM(cu.confirmed) AS confirmed
+            FROM chunk_usage cu
+            JOIN chunks c ON cu.chunk_id = c.id
+            GROUP BY c.category
+        """).fetchall()
+
+    stats: dict[str, dict] = {}
+    for category, retrieved, confirmed in rows:
+        cat = category or "connaissance"
+        stats[cat] = {
+            "retrieved": retrieved,
+            "confirmed": int(confirmed or 0),
+            "utility":   (confirmed or 0) / retrieved if retrieved else 0.0,
+        }
+    return stats
+
+
+def suggest_weight_adjustments(
+    stats: dict[str, dict],
+    current_weights: dict[str, float],
+    regression_rate: float = 0.0,
+) -> dict[str, float]:
+    """
+    Calcule les nouveaux poids par catégorie.
+    Principe : nudge proportionnel à l'écart entre l'utilité observée et la baseline.
+      baseline  = utilité moyenne toutes catégories avec retrieved >= MIN_RETRIEVED
+      gap       = utility(cat) / baseline
+      raw       = old × (1 + LEARNING_RATE × (gap - 1))
+
+    Axe B — régression vers la moyenne (si regression_rate > 0) :
+      new_weight = raw × (1 - regression_rate) + initial × regression_rate
+      → Si les données confirment un écart stable : convergence vers une valeur d'équilibre.
+      → Si les données divergent (bruit) : rappel progressif vers CATEGORY_WEIGHTS.
+
+    Clampé entre WEIGHT_MIN et WEIGHT_MAX.
+    Catégories avec retrieved < MIN_RETRIEVED : inchangées.
+    """
+    eligible = {
+        cat: s for cat, s in stats.items()
+        if s["retrieved"] >= MIN_RETRIEVED
+    }
+    if not eligible:
+        return dict(current_weights)
+
+    baseline = sum(s["utility"] for s in eligible.values()) / len(eligible)
+    if baseline == 0:
+        return dict(current_weights)
+
+    new_weights = dict(current_weights)
+    for cat, s in eligible.items():
+        old     = current_weights.get(cat, 1.0)
+        gap     = s["utility"] / baseline
+        raw     = old * (1.0 + LEARNING_RATE * (gap - 1.0))
+        if regression_rate > 0:
+            initial = CATEGORY_WEIGHTS.get(cat, 1.0)
+            raw     = raw * (1 - regression_rate) + initial * regression_rate
+        new_weights[cat] = round(max(WEIGHT_MIN, min(WEIGHT_MAX, raw)), 4)
+
+    return new_weights
+
+
+def _load_learned_weights(profile: str = "global") -> dict[str, float]:
+    """
+    Charge learned_weights_{profile}.json depuis data_dir si présent.
+    "global" → learned_weights.json (compatibilité 5.4).
+    Retourne {} en cas d'absence ou d'erreur (fallback silencieux sur CATEGORY_WEIGHTS).
+    """
+    filename = "learned_weights.json" if profile == "global" \
+               else f"learned_weights_{profile}.json"
+    path = get_data_dir() / filename
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {k: float(v) for k, v in data.get("weights", {}).items()}
+    except Exception:
+        return {}
+
+
+def adapt_weights_if_ready(profile: str = "global") -> bool:
+    """
+    Vérifie si on a suffisamment de données, calcule les nouveaux poids et écrit
+    learned_weights_{profile}.json (ou learned_weights.json pour "global").
+
+    "global"     → agrège toutes les données, seuil MIN_SESSIONS, pas de régression.
+    Autre profil → filtre par profil, seuil MIN_SESSIONS_PER_PROFILE, REGRESSION_RATE appliqué.
+    Retourne True si une adaptation a été effectuée, False sinon.
+    """
+    db = get_db()
+    try:
+        if profile == "global":
+            session_count = db.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM chunk_usage"
+            ).fetchone()[0]
+            threshold       = MIN_SESSIONS
+            regression_rate = 0.0
+        else:
+            session_count = db.execute(
+                "SELECT COUNT(DISTINCT session_id) FROM chunk_usage WHERE profile = ?",
+                (profile,),
+            ).fetchone()[0]
+            threshold       = MIN_SESSIONS_PER_PROFILE
+            regression_rate = REGRESSION_RATE
+
+        if session_count < threshold:
+            return False
+
+        stats       = compute_category_stats(db, profile=None if profile == "global" else profile)
+        new_weights = suggest_weight_adjustments(
+            stats, CATEGORY_WEIGHTS, regression_rate=regression_rate
+        )
+
+        filename = "learned_weights.json" if profile == "global" \
+                   else f"learned_weights_{profile}.json"
+        path = get_data_dir() / filename
+        now_iso = datetime.now().isoformat()
+        path.write_text(
+            json.dumps({
+                "updated_at":        now_iso,
+                "profile":           profile,
+                "sessions_analyzed": session_count,
+                "weights":           new_weights,
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        # Axe C — audit trail
+        _append_weights_history(
+            profile=profile,
+            sessions_analyzed=session_count,
+            weights=new_weights,
+            regression_applied=(regression_rate > 0),
+            timestamp=now_iso,
+        )
+
+        return True
+    finally:
+        db.close()
+
+
+HISTORY_RETENTION_DAYS = 90
+
+
+def _append_weights_history(
+    profile: str,
+    sessions_analyzed: int,
+    weights: dict[str, float],
+    regression_applied: bool,
+    timestamp: str,
+) -> None:
+    """
+    Append une ligne dans learned_weights_history.jsonl.
+    Purge les entrées de plus de HISTORY_RETENTION_DAYS jours à chaque écriture.
+    Silencieux sur toute erreur I/O.
+    """
+    history_path = get_data_dir() / "learned_weights_history.jsonl"
+    entry = json.dumps({
+        "timestamp":          timestamp,
+        "profile":            profile,
+        "sessions_analyzed":  sessions_analyzed,
+        "weights":            weights,
+        "regression_applied": regression_applied,
+    }, ensure_ascii=False)
+
+    try:
+        # Lecture des lignes existantes + purge des entrées expirées
+        cutoff = datetime.now()
+        kept: list[str] = []
+        if history_path.exists():
+            for line in history_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ts = json.loads(line).get("timestamp", "")
+                    age = (cutoff - datetime.fromisoformat(ts)).days
+                    if age <= HISTORY_RETENTION_DAYS:
+                        kept.append(line)
+                except Exception:
+                    kept.append(line)  # ligne non parseable : conservée par précaution
+
+        kept.append(entry)
+        history_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except Exception:
+        pass  # audit trail non critique — ne jamais bloquer l'adaptation
+
+
+# ══════════════════════════════════════════════════════════════
+# Phase 5.5 — Retrieval budget (injection contrôlée par crew)
+# ══════════════════════════════════════════════════════════════
+
+def _build_memory_overview() -> str:
+    """
+    Retourne la structure de memory.md sans son contenu :
+    sections ## et ### présentes, nombre de lignes de contenu par sous-section.
+    Budget estimé : ≤ 300 tokens quelle que soit la taille de memory.md.
+    Utilisé par CuriosityCrew pour détecter les lacunes sans injecter tout le fichier.
+    """
+    md_path = _markdown_path()
+    if not md_path.exists():
+        return "memory.md absent — mémoire non initialisée."
+    lines = md_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    result = []
+    current_h2 = None
+    current_h3 = None
+    content_lines = 0
+    for line in lines:
+        if line.startswith("## "):
+            if current_h3 is not None:
+                label = "VIDE" if content_lines == 0 else f"{content_lines} lignes"
+                result.append(f"    ### {current_h3} : {label}")
+            current_h2 = line[3:].strip()
+            current_h3 = None
+            content_lines = 0
+            result.append(f"## {current_h2}")
+        elif line.startswith("### "):
+            if current_h3 is not None:
+                label = "VIDE" if content_lines == 0 else f"{content_lines} lignes"
+                result.append(f"    ### {current_h3} : {label}")
+            current_h3 = line[4:].strip()
+            content_lines = 0
+        elif current_h3 is not None:
+            s = line.strip()
+            if s and not s.startswith("#"):
+                content_lines += 1
+    if current_h3 is not None:
+        label = "VIDE" if content_lines == 0 else f"{content_lines} lignes"
+        result.append(f"    ### {current_h3} : {label}")
+    return "\n".join(result) if result else "Structure de mémoire vide."
+
+
+def _compress_chunks(chunks: list[dict], max_tokens: int = 600) -> str:
+    """
+    Compresse une liste de chunks en texte injectable dans un prompt LLM.
+    Stratégie : une ligne par chunk, triée par score desc, tronquée à max_tokens.
+    Estimation conservatrice : 4 chars/token.
+    Retourne "" si chunks est vide.
+    """
+    if not chunks:
+        return ""
+    budget_chars = max_tokens * 4
+    lines = []
+    total = 0
+    for c in sorted(chunks, key=lambda x: x.get("score", 0), reverse=True):
+        cat     = c.get("category", "?")
+        sec     = c.get("section", "")
+        subsec  = c.get("subsection", "")
+        content = (c.get("content") or "").strip().replace("\n", " ")[:120]
+        loc     = f"{sec} > {subsec}".strip(" >") if subsec else sec
+        line    = f"- [{cat}] {loc} : {content}"
+        if total + len(line) + 1 > budget_chars:
+            break
+        lines.append(line)
+        total += len(line) + 1
+    return "\n".join(lines)
+
+
+def _record_retrieved_chunks(
+    session_id: str, chunk_ids: list[str], profile: str = "conversation"
+) -> None:
+    """
+    Enregistre les chunks récupérés en retrieval offline (avant kickoff LLM).
+    confirmed=0 — sera mis à jour par score_and_record_chunk_usage après la session.
+    Nécessite la colonne chunk_usage.profile (migration Phase 5.5 — init_db.py).
+    """
+    if not chunk_ids:
+        return
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with db:
+            for cid in chunk_ids:
+                db.execute(
+                    """INSERT INTO chunk_usage
+                       (chunk_id, session_id, retrieved_at, used_score, confirmed, profile)
+                       VALUES (?, ?, ?, NULL, 0, ?)""",
+                    (cid, session_id, now, profile),
+                )
+    finally:
+        db.close()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -380,7 +992,9 @@ def upsert_chunk(
     db.commit()
 
 
-def sync_markdown_to_db(md_path: Path = MARKDOWN_PATH):
+def sync_markdown_to_db(md_path: Path = None):
+    if md_path is None:
+        md_path = _markdown_path()
     db = get_db()
     chunks = parse_markdown_chunks(md_path)
     expected_ids = set()
@@ -420,8 +1034,10 @@ def _normalize_section(title: str) -> str:
     return title.strip().lower()
 
 
-def update_markdown_section(section: str, subsection: str, content: str, md_path: Path = MARKDOWN_PATH, category: str = "connaissance"):
+def update_markdown_section(section: str, subsection: str, content: str, md_path: Path = None, category: str = "connaissance"):
     """Upsert propre d'une sous-section dans le Markdown."""
+    if md_path is None:
+        md_path = _markdown_path()
     section    = sanitize_str(section).lstrip("#").strip()  # retire les ## accidentels
     subsection = sanitize_str(subsection).lstrip("#").strip()
     content    = sanitize_str(content)
@@ -525,7 +1141,7 @@ def update_markdown_section(section: str, subsection: str, content: str, md_path
 # ══════════════════════════════════════════════════════════════
 
 def load_session_json(session_id: str) -> dict:
-    path = SESSIONS_DIR / f"{session_id}.json"
+    path = _sessions_dir() / f"{session_id}.json"
     if not path.exists():
         return {}
     try:
@@ -541,7 +1157,8 @@ def load_session_json(session_id: str) -> dict:
         return {}
 
 
-def update_session_memory(session_id: str, user_message: str, agent_response: str):
+def update_session_memory(session_id: str, user_message: str, agent_response: str,
+                          retrieved_chunk_ids: list[str] | None = None):
     session = load_session_json(session_id)
     session.setdefault("session_id", session_id)
     session.setdefault("messages", [])
@@ -550,8 +1167,11 @@ def update_session_memory(session_id: str, user_message: str, agent_response: st
     session.setdefault("to_persist", [])
     # Sanitize avant écriture — certains modèles Ollama retournent des surrogates invalides
     session["messages"].append({"role": "user", "content": sanitize_str(user_message)})
-    session["messages"].append({"role": "agent", "content": sanitize_str(agent_response)})
-    path = SESSIONS_DIR / f"{session_id}.json"
+    agent_msg: dict = {"role": "agent", "content": sanitize_str(agent_response)}
+    if retrieved_chunk_ids:
+        agent_msg["retrieved_chunk_ids"] = retrieved_chunk_ids
+    session["messages"].append(agent_msg)
+    path = _sessions_dir() / f"{session_id}.json"
     path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -564,12 +1184,14 @@ def get_file_hash(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
 
-def is_markdown_stale(md_path: Path = MARKDOWN_PATH) -> bool:
+def is_markdown_stale(md_path: Path = None) -> bool:
     """
     Retourne True si memory.md a été modifié depuis la dernière sync.
     Vérifie à la fois le mtime (rapide) et le hash (fiable).
     Retourne True aussi si le fichier n'a jamais été indexé.
     """
+    if md_path is None:
+        md_path = _markdown_path()
     if not md_path.exists():
         return False  # Rien à syncer
 
@@ -595,8 +1217,10 @@ def is_markdown_stale(md_path: Path = MARKDOWN_PATH) -> bool:
     return get_file_hash(md_path) != stored_hash
 
 
-def update_file_state(md_path: Path = MARKDOWN_PATH):
+def update_file_state(md_path: Path = None):
     """Met à jour file_state après une sync réussie."""
+    if md_path is None:
+        md_path = _markdown_path()
     if not md_path.exists():
         return
     db = get_db()
@@ -608,7 +1232,7 @@ def update_file_state(md_path: Path = MARKDOWN_PATH):
     db.close()
 
 
-def check_and_sync(md_path: Path = MARKDOWN_PATH) -> bool:
+def check_and_sync(md_path: Path = None) -> bool:
     """
     Vérifie si memory.md est désynchronisé et re-sync si nécessaire.
     Appelé au démarrage de run().
@@ -641,9 +1265,12 @@ class RetrieveMemoryTool(BaseTool):
         "Les résultats indiquent leur source : 🧠 = mémoire personnelle, 📄 = document."
     )
     args_schema: Type[BaseModel] = RetrieveMemoryInput
+    profile: str = "conversation"  # profil de pondération contextuel
 
     def _run(self, query: str) -> str:
-        chunks = retrieve_all(query)
+        global _retrieved_this_turn
+        chunks = retrieve_all(query, profile=self.profile)
+        _retrieved_this_turn.extend(chunks)
         return format_chunks_for_prompt(chunks)
 
 

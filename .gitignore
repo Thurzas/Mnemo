@@ -39,8 +39,17 @@ latest_crew_run.log
 CLAUDE.md
 .claude/
 
+# Frontend build output (régénéré par `npm run build`)
+src/Mnemo/static/assets/
+src/Mnemo/static/vite.svg
+src/Mnemo/static/index.html
+frontend/node_modules/
+
 #Autres
 documents/
+src/Voices/
+docs/
+
 # NEVER export calendars. it's a major security risk.
 *.ics 
 data/

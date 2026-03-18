@@ -33,3 +33,8 @@ pysbd>=0.3.4
 # ── Dashboard web ──────────────────────────────────────────────────
 fastapi>=0.115.0
 uvicorn>=0.30.0
+
+# ── STT / TTS ──────────────────────────────────────────────────────
+# Les dépendances audio (faster-whisper, kokoro, misaki) sont dans
+# requirements.audio.txt — installé uniquement dans le conteneur mnemo principal.
+# Le scheduler n'en a pas besoin et kokoro tire PyTorch (~2.5 GB).

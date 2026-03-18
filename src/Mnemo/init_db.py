@@ -1,6 +1,10 @@
 """
 Lance ce script une seule fois pour initialiser la base SQLite.
     python init_db.py
+
+Peut aussi être appelé programmatiquement avec un chemin explicite :
+    from Mnemo.init_db import init_db, migrate_db
+    init_db(db_path=Path("/data/users/alice/memory.db"))
 """
 import sqlite3
 from pathlib import Path
@@ -8,8 +12,10 @@ from pathlib import Path
 DB_PATH = Path("memory.db")
 
 
-def init_db():
-    db = sqlite3.connect(DB_PATH)
+def init_db(db_path: Path = None):
+    if db_path is None:
+        db_path = DB_PATH
+    db = sqlite3.connect(db_path)
     db.executescript("""
         CREATE TABLE IF NOT EXISTS chunks (
             id               TEXT PRIMARY KEY,
@@ -20,7 +26,9 @@ def init_db():
             updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
             source_line      INTEGER,
             importance_weight REAL DEFAULT 1.0,
-            category         TEXT DEFAULT 'connaissance'
+            category         TEXT DEFAULT 'connaissance',
+            use_count        INTEGER  DEFAULT 0,
+            last_used_at     DATETIME
         );
 
         CREATE TABLE IF NOT EXISTS embeddings (
@@ -111,6 +119,19 @@ def init_db():
             tokenize = "unicode61"
         );
 
+        -- ── Phase 5.3 : Mémoire procédurale — tracking d'usage des chunks ──
+        -- used_score : similarité cosinus réponse/chunk (0.0–1.0)
+        -- confirmed  : 1 si used_score > USAGE_THRESHOLD (défaut 0.60)
+        CREATE TABLE IF NOT EXISTS chunk_usage (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            chunk_id     TEXT     REFERENCES chunks(id) ON DELETE CASCADE,
+            session_id   TEXT,
+            retrieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            used_score   REAL,
+            confirmed    INTEGER  DEFAULT 0,
+            profile      TEXT     DEFAULT 'conversation'
+        );
+
         -- ── CuriosityCrew — questions skippées ────────────────────────
         CREATE TABLE IF NOT EXISTS curiosity_skipped (
             id          TEXT PRIMARY KEY,
@@ -138,15 +159,17 @@ def init_db():
     """)
     db.commit()
     db.close()
-    print(f"✅ Base initialisée : {DB_PATH}")
+    print(f"✅ Base initialisée : {db_path}")
 
 
-def migrate_db():
+def migrate_db(db_path: Path = None):
     """
     Ajoute les colonnes manquantes sur une DB existante.
     Sûr à relancer plusieurs fois — ignore les colonnes déjà présentes.
     """
-    db = sqlite3.connect(DB_PATH)
+    if db_path is None:
+        db_path = DB_PATH
+    db = sqlite3.connect(db_path)
     migrations = [
         "ALTER TABLE chunks ADD COLUMN importance_weight REAL DEFAULT 1.0",
         "ALTER TABLE chunks ADD COLUMN category TEXT DEFAULT 'connaissance'",
@@ -194,6 +217,20 @@ def migrate_db():
             question    TEXT NOT NULL,
             skipped_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         )""",
+        # Phase 5.3 — mémoire procédurale
+        "ALTER TABLE chunks ADD COLUMN use_count    INTEGER  DEFAULT 0",
+        "ALTER TABLE chunks ADD COLUMN last_used_at DATETIME",
+        """CREATE TABLE IF NOT EXISTS chunk_usage (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            chunk_id     TEXT     REFERENCES chunks(id) ON DELETE CASCADE,
+            session_id   TEXT,
+            retrieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            used_score   REAL,
+            confirmed    INTEGER  DEFAULT 0,
+            profile      TEXT     DEFAULT 'conversation'
+        )""",
+        # Phase 5.5 — profil par retrieval
+        "ALTER TABLE chunk_usage ADD COLUMN profile TEXT DEFAULT 'conversation'",
         # Scheduler
         """CREATE TABLE IF NOT EXISTS scheduled_tasks (
             id          TEXT PRIMARY KEY,

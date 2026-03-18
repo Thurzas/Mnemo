@@ -35,8 +35,8 @@ try:
 except ImportError:
     HAS_DOCX = False
 
+from Mnemo.context import get_data_dir as _get_data_dir
 from Mnemo.tools.memory_tools import (
-    DB_PATH,
     EMBED_MODEL,
     CATEGORY_WEIGHTS,
     embed,
@@ -44,6 +44,9 @@ from Mnemo.tools.memory_tools import (
     compute_hash,
     sanitize_str,
 )
+
+def _db_path_default() -> Path:
+    return _get_data_dir() / "memory.db"
 
 # ── Config ────────────────────────────────────────────────────
 CHUNK_SIZE     = 400   # Mots par chunk (PDF → texte brut)
@@ -486,7 +489,7 @@ def upsert_doc_chunk(
 # Pipeline principal
 # ══════════════════════════════════════════════════════════════
 
-def ingest_pdf(path: Path, db_path: Path = DB_PATH) -> dict:
+def ingest_pdf(path: Path, db_path: Path | None = None) -> dict:
     """
     Pipeline complet d'ingestion d'un PDF :
     1. Vérifie que le fichier n'est pas déjà ingéré (par hash)
@@ -503,6 +506,8 @@ def ingest_pdf(path: Path, db_path: Path = DB_PATH) -> dict:
         "chunks":      int,
     }
     """
+    if db_path is None:
+        db_path = _db_path_default()
     db     = sqlite3.connect(str(db_path))
     doc_id = file_hash(path)
 
@@ -564,12 +569,14 @@ def _ingest_pages(
     pages: list[dict],
     page_count: int,
     mime_type: str,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
 ) -> dict:
     """
     Pipeline d'indexation commun à tous les formats.
     Appelé par ingest_pdf, ingest_docx, ingest_text après extraction.
     """
+    if db_path is None:
+        db_path = _db_path_default()
     db     = sqlite3.connect(str(db_path))
     doc_id = file_hash(path)
 
@@ -607,14 +614,14 @@ def _ingest_pages(
             "filename": path.name, "pages": page_count, "chunks": total}
 
 
-def ingest_docx(path: Path, db_path: Path = DB_PATH) -> dict:
+def ingest_docx(path: Path, db_path: Path | None = None) -> dict:
     """Ingère un fichier DOCX dans la base de connaissances."""
     pages      = extract_docx_pages(path)
     page_count = len(pages)  # pages fictives
     return _ingest_pages(path, pages, page_count, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", db_path)
 
 
-def ingest_text(path: Path, db_path: Path = DB_PATH) -> dict:
+def ingest_text(path: Path, db_path: Path | None = None) -> dict:
     """Ingère un fichier TXT ou Markdown dans la base de connaissances."""
     pages      = extract_text_pages(path)
     page_count = len(pages)  # pages fictives
@@ -622,7 +629,7 @@ def ingest_text(path: Path, db_path: Path = DB_PATH) -> dict:
     return _ingest_pages(path, pages, page_count, mime, db_path)
 
 
-def ingest_code(path: Path, db_path: Path = DB_PATH) -> dict:
+def ingest_code(path: Path, db_path: Path | None = None) -> dict:
     """Ingère un fichier source dans la base de connaissances."""
     pages      = extract_code_pages(path)
     page_count = len(pages)
@@ -631,7 +638,83 @@ def ingest_code(path: Path, db_path: Path = DB_PATH) -> dict:
     return _ingest_pages(path, pages, page_count, mime, db_path)
 
 
-def ingest_file(path: Path, db_path: Path = DB_PATH) -> dict:
+def ingest_text_block(
+    text:     str,
+    title:    str | None = None,
+    source:   str = "text_block",
+    db_path:  Path | None = None,
+) -> dict:
+    """
+    Ingère un bloc de texte brut (sans fichier physique) dans doc_chunks.
+
+    Utilisé par NoteWriterCrew pour les contenus classifiés Bucket B.
+    Le doc_id est le MD5 du texte — garantit l'idempotence si le même
+    contenu est soumis deux fois.
+
+    Args:
+        text   : contenu brut à ingérer.
+        title  : titre optionnel (affiché dans le retrieval). Si absent,
+                 généré depuis les premiers mots du texte.
+        source : identifiant du type de source (stocké dans la colonne path
+                 de la table documents). Défaut : "text_block".
+        db_path: chemin vers memory.db. Défaut : DATA_DIR/memory.db.
+
+    Returns:
+        dict { status, doc_id, filename, pages, chunks }
+        status ∈ "ingested" | "already_ingested" | "empty"
+    """
+    import hashlib as _hashlib
+
+    if db_path is None:
+        db_path = _db_path_default()
+
+    cleaned = sanitize_str(text)
+    if not cleaned.strip():
+        return {"status": "empty", "doc_id": "", "filename": title or "", "pages": 0, "chunks": 0}
+
+    doc_id = _hashlib.md5(cleaned.encode()).hexdigest()
+
+    if not title:
+        words = cleaned.split()[:8]
+        title = " ".join(words) + ("…" if len(cleaned.split()) > 8 else "")
+
+    db = sqlite3.connect(str(db_path))
+
+    if is_already_ingested(db, doc_id):
+        db.close()
+        return {"status": "already_ingested", "doc_id": doc_id, "filename": title, "pages": 0, "chunks": 0}
+
+    # Découpe en pages fictives de 500 mots (même logique que extract_text_pages)
+    WORDS_PER_PAGE = 500
+    words = cleaned.split()
+    pages = []
+    for i in range(0, len(words), WORDS_PER_PAGE):
+        pages.append({
+            "page": len(pages) + 1,
+            "text": " ".join(words[i:i + WORDS_PER_PAGE]),
+        })
+
+    if not pages:
+        db.close()
+        return {"status": "empty", "doc_id": doc_id, "filename": title, "pages": 0, "chunks": 0}
+
+    chunks = chunk_pages(pages)
+    total  = len(chunks)
+
+    for chunk in chunks:
+        upsert_doc_chunk(db, doc_id, chunk, title)
+
+    db.execute("""
+        INSERT INTO documents (id, filename, path, mime_type, page_count, chunk_count)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (doc_id, title, source, "text/plain", len(pages), total))
+    db.commit()
+    db.close()
+
+    return {"status": "ingested", "doc_id": doc_id, "filename": title, "pages": len(pages), "chunks": total}
+
+
+def ingest_file(path: Path, db_path: Path | None = None) -> dict:
     """
     Dispatcher universel — détecte le format et appelle le bon ingester.
     Formats supportés : .pdf, .docx, .txt, .md, .py, .js, .ts,
@@ -654,6 +737,32 @@ def ingest_file(path: Path, db_path: Path = DB_PATH) -> dict:
         )
 
 
+
+
+def delete_document(doc_id: str, db_path: Path | None = None) -> bool:
+    """
+    Supprime un document et tous ses chunks (cascade) de la base.
+    Nettoie aussi doc_chunks_fts (table virtuelle sans FK constraint).
+    Retourne True si le document existait, False s'il était introuvable.
+    """
+    if db_path is None:
+        db_path = _db_path_default()
+    db = sqlite3.connect(str(db_path))
+    row = db.execute("SELECT id FROM documents WHERE id = ?", (doc_id,)).fetchone()
+    if not row:
+        db.close()
+        return False
+    # Récupère les chunk_ids avant suppression pour nettoyer FTS
+    chunk_ids = [r[0] for r in db.execute(
+        "SELECT id FROM doc_chunks WHERE doc_id = ?", (doc_id,)
+    ).fetchall()]
+    for cid in chunk_ids:
+        db.execute("DELETE FROM doc_chunks_fts WHERE chunk_id = ?", (cid,))
+    # ON DELETE CASCADE supprime doc_chunks + doc_embeddings
+    db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    db.commit()
+    db.close()
+    return True
 
 
 # ══════════════════════════════════════════════════════════════
@@ -725,21 +834,24 @@ def search_docs_vector(db: sqlite3.Connection, query: str, top_k: int = 10) -> l
 # Utilitaires CLI
 # ══════════════════════════════════════════════════════════════
 
-def list_ingested_documents(db_path: Path = DB_PATH) -> list[dict]:
+def list_ingested_documents(db_path: Path | None = None) -> list[dict]:
     """Retourne la liste des documents ingérés avec leurs métadonnées."""
+    if db_path is None:
+        db_path = _db_path_default()
     db   = sqlite3.connect(str(db_path))
     rows = db.execute("""
-        SELECT filename, page_count, chunk_count, ingested_at
+        SELECT id, filename, page_count, chunk_count, ingested_at
         FROM documents
         ORDER BY ingested_at DESC
     """).fetchall()
     db.close()
     return [
         {
-            "filename":    r[0],
-            "pages":       r[1],
-            "chunks":      r[2],
-            "ingested_at": r[3],
+            "doc_id":      r[0],
+            "filename":    r[1],
+            "pages":       r[2],
+            "chunks":      r[3],
+            "ingested_at": r[4],
         }
         for r in rows
     ]

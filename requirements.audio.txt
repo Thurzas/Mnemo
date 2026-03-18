@@ -1,0 +1,17 @@
+# ══════════════════════════════════════════════════════════════════
+# requirements.audio.txt — dépendances STT / TTS
+#
+# Installé UNIQUEMENT dans le conteneur mnemo principal (dockerfile).
+# PAS dans le scheduler (dockerfile.scheduler) ni dans le service RVC.
+#
+# Raison : kokoro dépend de PyTorch (~2.5 GB).
+# L'inclure dans requirements.txt ferait exploser la taille du scheduler.
+# ══════════════════════════════════════════════════════════════════
+
+# Speech-to-Text
+faster-whisper>=1.0.0
+
+# Text-to-Speech — Kokoro-82M (multilingue FR/JA/EN/...)
+# Prérequis système : espeak-ng (phonémisation FR) — installé dans dockerfile
+kokoro>=0.9.2
+misaki[ja]>=0.9.2

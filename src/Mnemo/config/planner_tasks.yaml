@@ -1,0 +1,39 @@
+planner_task:
+  description: >
+    Décompose le goal suivant en étapes atomiques et ordonnées.
+
+    GOAL : {goal}
+
+    CONTEXTE DE RECONNAISSANCE (code/fichiers explorés avant planification) :
+    {recon_context}
+
+    LACUNES MÉMOIRE CONNUES :
+    {memory_gap_summary}
+
+    RÈGLES :
+    - Si recon_context est vide ou "(non disponible)", ajoute une première étape
+      "Explorer le code concerné" avec crew_target "reconnaissance".
+    - Si memory_gap_summary contient des lacunes bloquantes, ajoute une étape
+      "Combler les lacunes mémoire" avec crew_target "curiosity" AVANT les étapes
+      qui en dépendent.
+    - Maximum 8 étapes. Chaque étape doit être actionnable et précise.
+    - crew_target : crew qui exécutera l'étape.
+      Valeurs possibles : conversation, shell, note, scheduler, reconnaissance, curiosity
+      Si tu n'es pas sûr, utilise "conversation".
+
+    Retourne UNIQUEMENT un objet JSON valide :
+    {{
+      "title": "Titre court du plan (< 60 caractères)",
+      "steps": [
+        "Description concise de l'étape 1",
+        "Description concise de l'étape 2"
+      ],
+      "crew_targets": {{
+        "Description concise de l'étape 1": "conversation",
+        "Description concise de l'étape 2": "shell"
+      }},
+      "context_summary": "Ce que l'agent sait du goal au moment de la planification (1-3 phrases)"
+    }}
+  expected_output: >
+    Un objet JSON valide avec title, steps (liste ordonnée), crew_targets et context_summary.
+  agent: planner_agent

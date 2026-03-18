@@ -1,0 +1,50 @@
+/* ── Design system ────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@700;800&display=swap');
+
+:root {
+  --bg:      #07070d;
+  --surface: #0f0f18;
+  --s2:      #161622;
+  --border:  #23233a;
+  --a1:      #7c6af7;
+  --a2:      #4ecdc4;
+  --a3:      #f7b731;
+  --a4:      #ff6b6b;
+  --a5:      #a8e063;
+  --a6:      #f97af9;
+  --text:    #e8e8f0;
+  --muted:   #6b6b85;
+  --dimmed:  #3a3a55;
+  --mono:    'JetBrains Mono', monospace;
+  --display: 'Syne', sans-serif;
+}
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+a {
+  color: var(--a1);
+  text-decoration: none;
+}
+
+button {
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--dimmed); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }

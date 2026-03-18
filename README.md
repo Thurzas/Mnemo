@@ -1,43 +1,89 @@
-# 🐠•°•°•°•°°~ Mnemo Crew °:•.🐠*.•🪸.•:°
+# Mnemo
 
-Welcome to the Mnemo Crew project, powered by [crewAI](https://crewai.com). This template is designed to give an AI assistant to work with. check the roadmap to see where is the current work right now.
+Agent mémoire personnel — 100% local, 100% privé. Bâti sur [CrewAI](https://crewai.com) + [Ollama](https://ollama.com).
 
-## What is Mnemo ?
+## C'est quoi Mnemo ?
 
-The main goal of this project is to provide an AI assistant with specialized memory, enabling it to remember our conversations, preferences, or anecdotes useful in its work.
+Un assistant personnel qui **se souvient de toi** : conversations, préférences, habitudes, projets. Tout reste sur ta machine, rien n'est envoyé sur internet.
 
-### how does it remember
+### Mémoire hybride
 
-To achieve this, two types of memory are being developed: a traditional RAG memory (knowledge, think of it as a library) and a second, anecdotal memory, comparable to a general-purpose memory. based
+- **Court terme** : transcription JSON de la session courante
+- **Long terme lisible** : `memory.md` — fichier Markdown éditable à la main
+- **Long terme indexé** : SQLite avec FTS5 (recherche plein texte) + embeddings 768d (recherche vectorielle)
+- **Documents** : ingestion PDF, DOCX, TXT, Markdown, code source
 
-This all-purpose memory is formed in two stages: a memory.md file that acts as a user-readable truth table, and a database storing this information as chunks, stored in plain text for keyword searches, and stored as vectors for vectorized searches. This second search allows the concepts of the anecdote to be linked by proximity. This is exactly what happens in a RAG (Relationship Access Group), but this time geared towards preserving context about the user's preferences.
+### Fonctionnalités
 
-### Understanding the crew
+- Conversation avec mémoire persistante entre les sessions
+- Calendrier ICS (Google Calendar, Nextcloud, fichier local) — lecture et écriture
+- Recherche web (SearXNG self-hosted ou DuckDuckGo)
+- Briefing matinal automatique (`data/briefing.md`)
+- Planification en langage naturel (rappels, tâches récurrentes)
+- Interface web locale (dashboard React + API FastAPI)
+- Ingestion de documents (PDF, DOCX, TXT...)
 
-It's an assembly of crews, each with its own objective: the conversational crew can search two types of memory: short-term, session-based, and long-term, based on a Markdown file with a database for indexing. I'm using FTS5 as a search engine for vectors and key word.
-
-The consolidation crew is used to synchronize and maintain the database and the Markdown file.
+---
 
 ## Installation
 
-I'll prepare for phase 3 a script to simplify installation. But right now, two steps to make it work :
+Voir [INSTALL.MD](INSTALL.MD) pour le guide complet.
+
+**Résumé en 3 commandes :**
+
 ```bash
-python3 src/Mnemo/init_db.py 
-crewai run
+git clone https://github.com/thurzas/mnemo.git
+cd mnemo && chmod +x mnemo.sh install.sh
+./mnemo.sh setup
 ```
 
-first run of crewai should create a python environment to make it work, with needed dependancies.
+**Prérequis** : Docker ≥ 24, Ollama ≥ 0.4
 
-At this moment, you can ingest documents into your crew with :
+---
+
+## Utilisation
+
+```bash
+./mnemo.sh              # Démarre une session de conversation
+./mnemo.sh services     # Démarre scheduler + API (daemon)
+./mnemo.sh help         # Toutes les commandes disponibles
 ```
-python -m Mnemo.main ingest "documents/Artificial Intelligence A Modern Approach.pdf" 
-```
 
+---
 
-## Support
+## Architecture
 
-For support, questions, or feedback regarding the Mnemo Crew or crewAI.
-- crewAI's [documentation](https://docs.crewai.com)
-- there is no Discord yet, depends of how much people will contribute to it.
+8 crews spécialisés orchestrés via CrewAI :
 
-Let's create wonders together.
+| Crew | Rôle |
+|------|------|
+| `EvaluationCrew` | Analyse l'intent, route vers le bon crew |
+| `ConversationCrew` | Récupère le contexte et génère la réponse |
+| `ConsolidationCrew` | Extrait les faits et met à jour `memory.md` |
+| `CuriosityCrew` | Détecte les lacunes mémoire, pose des questions |
+| `CalendarWriteCrew` | Gestion du calendrier en écriture |
+| `ShellCrew` | Exécute des commandes système (whitelist + confirmation) |
+| `SchedulerCrew` | Planification en langage naturel |
+| `BriefingCrew` | Génère le briefing matinal et le résumé hebdomadaire |
+
+Pour plus de détails, consulte le [Manuel](Manual/README.md).
+
+---
+
+## Documentation
+
+| Document | Contenu |
+|----------|---------|
+| [INSTALL.MD](INSTALL.MD) | Guide d'installation complet |
+| [Manual/memory.md](Manual/memory.md) | Système de mémoire (3 couches, retrieval, consolidation) |
+| [Manual/calendar.md](Manual/calendar.md) | Calendrier ICS — lecture et écriture par le chat |
+| [Manual/crews.md](Manual/crews.md) | Les 8 crews : rôle, agents, sécurité |
+| [Manual/scheduler.md](Manual/scheduler.md) | Scheduler : planification et service background |
+| [Manual/routing.md](Manual/routing.md) | Pipeline de routing : keywords, ML, LLM |
+| [TROUBLESHOOTING.MD](TROUBLESHOOTING.MD) | Problèmes courants et solutions |
+
+---
+
+## Roadmap
+
+Voir [ROADMAP.md](ROADMAP.md).

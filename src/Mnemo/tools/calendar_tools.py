@@ -2,11 +2,11 @@
 calendar_tools.py — Temporal awareness pour Mnemo
 
 Supporte deux sources ICS :
-  - Fichier local    : CALENDAR_SOURCE=/home/matt/agenda.ics
-  - URL Google Cal   : CALENDAR_SOURCE=https://calendar.google.com/calendar/ical/xxx/basic.ics
-  - URL Nextcloud    : CALENDAR_SOURCE=https://nextcloud.local/remote.php/dav/calendars/...
+  - Fichier local    : get_calendar_source()=/home/matt/agenda.ics
+  - URL Google Cal   : get_calendar_source()=https://calendar.google.com/calendar/ical/xxx/basic.ics
+  - URL Nextcloud    : get_calendar_source()=https://nextcloud.local/remote.php/dav/calendars/...
 
-Si CALENDAR_SOURCE est absent ou invalide, tout est silencieux — le système
+Si get_calendar_source() est absent ou invalide, tout est silencieux — le système
 fonctionne normalement sans calendrier.
 
 Dépendance : icalendar (pip install icalendar)
@@ -36,7 +36,8 @@ except ImportError:
     _ICALENDAR_AVAILABLE = False
 
 # ── Config ───────────────────────────────────────────────────────
-CALENDAR_SOURCE   = os.getenv("CALENDAR_SOURCE", "")
+from Mnemo.context import get_calendar_source   # source per-user via ContextVar
+
 LOOKAHEAD_DAYS    = int(os.getenv("CALENDAR_LOOKAHEAD_DAYS", "14"))
 CACHE_TTL_SECONDS = int(os.getenv("CALENDAR_CACHE_TTL", "300"))  # 5 min
 
@@ -53,10 +54,10 @@ def _fetch_ics_raw() -> Optional[bytes]:
     Récupère le contenu brut du fichier ICS depuis la source configurée.
     Retourne None si source absente, inaccessible ou icalendar non installé.
     """
-    if not CALENDAR_SOURCE or not _ICALENDAR_AVAILABLE:
+    if not get_calendar_source() or not _ICALENDAR_AVAILABLE:
         return None
 
-    src = CALENDAR_SOURCE.strip()
+    src = get_calendar_source().strip()
 
     # ── URL (Google Calendar, Nextcloud, etc.) ──
     if src.startswith("http://") or src.startswith("https://"):
@@ -77,12 +78,25 @@ def _fetch_ics_raw() -> Optional[bytes]:
 
 
 def _get_calendar() -> Optional["Calendar"]:
-    """Retourne l'objet Calendar en cache ou recharge si TTL expiré."""
+    """Retourne l'objet Calendar en cache ou recharge si TTL expiré ou fichier modifié."""
     global _cache
     now = datetime.now()
 
+    # Vérifie si le fichier local a été modifié depuis le dernier chargement
+    # (pour détecter les écritures faites par un autre processus, ex. CLI → FastAPI)
+    file_modified = False
+    src = get_calendar_source().strip() if get_calendar_source() else ""
+    if src and not src.startswith("http") and _cache["fetched_at"] is not None:
+        try:
+            mtime = datetime.fromtimestamp(Path(src).stat().st_mtime)
+            if mtime > _cache["fetched_at"]:
+                file_modified = True
+        except OSError:
+            pass
+
     if (
-        _cache["data"] is not None
+        not file_modified
+        and _cache["data"] is not None
         and _cache["fetched_at"] is not None
         and (now - _cache["fetched_at"]).seconds < CACHE_TTL_SECONDS
     ):
@@ -390,21 +404,27 @@ def get_upcoming_events(
 def format_events_for_prompt(events: list[dict]) -> str:
     """
     Formate les événements pour injection dans un prompt LLM.
-    Format compact lisible, avec indication temporelle claire.
+    Format : [mardi 10 mars - Demain] HH:MM Titre - Lieu
+    Le nom du jour et la date sont inclus pour eviter que le LLM
+    ait a recalculer "dans 2 jours = quel jour ?".
     """
     if not events:
         return "Aucun événement à venir dans les prochains jours."
 
+    _jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
+    _mois  = ["janvier","février","mars","avril","mai","juin",
+              "juillet","août","septembre","octobre","novembre","décembre"]
+
     lines = []
     for ev in events:
-        time_str = ""
-        if ev["datetime"]:
-            time_str = f" à {ev['datetime'].strftime('%H:%M')}"
-        loc_str = f" — {ev['location']}" if ev["location"] else ""
-        lines.append(f"- [{ev['label']}]{time_str} {ev['title']}{loc_str}")
+        d        = ev["date"]
+        day_name = f"{_jours[d.weekday()]} {d.day} {_mois[d.month - 1]}"
+        time_str = f" à {ev['datetime'].strftime('%H:%M')}" if ev["datetime"] else ""
+        loc_str  = f" — {ev['location']}" if ev["location"] else ""
+        label    = ev["label"]
+        lines.append(f"- [{day_name} - {label}]{time_str} {ev['title']}{loc_str}")
 
     return "\n".join(lines)
-
 
 def format_startup_banner(events: list[dict]) -> str:
     """
@@ -464,36 +484,49 @@ def get_yesterday_date_str() -> str:
     return f"{human} ({iso})"
 
 
+def get_week_dates_for_prompt() -> str:
+    """
+    Retourne un mapping explicite nom-de-jour -> date ISO pour les 14 prochains jours.
+    Injecte comme variable dedicee dans CalendarWriteCrew pour une resolution de date fiable.
+    """
+    _jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
+    today  = date.today()
+    monday = today - timedelta(days=today.weekday())
+    parts  = []
+    for i in range(14):
+        d     = monday + timedelta(days=i)
+        label = _jours[i % 7] + (" prochain" if i >= 7 else "")
+        suffix = " <- aujourd'hui" if d == today else ""
+        parts.append(f"{label} = {d.isoformat()}{suffix}")
+    return ", ".join(parts)
+
+
 def get_temporal_context() -> str:
     """
-    Construit le bloc temporel complet à injecter dans les prompts.
+    Construit le bloc temporel minimal injecté dans TOUS les prompts.
 
-    Structure claire :
-      - Date et heure actuelles
-      - Hier (pour résoudre les requêtes "qu'est-ce que j'ai fait hier")
-      - Événements calendrier : AUJOURD'HUI ET FUTUR UNIQUEMENT
+    Contient UNIQUEMENT les ancres temporelles nécessaires au LLM pour
+    calculer des dates relatives ("hier", "demain", "lundi prochain").
+    L'agenda et les deadlines sont injectés séparément via calendar_context,
+    uniquement quand needs_calendar=True — ce qui évite que l'agent parle
+    du calendrier dans des conversations sans rapport.
     """
-    lines = [
+    _jours = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
+    _mois  = ["janvier","février","mars","avril","mai","juin",
+              "juillet","août","septembre","octobre","novembre","décembre"]
+
+    today  = date.today()
+    monday = today - timedelta(days=today.weekday())
+    week_parts = []
+    for i in range(7):
+        d = monday + timedelta(days=i)
+        week_parts.append(f"{_jours[i]} {d.day} {_mois[d.month - 1]}")
+
+    return "\n".join([
         f"Date et heure actuelles : {get_current_datetime_str()}",
+        f"Semaine en cours : {' · '.join(week_parts)}",
         f"Hier : {get_yesterday_date_str()}",
-    ]
-
-    # Deadlines urgentes (<=3j) — section dédiée, visible en premier
-    deadline_block = get_deadline_context()
-    if deadline_block:
-        lines.append("")
-        lines.append(deadline_block)
-
-    # Agenda complet dans la fenetre lookahead
-    events = get_upcoming_events(days=LOOKAHEAD_DAYS)
-    if events:
-        lines.append("")
-        lines.append(f"Agenda complet - aujourd'hui et {LOOKAHEAD_DAYS} prochains jours :")
-        lines.append(format_events_for_prompt(events))
-    elif not deadline_block:
-        lines.append("Aucun evenement calendrier disponible.")
-
-    return "\n".join(lines)
+    ])
 
 
 def get_deadline_context() -> str:
@@ -539,7 +572,7 @@ def get_deadline_context() -> str:
 
 def calendar_is_configured() -> bool:
     """Retourne True si une source calendrier est configurée ET accessible."""
-    return bool(CALENDAR_SOURCE) and _ICALENDAR_AVAILABLE
+    return bool(get_calendar_source()) and _ICALENDAR_AVAILABLE
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -548,16 +581,16 @@ def calendar_is_configured() -> bool:
 
 def calendar_is_writable() -> bool:
     """True si CALENDAR_SOURCE est un fichier local (pas une URL)."""
-    if not CALENDAR_SOURCE or not _ICALENDAR_AVAILABLE:
+    if not get_calendar_source() or not _ICALENDAR_AVAILABLE:
         return False
-    src = CALENDAR_SOURCE.strip()
+    src = get_calendar_source().strip()
     return not (src.startswith("http://") or src.startswith("https://"))
 
 
 def _save_calendar(cal: "Calendar") -> None:
     """Écrit le calendrier modifié dans le fichier ICS et invalide le cache."""
     global _cache
-    path = Path(CALENDAR_SOURCE.strip())
+    path = Path(get_calendar_source().strip())
     path.write_bytes(cal.to_ical())
     _cache["data"] = None
     _cache["fetched_at"] = None
@@ -572,7 +605,7 @@ def _load_writable_calendar() -> "Calendar":
     if not calendar_is_writable():
         raise ValueError(
             "Le calendrier est en lecture seule (URL distante) ou non configuré. "
-            "Configure CALENDAR_SOURCE avec un chemin de fichier local."
+            "Configurez une source ICS locale dans votre profil utilisateur."
         )
     raw = _fetch_ics_raw()
     if raw:
@@ -583,16 +616,18 @@ def _load_writable_calendar() -> "Calendar":
     return cal
 
 
-def get_events_with_uid(days: int = 30) -> list[dict]:
+def get_events_with_uid(days: int = 30, from_date: date | None = None) -> list[dict]:
     """
     Comme get_upcoming_events() mais inclut le champ 'uid' dans chaque événement.
     Utilisé par CalendarWriteCrew pour cibler un événement par UID.
+    from_date permet de démarrer avant aujourd'hui (ex: début de semaine courante).
     """
     cal = _get_calendar()
     if cal is None:
         return []
 
     today = date.today()
+    start = from_date if from_date is not None else today
     end   = today + timedelta(days=days)
     seen  = set()
     events: list[dict] = []
@@ -603,7 +638,7 @@ def get_events_with_uid(days: int = 30) -> list[dict]:
         uid = str(component.get("UID", ""))
 
         if component.get("RRULE"):
-            for occ_date in _expand_rrule(component, today, end):
+            for occ_date in _expand_rrule(component, start, end):
                 key = (uid, occ_date)
                 if key not in seen:
                     seen.add(key)
@@ -615,7 +650,7 @@ def get_events_with_uid(days: int = 30) -> list[dict]:
             if dtstart is None:
                 continue
             ev_date = _to_date(dtstart.dt)
-            if ev_date is None or not (today <= ev_date <= end):
+            if ev_date is None or not (start <= ev_date <= end):
                 continue
             key = (uid, ev_date)
             if key not in seen:
@@ -630,17 +665,18 @@ def get_events_with_uid(days: int = 30) -> list[dict]:
 
 def format_events_with_uid(events: list[dict]) -> str:
     """
-    Formate les événements avec leur UID tronqué pour CalendarWriteCrew.
-    Format : - [uid12car] [label] HH:MM Titre — Lieu
+    Formate les événements avec un index numérique (#N) pour CalendarWriteCrew.
+    Format : - [#N] [label] HH:MM Titre — Lieu
+    L'index est résolu en UID complet par CalendarWriteCrew.run() avant toute opération.
+    Les UIDs bruts (parfois 60+ caractères pour Google Calendar) ne sont jamais exposés au LLM.
     """
     if not events:
         return "Aucun événement à venir dans les 30 prochains jours."
     lines = []
-    for ev in events:
-        time_str  = f" à {ev['datetime'].strftime('%H:%M')}" if ev.get("datetime") else ""
-        loc_str   = f" — {ev['location']}" if ev.get("location") else ""
-        uid_short = ev.get("uid", "")[:12]
-        lines.append(f"- [{uid_short}] [{ev['label']}]{time_str} {ev['title']}{loc_str}")
+    for i, ev in enumerate(events):
+        time_str = f" à {ev['datetime'].strftime('%H:%M')}" if ev.get("datetime") else ""
+        loc_str  = f" — {ev['location']}" if ev.get("location") else ""
+        lines.append(f"- [#{i}] [{ev['label']}]{time_str} {ev['title']}{loc_str}")
     return "\n".join(lines)
 
 
@@ -695,16 +731,40 @@ def add_event(
     return uid
 
 
+def _resolve_uid(components: list, uid: str) -> Optional[str]:
+    """
+    Résout un UID partiel vers l'UID complet d'un VEVENT.
+    Essaie d'abord une correspondance exacte, puis par préfixe (min 8 chars).
+    Retourne l'UID complet trouvé, ou None.
+    """
+    vevents = [c for c in components if getattr(c, "name", "") == "VEVENT"]
+    # Correspondance exacte
+    for c in vevents:
+        if str(c.get("UID", "")) == uid:
+            return uid
+    # Correspondance par préfixe (LLM peut tronquer les longs UIDs)
+    if len(uid) >= 8:
+        for c in vevents:
+            full = str(c.get("UID", ""))
+            if full.startswith(uid):
+                return full
+    return None
+
+
 def delete_event(uid: str) -> bool:
     """
     Supprime un VEVENT par UID dans le fichier ICS local.
+    Accepte un UID partiel (préfixe) si le LLM l'a tronqué.
     Retourne True si trouvé et supprimé, False sinon.
     """
     cal = _load_writable_calendar()
+    resolved = _resolve_uid(cal.subcomponents, uid)
+    if resolved is None:
+        return False
     before = len(cal.subcomponents)
     cal.subcomponents = [
         c for c in cal.subcomponents
-        if not (getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == uid)
+        if not (getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == resolved)
     ]
     if len(cal.subcomponents) == before:
         return False
@@ -720,9 +780,13 @@ def update_event(uid: str, **fields) -> bool:
     """
     cal = _load_writable_calendar()
 
+    resolved = _resolve_uid(cal.subcomponents, uid)
+    if resolved is None:
+        return False
+
     target = None
     for c in cal.subcomponents:
-        if getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == uid:
+        if getattr(c, "name", "") == "VEVENT" and str(c.get("UID", "")) == resolved:
             target = c
             break
 
@@ -833,7 +897,7 @@ try:
             events = get_upcoming_events(days=days)
             if not events:
                 if not calendar_is_configured():
-                    return "Aucun calendrier configuré (variable CALENDAR_SOURCE absente)."
+                    return "Aucun calendrier configuré (CALENDAR_SOURCE ou profil utilisateur absent)."
                 return f"Aucun événement dans les {days} prochains jours."
             return format_events_for_prompt(events)
 

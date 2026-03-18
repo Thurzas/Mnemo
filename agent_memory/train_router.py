@@ -108,7 +108,10 @@ def main():
         print(f"  [{tag}] {conf:.2f} | {text[:40]:<40} -> {pred}")
     print(f"  {ok}/{len(TESTS)} tests\n")
 
-    joblib.dump({"pipeline": pipeline, "routes": ROUTES, "n_train": len(texts)}, args.output)
+    # IMPORTANT : utiliser pipeline.classes_ (ordre alphabétique sklearn)
+    # et non ROUTES (ordre arbitraire) — predict_proba retourne les probas
+    # dans l'ordre de classes_, pas dans l'ordre de ROUTES.
+    joblib.dump({"pipeline": pipeline, "routes": list(pipeline.classes_), "n_train": len(texts)}, args.output)
     print(f"Modele sauvegarde : {args.output} ({args.output.stat().st_size // 1024} KB)")
     print("Etape suivante : monte router_model.joblib dans Docker et relance.")
 

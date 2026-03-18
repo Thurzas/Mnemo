@@ -11,6 +11,27 @@
 # Run   :  docker compose run --rm mnemo
 # ══════════════════════════════════════════════════════════════════
 
+
+# ── Étape 1 : build du frontend React ────────────────────────────
+# Une image Node temporaire compile le frontend.
+# Le résultat (src/Mnemo/static/) est copié dans l'image finale.
+# L'utilisateur n'a pas besoin de Node.js sur sa machine.
+FROM node:22-slim AS frontend-builder
+
+WORKDIR /build
+
+# Installe les dépendances (layer mis en cache si package.json inchangé)
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --prefer-offline
+
+# Copie les sources et compile
+# outDir est configuré dans vite.config.ts → ../src/Mnemo/static
+# (depuis /build, ça donne /src/Mnemo/static dans le container builder)
+COPY frontend/ ./
+RUN npm run build
+
+
+# ── Étape 2 : image Python finale ────────────────────────────────
 FROM python:3.12-slim
 
 # ── Métadonnées ───────────────────────────────────────────────────
@@ -22,17 +43,35 @@ LABEL version="3.0"
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         curl \
+        ffmpeg \
+        espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Utilisateur non-root ─────────────────────────────────────────
 # Crée un utilisateur dédié (uid/gid 1000) sans shell de login.
 # Le conteneur ne tourne JAMAIS en root — même en cas d'exploitation.
 RUN groupadd --gid 1000 mnemo \
- && useradd  --uid 1000 --gid 1000 --create-home --shell /bin/false mnemo  && mkdir -p /home/mnemo/.local/share  && chown -R mnemo:mnemo /home/mnemo
+ && useradd  --uid 1000 --gid 1000 --create-home --shell /bin/false mnemo \
+ && mkdir -p /home/mnemo/.local/share \
+ && chown -R mnemo:mnemo /home/mnemo
 
 COPY requirements.txt /tmp/requirements.txt
+COPY requirements.audio.txt /tmp/requirements.audio.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
- && pip install --no-cache-dir litellm
+ && pip install --no-cache-dir litellm \
+ && pip install --no-cache-dir -r /tmp/requirements.audio.txt \
+ && python -m unidic download
+
+# ── Modèles STT — téléchargés au build (internet dispo) ─────────
+# Whisper tiny (~39 MB) — modèle STT offline
+RUN python3 -c "\
+from faster_whisper import WhisperModel; \
+WhisperModel('tiny', device='cpu', compute_type='int8', download_root='/app/models/whisper')"
+
+# Kokoro-82M : les poids (~82 MB) sont téléchargés au PREMIER APPEL TTS dans
+# /data/models (volume persistant, writable). On ne les bake pas dans l'image
+# pour éviter les problèmes d'écriture sur filesystem read-only.
+# HF_HOME est défini dans docker-compose.yml → /data/models.
 
 # ── Patch CrewAI : désactive le prompt interactif de tracing ────
 COPY docker/patch_crewai_tracing.py /tmp/patch_crewai_tracing.py
@@ -40,6 +79,11 @@ RUN python3 /tmp/patch_crewai_tracing.py
 
 # ── Code source (lecture seule dans le conteneur) ────────────────
 COPY src/ /app/src/
+
+# ── Frontend compilé (depuis l'étape builder) ────────────────────
+# Remplace le contenu de static/ par le build Vite frais.
+COPY --from=frontend-builder /src/Mnemo/static/ /app/src/Mnemo/static/
+
 RUN chown -R mnemo:mnemo /app
 
 # ── Répertoire de travail = données utilisateur ──────────────────
@@ -57,6 +101,9 @@ ENV PYTHONPATH="/app/src"
 # Redirige HOME vers /tmp (tmpfs) — évite les erreurs de lecture seule
 # CrewAI écrit son cache ChromaDB dans HOME/.local/share/data
 ENV HOME=/tmp
+# HF_HOME : Kokoro télécharge ses poids dans /data/models (volume writable).
+# Surchargé par docker-compose.yml — cette valeur est un fallback pour le CLI.
+ENV HF_HOME=/data/models
 ENV PYTHONUNBUFFERED=1
 # Désactive la télémétrie CrewAI — aucun envoi vers app.crewai.com
 ENV OTEL_SDK_DISABLED=true

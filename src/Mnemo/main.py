@@ -4,7 +4,7 @@ import json
 import uuid
 import warnings
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
@@ -38,33 +38,6 @@ def _dbg(msg: str) -> None:
         print(f"  [DBG] {msg}")
 
 
-# ── Active learning — collecte les cas incertains pour re-entrainement ──
-# uncertain_cases.jsonl dans /data — pas dans /app (read-only)
-_UNCERTAIN_LOG = Path("uncertain_cases.jsonl")  # relatif à WORKDIR=/data
-_UNCERTAIN_CONF_THRESHOLD = 0.70  # en dessous = cas incertain
-
-def _log_uncertain(message: str, final_route: str, ml_conf: float) -> None:
-    """
-    Logge les messages ou le ML etait peu confiant (conf < seuil).
-    Ces cas seront utilises pour ameliorer le modele au prochain re-train.
-    La route finale (decidee par LLM ou keywords) sert de label.
-    """
-    if ml_conf >= _UNCERTAIN_CONF_THRESHOLD:
-        return  # ML etait confiant, pas besoin de loguer
-    try:
-        import json as _json
-        entry = _json.dumps({
-            "text":       message,
-            "route":      final_route,
-            "ml_conf":    round(ml_conf, 3),
-            "source":     "active_learning",
-        }, ensure_ascii=False)
-        with open(_UNCERTAIN_LOG, "a", encoding="utf-8") as f:
-            f.write(entry + "\n")
-        _dbg(f"cas incertain logge -> {_UNCERTAIN_LOG.name} (conf={ml_conf:.2f}, label={final_route})")
-    except Exception as e:
-        _dbg(f"log uncertain echoue : {e}")
-
 # ─────────────────────────────────────────────────────────────
 
 from Mnemo.crew import (
@@ -72,18 +45,24 @@ from Mnemo.crew import (
     ShellCrew, BriefingCrew, CalendarWriteCrew, SchedulerCrew, NoteWriterCrew,
 )
 from Mnemo.tools.memory_tools import (
-    update_session_memory, load_session_json, SESSIONS_DIR,
-    check_and_sync, MARKDOWN_PATH, get_db, compute_hash,
+    update_session_memory, load_session_json,
+    check_and_sync, get_db, compute_hash,
     update_markdown_section, sync_markdown_to_db,
+    _sessions_dir, _markdown_path,
+    score_and_record_chunk_usage,
+    adapt_weights_if_ready,
+    MemoryGap, MemoryGapReport, save_memory_gap_report,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
     get_temporal_context, get_upcoming_events, format_events_for_prompt,
     get_deadline_context, format_startup_banner, calendar_is_configured,
 )
-from Mnemo.tools.web_tools import (
-    SEARXNG_URL, _DDG_AVAILABLE, web_search, format_results_for_prompt,
-)
+from Mnemo.context import set_data_dir as _set_data_dir
+
+# ── Data dir — CLI utilise DATA_PATH (ou /data par défaut) ────────
+import os as _os
+_set_data_dir(Path(_os.getenv("DATA_PATH", "/data")).resolve())
 
 
 # ══════════════════════════════════════════════════════════════
@@ -288,7 +267,7 @@ def _collect_answers(questions: list[dict]) -> list[dict]:
     return answers
 
 
-def curiosity_session(session_content: str) -> None:
+def curiosity_session(session_content: str, session_id: str = "") -> None:
     """
     Lance une session de questionnement proactif post-consolidation.
 
@@ -298,8 +277,8 @@ def curiosity_session(session_content: str) -> None:
     Phase 3  — Menu CLI    : collecte les réponses utilisateur
     Phase 4  — LLM         : QuestionnaireAgent reformule + écrit dans memory.md
     """
-    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
-        if MARKDOWN_PATH.exists() else ""
+    memory_content = _markdown_path().read_text(encoding="utf-8", errors="ignore") \
+        if _markdown_path().exists() else ""
 
     # ── Phase 1a : trous structurels (Python pur, garanti) ──
     structural_gaps = _detect_structural_gaps(memory_content)
@@ -323,12 +302,32 @@ def curiosity_session(session_content: str) -> None:
     if remaining_slots > 0 and session_content:
         print("\n🔍 Analyse contextuelle en cours...")
         try:
+            from Mnemo.tools.memory_tools import (
+                _build_memory_overview, retrieve_all,
+                _compress_chunks, _record_retrieved_chunks,
+            )
+            memory_overview = _build_memory_overview()
+            chunks_recent   = retrieve_all(
+                session_content[:400], top_k_final=3, profile="curiosity"
+            )
+            if session_id and chunks_recent:
+                _record_retrieved_chunks(
+                    session_id, [c["id"] for c in chunks_recent], profile="curiosity"
+                )
+            memory_recent = _compress_chunks(chunks_recent, max_tokens=300)
+        except Exception as e:
+            print(f"  ⚠️  Retrieval curiosity ignoré : {e}")
+            memory_overview = memory_content[:1500]
+            memory_recent   = ""
+
+        try:
             structural_summary = "\n".join(
                 f"- {g['question']}" for g in structural_gaps
             ) or "Aucun trou structurel détecté."
 
             result = CuriosityCrew().crew().kickoff(inputs={
-                "memory_content":     memory_content[:6000],
+                "memory_overview":    memory_overview,
+                "memory_recent":      memory_recent,
                 "session_summary":    session_content,
                 "skipped_questions":  skipped_text,
                 "structural_gaps":    structural_summary,
@@ -340,13 +339,67 @@ def curiosity_session(session_content: str) -> None:
             end   = raw.rfind("}") + 1
             if start != -1 and end > start:
                 detection = json.loads(raw[start:end])
-                if detection.get("has_gaps"):
-                    for q in detection.get("questions", [])[:remaining_slots]:
-                        q_id = q.get("id") or compute_hash(q.get("question", ""))
-                        if q_id not in skipped_ids:
-                            q["id"]   = q_id
-                            q["type"] = "contextual"
-                            contextual_gaps.append(q)
+                # Nouveau format : blocking_gaps + enriching_gaps
+                for gap_dict in detection.get("blocking_gaps", []):
+                    q_id = compute_hash(gap_dict.get("question", "") or gap_dict.get("description", ""))
+                    if q_id not in skipped_ids and gap_dict.get("question"):
+                        gap_dict["id"]   = q_id
+                        gap_dict["type"] = "contextual_blocking"
+                        contextual_gaps.append(gap_dict)
+                for gap_dict in detection.get("enriching_gaps", []):
+                    q_id = compute_hash(gap_dict.get("question", "") or gap_dict.get("description", ""))
+                    if q_id not in skipped_ids and gap_dict.get("question"):
+                        gap_dict["id"]   = q_id
+                        gap_dict["type"] = "contextual_enriching"
+                        contextual_gaps.append(gap_dict)
+                # Complétude mémoire pour le MemoryGapReport
+                llm_completeness = float(detection.get("memory_completeness", 0.0))
+                llm_blocking  = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("description", ""),
+                        affects     = g.get("affects", []),
+                        priority    = g.get("priority", 1),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in detection.get("blocking_gaps", [])
+                ]
+                llm_enriching = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("description", ""),
+                        affects     = g.get("affects", []),
+                        priority    = g.get("priority", 3),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in detection.get("enriching_gaps", [])
+                ]
+                # Lacunes structurelles → bloquantes par nature
+                struct_as_gaps = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("question", ""),
+                        priority    = g.get("priority", 2),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in structural_gaps
+                ]
+                gap_report = MemoryGapReport(
+                    assessed_at         = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                    memory_completeness = llm_completeness,
+                    blocking_gaps       = struct_as_gaps + llm_blocking,
+                    enriching_gaps      = llm_enriching,
+                )
+                save_memory_gap_report(gap_report)
+                print(f"  📊 Complétude mémoire : {llm_completeness:.0%} | "
+                      f"{len(gap_report.blocking_gaps)} bloquante(s), "
+                      f"{len(gap_report.enriching_gaps)} enrichissante(s)")
         except Exception as e:
             print(f"  ⚠️  Analyse contextuelle ignorée : {e}")
 
@@ -401,470 +454,49 @@ def new_session_id() -> str:
     return f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
 
-def _confirm_web_search(web_query: str, backend: str) -> bool:
-    """
-    Affiche la requête web que l'agent veut envoyer et demande confirmation.
-    Retourne True si l'utilisateur confirme, False sinon.
-    La query est figée — le LLM ne peut plus la modifier après cette étape.
-    """
-    print(f"\n  🌐 L'agent veut effectuer une recherche web.")
-    print(f"     Requête  : {web_query!r}")
-    print(f"     Backend  : {backend}")
-    print(f"     ⚠️  Ces données seront envoyées hors de ta machine.")
-    try:
-        answer = input("     Confirmer l'envoi ? (O/n) > ").strip().lower()
-        return answer in ("", "o", "oui", "y", "yes")
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-
-def _confirm_shell_command(shell_command: str) -> bool:
-    """
-    Affiche la commande shell proposée et demande confirmation explicite.
-    La commande est figée — le LLM ne peut plus la modifier après cette étape.
-    Retourne True si l'utilisateur tape 'oui' (pas de validation par défaut).
-    """
-    from Mnemo.tools.shell_whitelist import describe_command_policy
-    from Mnemo.tools.shell_tools import validate_command
-
-    print()
-    print("  🖥️  L'agent veut exécuter une commande système.")
-    print(f"     Commande : {shell_command!r}")
-
-    # Pré-validation — affiche le problème avant même de demander
-    validation = validate_command(shell_command)
-    if not validation:
-        print(f"     ❌ Commande refusée par la whitelist : {validation.reason}")
-        return False
-
-    print("     ⚠️  Cette commande sera exécutée sur le système de fichiers /data.")
-    print("     Tape 'oui' pour confirmer (toute autre réponse annule).")
-    try:
-        answer = input("     Confirmer ? > ").strip().lower()
-        return answer in ("oui", "o", "yes", "y")
-    except (EOFError, KeyboardInterrupt):
-        return False
-
-
-def _parse_eval_json(raw: str) -> dict:
-    """Extrait le JSON d'évaluation depuis la réponse brute du LLM — best-effort."""
-    try:
-        # Extrait toujours le sous-string JSON — même si ça commence par {,
-        # il peut y avoir du texte après le } final (ex: "{"route":"x"} Voilà.")
-        start = raw.index("{")
-        end   = raw.rindex("}") + 1
-        return json.loads(raw[start:end])
-    except (json.JSONDecodeError, ValueError):
-        return {}
-
-
-def _handle_clarification(
-    eval_json: dict, user_message: str, temporal_ctx: str
-) -> tuple[dict, str, str]:
-    """
-    Interception needs_clarification : pose la question, ré-évalue si réponse.
-    Retourne (eval_json, eval_raw, user_message) potentiellement mis à jour.
-    """
-    if not (eval_json.get("needs_clarification") and eval_json.get("clarification_reason")):
-        return eval_json, json.dumps(eval_json, ensure_ascii=False), user_message
-
-    reason = eval_json["clarification_reason"]
-    print(f"\n  🤔 Mnemo a besoin d'une précision : {reason}")
-    try:
-        clarif = input("    Toi > ").strip()
-        if clarif:
-            user_message = f"{user_message}\n[Précision : {clarif}]"
-            eval_result  = EvaluationCrew().crew().kickoff(inputs={
-                "user_message":     user_message,
-                "temporal_context": temporal_ctx,
-            })
-            eval_raw  = eval_result.raw.strip()
-            eval_json = _parse_eval_json(eval_raw)
-    except (EOFError, KeyboardInterrupt):
-        pass
-
-    return eval_json, json.dumps(eval_json, ensure_ascii=False), user_message
-
-
-def _handle_web_confirmation(eval_json: dict) -> tuple[dict, str]:
-    """
-    Interception needs_web : affiche la query figée, demande confirmation.
-    Si refus, désactive needs_web dans eval_json.
-    Retourne (eval_json, web_context) — web_context est la chaîne formatée ou "".
-    """
-    web_context = ""
-    if not (eval_json.get("needs_web") and eval_json.get("web_query")):
-        return eval_json, web_context
-
-    web_query = eval_json["web_query"]
-    backend = "SearXNG" if SEARXNG_URL else \
-              "DuckDuckGo" if _DDG_AVAILABLE else "aucun backend configuré"
-
-    if _confirm_web_search(web_query, backend):
-        results = web_search(web_query)
-        web_context = format_results_for_prompt(results) if results else ""
-    else:
-        eval_json["needs_web"] = False
-        eval_json["web_query"] = None
-        print("     Recherche web annulée — réponse depuis la mémoire uniquement.\n")
-
-    return eval_json, web_context
-
-
-def _extract_shell_command(user_message: str) -> str:
-    """
-    Quand le LLM n'a pas produit de shell_command malgré route=shell,
-    on repose une question ciblée pour extraire uniquement la commande.
-    Retourne une chaîne vide si rien de valide n'est trouvé.
-    """
-    if not user_message:
-        return ""
-    try:
-        import requests as _req
-        prompt = (
-            f"L'utilisateur demande : \"{user_message}\"\n"
-            "Génère UNIQUEMENT la commande shell Linux correspondante, "
-            "en utilisant /data comme racine. Une seule commande. "
-            "Pas d'explication, pas de markdown. "
-            "Si tu ne peux pas déterminer de commande précise, réponds: NULL\n"
-            "Commande :"
-        )
-        # Réutilise le même endpoint Ollama que generate_training_data
-        import os as _os
-        host  = _os.getenv("OLLAMA_HOST", "http://host.docker.internal:11434")
-        model_raw = _os.getenv("MODEL", "ollama/mistral").replace("ollama/", "")
-        r = _req.post(
-            f"{host}/v1/chat/completions",
-            json={"model": model_raw,
-                  "messages": [{"role": "user", "content": prompt}],
-                  "max_tokens": 60, "temperature": 0.0},
-            timeout=15,
-        )
-        if r.status_code == 200:
-            cmd = r.json()["choices"][0]["message"]["content"].strip()
-            cmd = cmd.strip("`").strip()
-            if cmd and cmd.upper() != "NULL" and len(cmd) < 200:
-                return cmd
-    except Exception as e:
-        _dbg(f"_extract_shell_command echoue : {e}")
-    return ""
-
-
-def _handle_shell_confirmation(eval_json: dict) -> tuple[dict, str]:
-    """
-    Interception route=shell : affiche la commande figée, demande confirmation EXPLICITE.
-    Si refus ou commande invalide, revert vers route conversation.
-    Retourne (eval_json, shell_command_confirmed) — shell_command_confirmed est "" si annulé.
-    """
-    if eval_json.get("route") != "shell":
-        return eval_json, ""
-
-    shell_command = (eval_json.get("shell_command") or "").strip()
-
-    if not shell_command:
-        # LLM a dit conversation mais keywords ont corrigé en shell.
-        # On tente d'extraire la commande via un prompt ciblé.
-        shell_command = _extract_shell_command(eval_json.get("_user_message", ""))
-        if shell_command:
-            eval_json["shell_command"] = shell_command
-        else:
-            print("  ⚠️  Route shell mais commande introuvable — redirection conversation.")
-            eval_json["route"] = "conversation"
-            return eval_json, ""
-
-    if _confirm_shell_command(shell_command):
-        print("     Commande confirmee - execution en cours...")
-        return eval_json, shell_command
-    else:
-        print("     Commande annulee - reponse depuis la memoire.")
-        eval_json["route"] = "conversation"
-        return eval_json, ""
-
-
-def _route_message(
-    eval_json: dict,
-    user_message: str,
-    session_id: str,
-    temporal_ctx: str,
-    web_context: str,
-) -> str:
-    """
-    Dispatche vers le bon crew selon eval_json["route"].
-
-    Routes :
-      "conversation" (défaut) → ConversationCrew
-      "shell"                 → ShellCrew  (stub phase 3.2)
-      "calendar"              → CalendarWriteCrew (stub phase 3.3)
-      "scheduler"             → SchedulerCrew
-    Route inconnue ou absente → conversation silencieux.
-
-    Si web_context non vide (needs_web confirmé) :
-      injecté dans les inputs pour toutes les routes — enrichit le contexte avant l'action.
-    """
-    route = eval_json.get("route", "conversation")
-    eval_raw = json.dumps(eval_json, ensure_ascii=False)
-
-    # Pré-fetch calendrier si needs_calendar — évite que le retriever
-    # consomme des itérations à appeler GetCalendarTool lui-même
-    calendar_context = ""
-    if eval_json.get("needs_calendar"):
-        try:
-            ref_date_str = eval_json.get("reference_date")
-            if ref_date_str:
-                from datetime import date as _date
-                ref_date = _date.fromisoformat(ref_date_str)
-                from Mnemo.tools.calendar_tools import get_events_for_date
-                cal_events = get_events_for_date(ref_date)
-            else:
-                # Fenêtre large pour les questions "prochaine session X"
-                cal_events = get_upcoming_events(days=21)
-            calendar_context = format_events_for_prompt(cal_events) if cal_events else "Aucun événement trouvé."
-        except Exception as e:
-            calendar_context = f"Erreur calendrier : {e}"
-
-    base_inputs = {
-        "user_message":      user_message,
-        "evaluation_result": eval_raw,
-        "temporal_context":  temporal_ctx,
-        "web_context":       web_context,
-        "calendar_context":  calendar_context,
-    }
-
-    if route == "shell":
-        shell_command = eval_json.get("shell_command", "")
-        return ShellCrew().run({
-            **base_inputs,
-            "shell_command": shell_command,
-        })
-
-    if route == "note":
-        return NoteWriterCrew().run({"user_message": user_message})
-
-    if route == "calendar":
-        return CalendarWriteCrew().run({**base_inputs})
-
-    if route == "scheduler":
-        return SchedulerCrew().run({**base_inputs})
-
-    # "conversation" ou route inconnue → ConversationCrew (défaut silencieux)
-    result = ConversationCrew().crew().kickoff(inputs={
-        **base_inputs,
-        "session_id":    session_id,
-        "memory_context": "",
-    })
-    return result.raw
-
-
-# ══════════════════════════════════════════════════════════════════
-# Routing hybride : keywords + ML + LLM fallback
-# ══════════════════════════════════════════════════════════════════
-
-_SHELL_KEYWORDS = [
-    "liste les fichiers", "liste les dossiers", "liste le dossier",
-    "lister les fichiers", "lister les dossiers",
-    "qu est-ce qu il y a dans", "contenu du dossier",
-    "montre-moi les fichiers", "montre moi les fichiers",
-    "va dans le dossier", "va fouiller dans",
-    "lis le fichier", "lit le fichier", "lire le fichier",
-    "affiche le fichier", "afficher le fichier",
-    "montre-moi le fichier", "montre moi le fichier",
-    "cherche les fichiers", "trouve les fichiers",
-    "find /data", "ls /data", "cat /data",
-    "cree le dossier", "cree un dossier",
-    "cree le fichier", "cree un fichier",
-    "supprime le fichier", "supprime le dossier",
-    "deplace le fichier", "copie le fichier",
-    "lance le script", "execute le script",
-    "commande shell", "commande systeme", "en shell", "via shell",
-    "liste moi les", "liste-moi les",
-]
-
-def _detect_shell_intent(msg: str) -> bool:
-    m = msg.lower()
-    return any(kw in m for kw in _SHELL_KEYWORDS)
-
-
-_SCHEDULER_KEYWORDS = [
-    "rappelle-moi", "rappelle moi",
-    "planifie", "planifier", "programme", "programmer",
-    "chaque lundi", "chaque mardi", "chaque mercredi", "chaque jeudi",
-    "chaque vendredi", "chaque samedi", "chaque dimanche",
-    "tous les lundis", "tous les mardis", "tous les mercredis",
-    "tous les jeudis", "tous les vendredis",
-    "chaque semaine", "chaque jour", "tous les jours",
-    "tous les matins", "chaque matin",
-    "dans 1 jour", "dans 2 jours", "dans 3 jours",
-    "demain matin", "demain soir",
-    "annule le rappel", "annule la tache", "supprime le rappel",
-    "liste mes rappels", "liste mes taches planifiees",
-    "quels sont mes rappels",
-]
-
-def _detect_scheduler_intent(msg: str) -> bool:
-    m = msg.lower()
-    return any(kw in m for kw in _SCHEDULER_KEYWORDS)
-
-
-_NOTE_KEYWORDS = [
-    "note que", "notes que", "retiens que", "retiens bien que",
-    "mémorise que", "mémorise ça", "mémorise ceci",
-    "n'oublie pas que", "n'oublie pas ça",
-    "souviens-toi que", "souviens toi que",
-    "garde en mémoire", "garde ça en mémoire",
-    "enregistre que", "enregistre ceci", "enregistre ça",
-    "ajoute à ma mémoire", "ecris dans ma memoire", "écris dans ma mémoire",
-    "ajoute à mes notes", "ajoute dans mes notes",
-    "important à noter", "important a noter",
-    "à noter :", "a noter :",
-]
-
-def _detect_note_intent(msg: str) -> bool:
-    m = msg.lower()
-    return any(kw in m for kw in _NOTE_KEYWORDS)
-
-
-_ROUTER_MODEL = None
-
-def _load_router_model():
-    global _ROUTER_MODEL
-    if _ROUTER_MODEL is not None:
-        return _ROUTER_MODEL
-    # Cherche d'abord dans /data (retrain sans rebuild), fallback /app
-    model_path = Path("router_model.joblib")
-    if not model_path.exists():
-        model_path = Path(__file__).parent / "router_model.joblib"
-    if not model_path.exists():
-        return None
-    try:
-        import joblib
-        _ROUTER_MODEL = joblib.load(model_path)
-        n = _ROUTER_MODEL.get("n_train", "?")
-        print(f"  [router ML] modele charge ({n} exemples)")
-        return _ROUTER_MODEL
-    except Exception as e:
-        print(f"  [router ML] echec : {e}")
-        return None
-
-
-def _ml_detect_intent(message: str) -> tuple:
-    """Retourne (route, confidence). confidence=0.0 si modele absent."""
-    md = _load_router_model()
-    if md is None:
-        return "conversation", 0.0
-    try:
-        pipeline = md["pipeline"]
-        proba    = pipeline.predict_proba([message])[0]
-        max_idx = proba.argmax()
-        conf = float(proba[max_idx])        
-        # Si le ML est vraiment perdu (ex: < 0.40), on ne lui fait pas confiance du tout
-        if conf < 0.40:
-            return "conversation", 0.0
-        return md["routes"][max_idx], conf
-    except Exception:
-        return "conversation", 0.0
-
-
 def handle_message(user_message: str, session_id: str) -> str:
     """
-    Pipeline d'arbitrage haute-fidélité :
-    Priorité 1 : Keywords critiques (Déterminisme)
-    Priorité 2 : ML à haute confiance (Vitesse)
-    Priorité 3 : LLM (Nuance sémantique)
-    Priorité 4 : Arbitrage ML vs LLM (Sécurité)
+    Pipeline de routing — Chaîne de Responsabilité :
+      KeywordHandler → MLHandler → LLMHandler
+    Suivi du middleware de confirmation (clarification / web / shell),
+    puis dispatch vers le crew approprié.
     """
+    import Mnemo.tools.memory_tools as _mt
+    from Mnemo.routing import build_router, RouterContext, dispatch
+    from Mnemo.routing.confirmation import run_confirmation_middleware
+
     temporal_ctx = get_temporal_context()
-    
-    # --- 1. PRE-CHECK : Keywords & ML ---
-    kw_shell      = _detect_shell_intent(user_message)
-    kw_scheduler  = _detect_scheduler_intent(user_message)
-    kw_note       = _detect_note_intent(user_message)
-    ml_route, ml_conf = _ml_detect_intent(user_message)
 
-    _dbg(f"[Check] KW: shell={kw_shell}, sched={kw_scheduler}, note={kw_note} | ML: {ml_route} ({ml_conf:.2f})")
+    ctx    = RouterContext(message=user_message, session_id=session_id, temporal_context=temporal_ctx)
+    router = build_router()
+    result = router.handle(ctx)
 
-    # Route note déterministe — les formules "note que / retiens que" sont
-    # non ambiguës : on bypass directement le LLM
-    if kw_note:
-        _dbg("SKIP LLM activé -> Route retenue : note (keyword)")
-        eval_json = {
-            "route": "note",
-            "needs_memory": False,
-            "needs_web": False,
-            "needs_clarification": False,
-        }
-        return _route_message(eval_json, user_message, temporal_ctx, "", session_id)
+    if result is None:
+        # Chaîne épuisée sans résultat — ne devrait pas arriver (LLMHandler = fallback)
+        from Mnemo.routing.context import RouterResult
+        result = RouterResult("conversation", 0.0, "fallback")
 
-    # --- 2. DÉCISION DU SKIP (Bypass LLM pour la performance) ---
-    # On bypass si le ML est ultra-sûr OU si Keywords + ML concordent
-    should_skip_llm = (
-        (ml_conf >= 0.95) or
-        (kw_shell and ml_route == "shell" and ml_conf >= 0.80) or
-        (kw_scheduler and ml_route == "scheduler" and ml_conf >= 0.80)
+    _dbg(f"ROUTE -> {result.route} (conf={result.confidence:.2f}, handler={result.handler})")
+    print(f"[EVAL] ({result.handler}) {json.dumps({'route': result.route, 'conf': round(result.confidence, 2), **result.metadata}, ensure_ascii=False)}")
+
+    confirmed = run_confirmation_middleware(result, user_message, temporal_ctx)
+
+    # Phase 5.3 — vide le buffer de retrieval avant le kickoff
+    _mt._retrieved_this_turn = []
+
+    response = dispatch(
+        confirmed.result,
+        user_message  = confirmed.user_message,
+        session_id    = session_id,
+        temporal_ctx  = temporal_ctx,
+        web_context   = confirmed.web_context,
+        shell_command = confirmed.shell_command,
     )
 
-    if should_skip_llm:
-        _dbg(f"SKIP LLM activé -> Route retenue : {ml_route}")
-        eval_json = {
-            "route": ml_route,
-            "needs_memory": ml_route == "conversation",
-            "needs_web": False,
-            "needs_clarification": False,
-            "shell_command": None # Sera extrait plus tard si besoin
-        }
-    else:
-        # --- 3. EVALUATION LLM (Le juge sémantique) ---
-        _dbg("Lancement de l'EvaluationCrew (LLM)...")
-        eval_result = EvaluationCrew().crew().kickoff(inputs={
-            "user_message": user_message,
-            "temporal_context": temporal_ctx,
-        })
-        eval_json = _parse_eval_json(eval_result.raw.strip())
-        llm_route = eval_json.get("route", "conversation")
-
-        # --- 4. ARBITRAGE (La Correction) ---
-        # Ici on gère ton cas d'école : LLM dit "conversation" (RAG) 
-        # mais le ML voit des fichiers (Shell)
-        
-        final_route = llm_route
-        
-        # Règle d'or : Si le LLM veut discuter mais que le ML est formel sur une action
-        if llm_route == "conversation":
-            if ml_conf >= 0.85 and ml_route != "conversation":
-                final_route = ml_route
-                _dbg(f"ARBITRAGE : ML redresse {llm_route} -> {ml_route} (Conf: {ml_conf:.2f})")
-            
-            # Priorité absolue aux mots-clés techniques (ls, rm, cd...)
-            elif kw_shell:
-                final_route = "shell"
-                _dbg("ARBITRAGE : Keyword Shell prioritaire sur LLM Conversation")
-                
-        eval_json["route"] = final_route
-
-    # --- 5. POST-TRAITEMENT (Clarification / Web / Shell) ---
-    # Clarification si besoin (ex: "quel fichier ?")
-    eval_json, _, user_message = _handle_clarification(eval_json, user_message, temporal_ctx)
-    
-    # Recherche Web si le LLM l'a demandé ou si route conversation
-    eval_json, web_context = _handle_web_confirmation(eval_json)
-    
-    # Confirmation de commande Shell si route == shell
-    eval_json, _ = _handle_shell_confirmation(eval_json)
-
-    # Sauvegarde du message pour l'extraction de commande
-    eval_json["_user_message"] = user_message
-    final_route = eval_json.get("route", "conversation")
-
-    # Log pour futur entraînement (si ml_conf est bas, on veut apprendre de cette phrase)
-    if ml_conf < 0.70:
-        _log_uncertain(user_message, final_route, ml_conf)
-
-    # --- 6. ROUTAGE FINAL VERS LES AGENTS ---
-    _dbg(f"ROUTE FINALE -> {final_route}")
-    response = _route_message(
-        eval_json, user_message, session_id, temporal_ctx, web_context
-    )
-
-    update_session_memory(session_id, user_message, response)
+    # Phase 5.3 — persiste les chunk IDs récupérés pendant ce tour
+    retrieved_ids = [c["id"] for c in _mt._retrieved_this_turn]
+    update_session_memory(session_id, confirmed.user_message, response,
+                          retrieved_chunk_ids=retrieved_ids or None)
     return response
 
 def end_session(session_id: str) -> tuple:
@@ -889,8 +521,22 @@ def end_session(session_id: str) -> tuple:
         "temporal_context": get_temporal_context(),
     })
 
+    # Phase 5.3 — scoring d'usage des chunks (silencieux si Ollama offline)
+    try:
+        score_and_record_chunk_usage(session, session_id)
+    except Exception:
+        pass
+
+    # Phase 5.5 — adaptation des poids par profil si données suffisantes
+    try:
+        adapt_weights_if_ready("global")
+        for _profile in ("conversation", "briefing", "curiosity"):
+            adapt_weights_if_ready(_profile)
+    except Exception:
+        pass
+
     # Marque la session comme consolidée
-    (SESSIONS_DIR / f"{session_id}.done").touch()
+    (_sessions_dir() / f"{session_id}.done").touch()
     return result.raw, session_text
 
 
@@ -901,9 +547,9 @@ def end_session(session_id: str) -> tuple:
 def consolidate_orphan_sessions():
     """Consolide les sessions JSON non traitées des runs précédents."""
     orphans = [
-        f for f in SESSIONS_DIR.glob("*.json")
+        f for f in _sessions_dir().glob("*.json")
         if not f.stem.endswith(".broken")
-        and not (SESSIONS_DIR / f"{f.stem}.done").exists()
+        and not (_sessions_dir() / f"{f.stem}.done").exists()
     ]
     if not orphans:
         return
@@ -916,7 +562,7 @@ def consolidate_orphan_sessions():
         raw = path.read_text(encoding="utf-8", errors="ignore").strip()
         if not raw:
             print(f"   ⚠️  Session vide, ignorée et marquée comme traitée.")
-            (SESSIONS_DIR / f"{session_id}.done").touch()
+            (_sessions_dir() / f"{session_id}.done").touch()
             continue
 
         try:
@@ -925,7 +571,7 @@ def consolidate_orphan_sessions():
         except Exception as e:
             print(f"   ❌ Échec : {e}")
             # On marque quand même comme done pour éviter de boucler indéfiniment
-            (SESSIONS_DIR / f"{session_id}.done").touch()
+            (_sessions_dir() / f"{session_id}.done").touch()
             print(f"   ↳ Session marquée comme traitée pour ne pas bloquer au prochain démarrage.")
 
 
@@ -939,8 +585,8 @@ def _show_briefing_if_fresh() -> None:
     a été généré aujourd'hui (par le scheduler) et n'a pas encore été lu.
     Marque le fichier comme lu en ajoutant briefing.read à côté.
     """
-    briefing_path = MARKDOWN_PATH.parent / "briefing.md"
-    read_flag     = MARKDOWN_PATH.parent / "briefing.read"
+    briefing_path = _markdown_path().parent / "briefing.md"
+    read_flag     = _markdown_path().parent / "briefing.read"
 
     if not briefing_path.exists():
         return
@@ -976,11 +622,43 @@ def run():
     Point d'entrée principal — appelé par `crewai run`.
     Lance une session de conversation interactive en CLI.
     """
+    import os as _os_run
+    _os_run.umask(0o077)  # nouveau fichier → 600, nouveau répertoire → 700
+
+    # 0. Init + migration idempotentes — s'assure que toutes les tables existent
+    try:
+        from Mnemo.init_db import init_db, migrate_db
+        from Mnemo.context import get_data_dir
+        _db = get_data_dir() / "memory.db"
+        init_db(db_path=_db)
+        migrate_db(db_path=_db)
+    except Exception as _e:
+        print(f"[WARN] init/migrate_db échoué : {_e}")
+
     # 1. Vérifie la cohérence de memory.md avec la DB
     check_and_sync()
 
     # 2. Rattrape les sessions orphelines des runs précédents
     consolidate_orphan_sessions()
+
+    # 3. Plans actifs — propose la reprise si un plan est en cours
+    try:
+        from Mnemo.tools.plan_tools import check_active_plans, PlanRunner
+        active_plans = check_active_plans()
+        if active_plans:
+            plan = active_plans[0]
+            print(f"\n📋 Plan en cours détecté : `{plan.name}`")
+            print("   Veux-tu reprendre ce plan ? (o/n)")
+            try:
+                answer = input("   > ").strip().lower()
+                if answer in ("o", "oui", "y", "yes"):
+                    print("\n▶️  Reprise du plan...")
+                    summary = PlanRunner().run(plan)
+                    print(f"\n{summary}\n")
+            except (EOFError, KeyboardInterrupt):
+                pass
+    except Exception as _plan_e:
+        print(f"[WARN] Vérification plans actifs échouée : {_plan_e}")
 
     session_id = new_session_id()
     print(f"\n🧠 Agent démarré — session : {session_id}")
@@ -1014,8 +692,8 @@ def run():
     _show_briefing_if_fresh()
 
     # Premier lancement — memory.md vierge → questionnaire d'initialisation
-    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
-        if MARKDOWN_PATH.exists() else ""
+    memory_content = _markdown_path().read_text(encoding="utf-8", errors="ignore") \
+        if _markdown_path().exists() else ""
     structural_gaps = _detect_structural_gaps(memory_content)
     skipped_ids     = _get_skipped_questions()
     unfilled_gaps   = [g for g in structural_gaps if g["id"] not in skipped_ids]
@@ -1062,7 +740,7 @@ def run():
         # Questionnement proactif — déclenché même si le résumé est vide
         # (les trous structurels sont détectés par Python, pas par le LLM)
         try:
-            curiosity_session(session_text or session_summary or "")
+            curiosity_session(session_text or session_summary or "", session_id=session_id)
         except Exception as e:
             print(f"  ⚠️  Questionnement ignoré : {e}")
 
@@ -1165,8 +843,8 @@ def debug_curiosity() -> None:
     print("🧪 Mode debug — déclenchement direct du questionnaire\n")
 
     # Affiche l'état de memory.md
-    memory_content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore") \
-        if MARKDOWN_PATH.exists() else ""
+    memory_content = _markdown_path().read_text(encoding="utf-8", errors="ignore") \
+        if _markdown_path().exists() else ""
     print(f"📄 memory.md : {len(memory_content)} caractères")
 
     # Détection structurelle
@@ -1181,7 +859,7 @@ def debug_curiosity() -> None:
     print()
 
     # Lance le questionnaire avec un résumé de test
-    curiosity_session("Session de debug — test du questionnement proactif.")
+    curiosity_session("Session de debug — test du questionnement proactif.", session_id="debug")
 
 
 

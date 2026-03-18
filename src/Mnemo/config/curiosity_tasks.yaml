@@ -1,28 +1,34 @@
 gap_detection_task:
   description: >
-    Ton rôle est de détecter UNIQUEMENT les lacunes CONTEXTUELLES dans la mémoire
-    de l'agent — celles qu'un schéma statique ne peut pas voir.
+    Ton rôle est de détecter les lacunes CONTEXTUELLES dans la mémoire de l'agent
+    et de les classifier en deux catégories :
 
-    Les lacunes structurelles (prénom absent, section vide...) ont DÉJÀ été
-    détectées automatiquement et sont listées ici — ne les répète pas :
+    - BLOQUANTES  : manques qui dégradent significativement un autre module
+      (ex : "Projets en cours" vide → le briefing sera creux ; pas de décisions → le planificateur est aveugle)
+    - ENRICHISSANTES : manques qui amélioreraient la qualité mais ne bloquent rien d'immédiat
+      (ex : style de communication, fuseau horaire, centres d'intérêt)
+
+    Les lacunes structurelles (champs absents détectés automatiquement) sont déjà listées ici
+    — ne les répète pas, mais utilise-les pour estimer la complétude :
     {structural_gaps}
 
-    Voici le contenu actuel de memory.md :
-    {memory_content}
+    Structure actuelle de memory.md (sections présentes/vides) :
+    {memory_overview}
 
-    Voici le résumé de la session qui vient de se terminer :
+    Extraits pertinents liés à la session (chunks les plus proches) :
+    {memory_recent}
+
+    Résumé de la session qui vient de se terminer :
     {session_summary}
 
     Questions déjà refusées par l'utilisateur (ne pas reproposer) :
     {skipped_questions}
 
-    Cherche uniquement des lacunes contextuelles, par exemple :
-    - Un projet mentionné dans la session mais sans objectifs ni contexte dans memory.md
-    - Une technologie ou outil évoqué sans préciser l'usage (hobby ? pro ? apprentissage ?)
-    - Une préférence implicite dans la façon de parler qui n'est jamais formulée explicitement
-    - Un événement ou deadline mentionné sans qu'on sache s'il est toujours d'actualité
+    MEMORY_COMPLETENESS : estime un score entre 0.0 (mémoire vide) et 1.0 (mémoire complète)
+    en te basant sur le nombre de sections renseignées dans memory_overview.
 
-    Pour chaque question, détermine aussi le label et le format d'écriture selon la section cible :
+    Pour chaque lacune, propose une question à poser à l'utilisateur si pertinent.
+    Détermine le label et le format d'écriture selon la section cible :
 
     Sections ATOMIQUES — réponse écrite sous forme "- **Label** : valeur" :
       "Identité Utilisateur" > "Profil de base"        → labels : Nom/Pseudo, Métier, Localisation, Langue préférée, Fuseau horaire
@@ -36,25 +42,40 @@ gap_detection_task:
       "Historique des sessions"
       "Identité Agent" > "Ce que l'agent a appris sur lui-même"
 
-    Ne génère pas plus de 3 questions. Si rien de pertinent n'est détectable
-    depuis la session, retourne has_gaps: false.
+    RÈGLES :
+    - Maximum 2 lacunes bloquantes et 2 lacunes enrichissantes (4 au total)
+    - Si aucune lacune détectable, retourne des listes vides et memory_completeness estimé
+    - Ne jamais inclure une question déjà dans skipped_questions
+    - Le champ "affects" liste les modules impactés parmi : briefing, conversation, plan
 
     Retourne UNIQUEMENT un objet JSON valide :
     {{
-      "has_gaps": true,
-      "questions": [
+      "memory_completeness": 0.4,
+      "blocking_gaps": [
         {{
-          "id": "hash_court_unique",
-          "question": "Question claire et directe ?",
           "section": "section_cible_dans_memory_md",
           "subsection": "sous_section_cible",
+          "description": "Pourquoi c'est bloquant en une phrase",
+          "affects": ["briefing"],
+          "priority": 1,
           "label": "Label markdown si section atomique, sinon chaine vide",
-          "priority": 3
+          "question": "Question à poser à l'utilisateur, ou vide si non pertinent"
+        }}
+      ],
+      "enriching_gaps": [
+        {{
+          "section": "section_cible_dans_memory_md",
+          "subsection": "sous_section_cible",
+          "description": "Ce que ça apporterait en une phrase",
+          "affects": ["conversation"],
+          "priority": 3,
+          "label": "Label markdown si section atomique, sinon chaine vide",
+          "question": "Question à poser à l'utilisateur, ou vide si non pertinent"
         }}
       ]
     }}
   expected_output: >
-    Un objet JSON valide avec has_gaps et la liste des questions contextuelles (0 à 3).
+    Un objet JSON valide avec memory_completeness, blocking_gaps et enriching_gaps.
   agent: gap_detector
 
 write_answers_task:

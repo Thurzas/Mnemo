@@ -6,16 +6,25 @@ Routes :
   GET    /api/health             → {"status": "ok"}
   POST   /api/message            → {message, session_id?} → {response, session_id}
   GET    /api/memory             → contenu de memory.md + sections parsées
+  POST   /api/memory             → écriture memory.md + sync DB
   GET    /api/sessions           → liste des sessions avec métadonnées
   GET    /api/sessions/{id}      → messages d'une session
   GET    /api/calendar           → événements à venir (14 jours) avec uid
   POST   /api/calendar           → créer un événement ICS
   PUT    /api/calendar/{uid}     → modifier un événement ICS
   DELETE /api/calendar/{uid}     → supprimer un événement ICS
+  GET    /api/reminders          → rappels depuis briefing.md
+  POST   /api/users              → créer un utilisateur (MNEMO_ADMIN_TOKEN requis)
+  GET    /api/auth/whoami        → infos de l'utilisateur courant
+  WS     /ws/message             → streaming token par token (auth + message loop)
+
+Authentification :
+  - Toutes les routes /api/* (sauf health) requièrent : Authorization: Bearer <token>
+  - Les tokens sont stockés dans DATA_PATH/users.json (hash SHA-256)
+  - Chaque utilisateur a son répertoire DATA_PATH/users/{username}/
 
 Sécurité :
   - Route shell bloquée (pas de subprocess depuis le web)
-  - needs_web auto-refusé (pas de confirmation interactive)
   - needs_clarification ignoré
   - Validation des session_id contre le path traversal
   - Écriture calendrier : lecture seule si CALENDAR_SOURCE est une URL
@@ -23,21 +32,131 @@ Sécurité :
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
+import hashlib
 import json
+import logging
 import os
+import re
+import secrets
 import uuid
+import urllib.parse
+import urllib.request
+from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-DATA_PATH    = Path(os.getenv("DATA_PATH", "/data")).resolve()
-MEMORY_FILE  = DATA_PATH / "memory.md"
-SESSIONS_DIR = DATA_PATH / "sessions"
-STATIC_DIR   = Path(__file__).parent / "static"
+# Import anticipé de main.py — son code module-level appelle _set_data_dir("/data")
+# ce qui est inoffensif ici (contexte startup = root context, isolé des contextes
+# utilisateurs). Sans ça, l'import se déclencherait à l'intérieur de
+# user_context.run(...) et écraserait le user_dir avec /data.
+import Mnemo.main as _mnemo_main  # noqa: F401
+
+DATA_PATH  = Path(os.getenv("DATA_PATH", "/data")).resolve()
+USERS_FILE = DATA_PATH / "users.json"
+USERS_DIR  = DATA_PATH / "users"
+STATIC_DIR = Path(__file__).parent / "static"
+
+# ── Restrictions de permissions ────────────────────────────────────
+# Nouveau fichier → 600 (rw-------), nouveau répertoire → 700 (rwx------)
+# Protège les données utilisateurs contre les autres comptes OS sur l'hôte.
+os.umask(0o077)
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
+
+# Serve React build — mounted last so /api/* routes take priority
+if STATIC_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
+
+
+# ── Gestion des utilisateurs ───────────────────────────────────────
+
+def _load_users() -> dict:
+    """Charge users.json. Retourne {} si absent."""
+    if not USERS_FILE.exists():
+        return {}
+    try:
+        return json.loads(USERS_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_users(users: dict) -> None:
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    USERS_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        USERS_FILE.chmod(0o600)         # rw------- : hash des tokens, sensible
+        USERS_FILE.parent.chmod(0o700)  # rwx------ : répertoire /data
+    except OSError:
+        pass
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _init_user_dir(username: str, user_info: dict) -> Path:
+    """Crée le répertoire utilisateur et initialise sa DB si nécessaire."""
+    from Mnemo.init_db import init_db, migrate_db
+    user_dir = USERS_DIR / username
+    user_dir.mkdir(parents=True, exist_ok=True)
+    sessions_dir = user_dir / "sessions"
+    sessions_dir.mkdir(exist_ok=True)
+    # chmod explicite — couvre les répertoires créés avant l'ajout de umask(077)
+    try:
+        USERS_DIR.chmod(0o700)
+        user_dir.chmod(0o700)
+        sessions_dir.chmod(0o700)
+    except OSError:
+        pass
+    db_path = user_dir / "memory.db"
+    if not db_path.exists():
+        init_db(db_path=db_path)
+        migrate_db(db_path=db_path)
+        try:
+            db_path.chmod(0o600)
+        except OSError:
+            pass
+    return user_dir
+
+
+# ── Dépendance d'authentification ─────────────────────────────────
+
+async def get_current_user(authorization: Annotated[str | None, Header()] = None) -> str:
+    """
+    Valide le token Bearer, configure le contexte utilisateur (data dir + calendar source)
+    et retourne le username. Appelé en dépendance async avant les handlers sync —
+    anyio copie le ContextVar dans le thread pool, donc les tools CrewAI voient le bon chemin.
+    """
+    from Mnemo.context import set_data_dir, set_calendar_source
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token manquant (Authorization: Bearer <token>)")
+
+    token = authorization[7:].strip()
+    token_hash = _hash_token(token)
+
+    users = _load_users()
+    for username, info in users.items():
+        if info.get("token_hash") == token_hash:
+            user_dir = _init_user_dir(username, info)
+            set_data_dir(user_dir)
+            if info.get("calendar_source"):
+                set_calendar_source(info["calendar_source"])
+            return username
+
+    raise HTTPException(status_code=401, detail="Token invalide")
+
+
+Auth = Annotated[str, Depends(get_current_user)]
 
 
 # ── Modèles ────────────────────────────────────────────────────────
@@ -45,11 +164,15 @@ app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
 class MessageRequest(BaseModel):
     message: str
     session_id: str | None = None
+    web_confirmed: bool | None = None   # None=premier appel, True=confirmé, False=refusé
+    web_query: str | None = None        # query confirmée (renvoyée par le client)
 
 
 class MessageResponse(BaseModel):
     response: str
     session_id: str
+    needs_web_confirm: bool = False
+    web_query: str | None = None
 
 
 # ── Pipeline web (sans confirmation interactive) ───────────────────
@@ -60,121 +183,165 @@ _SHELL_BLOCKED = (
 )
 
 
-def _handle_message_web(user_message: str, session_id: str) -> str:
+def _handle_message_web(
+    user_message: str,
+    session_id: str,
+    web_confirmed: bool | None = None,
+    confirmed_web_query: str | None = None,
+) -> str | dict:
     """
     Variante de handle_message sans stdin — destinée à l'API web.
-
-    Différences vs handle_message() :
-    - route=shell → refus explicite (sécurité)
-    - needs_web   → auto-refusé (pas de confirmation interactive)
-    - needs_clarification → ignoré (pas d'input utilisateur possible)
-    - conversation / note / scheduler / calendar : pipeline normal
+    Utilise la même CoR que le CLI (build_router) avec des adaptations web :
+    - route=shell          → refus explicite (sécurité, pas de confirmation possible)
+    - needs_clarification  → ignoré
+    - needs_web=True       → retourne {"__web_confirm__": True, "web_query": ...}
+                             si web_confirmed is None (premier appel).
+                             Si web_confirmed=True  → lance la recherche.
+                             Si web_confirmed=False → skip la recherche.
     """
-    from Mnemo.main import (
-        _parse_eval_json,
-        _route_message,
-        _detect_shell_intent,
-        _ml_detect_intent,
-    )
-    from Mnemo.crew import EvaluationCrew
+    from Mnemo.routing import build_router, RouterContext, dispatch
+    from Mnemo.routing.handlers.keyword import _detect_shell_intent
+    from Mnemo.routing.context import RouterResult
     from Mnemo.tools.memory_tools import update_session_memory
     from Mnemo.tools.calendar_tools import get_temporal_context
 
     temporal_ctx = get_temporal_context()
 
-    # Sécurité rapide : keywords shell → refus immédiat sans LLM
+    # Sécurité rapide : keywords shell → refus immédiat sans passer par la CoR
     if _detect_shell_intent(user_message):
         return _SHELL_BLOCKED
 
-    # ML pre-check : shell à haute confiance → refus
-    ml_route, ml_conf = _ml_detect_intent(user_message)
-    if ml_route == "shell" and ml_conf >= 0.80:
+    # Routing via la chaîne de responsabilité
+    ctx    = RouterContext(message=user_message, session_id=session_id, temporal_context=temporal_ctx)
+    router = build_router()
+    result = router.handle(ctx)
+
+    if result is None:
+        result = RouterResult("conversation", 0.0, "fallback")
+
+    # API : shell toujours bloqué, même si le ML/LLM l'a choisi
+    if result.route == "shell":
         return _SHELL_BLOCKED
 
-    # EvaluationCrew (LLM) — analyse sémantique complète
-    eval_result = EvaluationCrew().crew().kickoff(inputs={
-        "user_message": user_message,
-        "temporal_context": temporal_ctx,
-    })
-    eval_json = _parse_eval_json(eval_result.raw.strip())
+    meta = result.metadata
 
-    # Dernier filet : si le LLM a quand même routé vers shell
-    if eval_json.get("route") == "shell":
-        return _SHELL_BLOCKED
+    # Coercion : web_query non-null implique needs_web = True
+    if meta.get("web_query") and not meta.get("needs_web"):
+        meta["needs_web"] = True
 
-    # Désactiver les flux interactifs non disponibles en mode web
-    eval_json["needs_web"] = False
-    eval_json["needs_clarification"] = False
+    # Gestion de la confirmation web interactive (remplace stdin)
+    web_context = ""
+    if meta.get("needs_web") and meta.get("web_query"):
+        if web_confirmed is None:
+            return {"__web_confirm__": True, "web_query": meta["web_query"]}
+        elif web_confirmed:
+            from Mnemo.tools.web_tools import web_search, format_results_for_prompt
+            results = web_search(confirmed_web_query or meta["web_query"])
+            web_context = format_results_for_prompt(results) if results else ""
+        else:
+            meta["needs_web"] = False
+            meta["web_query"] = None
 
-    response = _route_message(eval_json, user_message, session_id, temporal_ctx, "")
+    meta["needs_clarification"] = False
+    meta["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
+
+    print(f"[EVAL] ({result.handler}) {json.dumps({'route': result.route, 'conf': round(result.confidence, 2), **meta}, ensure_ascii=False)}")
+    response = dispatch(result, user_message=user_message, session_id=session_id,
+                        temporal_ctx=temporal_ctx, web_context=web_context)
     update_session_memory(session_id, user_message, response)
     return response
 
 
 # ── Routes ─────────────────────────────────────────────────────────
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard():
-    html_file = STATIC_DIR / "index.html"
-    if html_file.exists():
-        return HTMLResponse(html_file.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Dashboard unavailable</h1>", status_code=404)
-
-
 @app.get("/api/health")
 async def health():
-    return {
-        "status": "ok",
-        "data_path": str(DATA_PATH),
-        "memory_exists": MEMORY_FILE.exists(),
-        "sessions_dir": str(SESSIONS_DIR),
-    }
+    return {"status": "ok", "data_path": str(DATA_PATH)}
 
 
 @app.post("/api/message", response_model=MessageResponse)
-def message(req: MessageRequest):
+def message(req: MessageRequest, _: Auth):
     """
     Envoie un message à Mnemo — exécuté en thread pool (def, pas async def)
     pour ne pas bloquer la boucle d'événements pendant l'appel LLM.
     """
     sid = req.session_id or f"web_{uuid.uuid4().hex[:12]}"
     try:
-        response = _handle_message_web(req.message, sid)
+        result = _handle_message_web(req.message, sid, req.web_confirmed, req.web_query)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return {"response": response, "session_id": sid}
+    if isinstance(result, dict) and result.get("__web_confirm__"):
+        return {"response": "", "session_id": sid,
+                "needs_web_confirm": True, "web_query": result["web_query"]}
+    return {"response": result, "session_id": sid}
 
 
 @app.get("/api/memory")
-async def memory():
-    if not MEMORY_FILE.exists():
-        return {"content": "", "sections": []}
+async def memory(_: Auth):
+    from Mnemo.context import get_data_dir
+    memory_file = get_data_dir() / "memory.md"
+    if not memory_file.exists():
+        return {"content": "", "sections": [], "preamble": ""}
 
-    content = MEMORY_FILE.read_text(encoding="utf-8")
+    content = memory_file.read_text(encoding="utf-8")
 
     sections: list[dict] = []
+    preamble_lines: list[str] = []
+    preamble_done = False
     current: dict | None = None
+
     for line in content.splitlines():
         if line.startswith("## "):
+            preamble_done = True
             if current is not None:
                 sections.append(current)
             current = {"title": line[3:].strip(), "content": ""}
         elif current is not None:
             current["content"] += line + "\n"
+        elif not preamble_done:
+            preamble_lines.append(line)
+
     if current is not None:
         sections.append(current)
 
-    return {"content": content, "sections": sections}
+    # Trim trailing newlines from section content for cleaner editing
+    for s in sections:
+        s["content"] = s["content"].rstrip("\n")
+
+    preamble = "\n".join(preamble_lines).rstrip("\n")
+    return {"content": content, "sections": sections, "preamble": preamble}
+
+
+class MemoryWriteRequest(BaseModel):
+    content: str
+
+
+@app.post("/api/memory")
+def memory_write(req: MemoryWriteRequest, _: Auth):
+    """
+    Écrit le contenu dans memory.md puis synchronise la DB SQLite.
+    Exécuté en thread pool (def, pas async) car sync_markdown_to_db peut être lent.
+    """
+    try:
+        from Mnemo.context import get_data_dir
+        from Mnemo.tools.memory_tools import sync_markdown_to_db
+        (get_data_dir() / "memory.md").write_text(req.content, encoding="utf-8")
+        sync_markdown_to_db()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/sessions")
-async def sessions():
-    if not SESSIONS_DIR.exists():
+async def sessions(_: Auth):
+    from Mnemo.context import get_data_dir
+    sessions_dir = get_data_dir() / "sessions"
+    if not sessions_dir.exists():
         return {"sessions": []}
 
     result = []
     for f in sorted(
-        SESSIONS_DIR.glob("*.json"),
+        sessions_dir.glob("*.json"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     ):
@@ -184,10 +351,13 @@ async def sessions():
             result.append({
                 "id": f.stem,
                 "message_count": len(messages),
-                "done": (SESSIONS_DIR / f"{f.stem}.done").exists(),
+                "done": (sessions_dir / f"{f.stem}.done").exists(),
                 "modified": f.stat().st_mtime,
                 "preview": (
-                    messages[0].get("user_message", "")[:100]
+                    next(
+                        (m.get("content", "")[:100] for m in messages if m.get("role") == "user"),
+                        ""
+                    )
                     if messages else ""
                 ),
             })
@@ -198,11 +368,12 @@ async def sessions():
 
 
 @app.get("/api/sessions/{session_id}")
-async def session_detail(session_id: str):
+async def session_detail(session_id: str, _: Auth):
+    from Mnemo.context import get_data_dir
     if any(c in session_id for c in ("/", "\\", "..")):
         raise HTTPException(status_code=400, detail="Invalid session ID")
 
-    path = SESSIONS_DIR / f"{session_id}.json"
+    path = get_data_dir() / "sessions" / f"{session_id}.json"
     if not path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -224,10 +395,13 @@ def _serialize_events(events: list) -> list:
 
 
 @app.get("/api/calendar")
-async def calendar_list():
+async def calendar_list(_: Auth):
     try:
+        from datetime import date, timedelta
         from Mnemo.tools.calendar_tools import get_events_with_uid, calendar_is_writable
-        events = get_events_with_uid(days=60)
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())  # lundi de la semaine courante
+        events = get_events_with_uid(days=60, from_date=week_start)
         return {
             "events": _serialize_events(events),
             "writable": calendar_is_writable(),
@@ -255,7 +429,7 @@ class EventUpdateRequest(BaseModel):
 
 
 @app.post("/api/calendar", status_code=201)
-def calendar_create(req: EventCreateRequest):
+def calendar_create(req: EventCreateRequest, _: Auth):
     try:
         from Mnemo.tools.calendar_tools import add_event, calendar_is_writable
         if not calendar_is_writable():
@@ -278,7 +452,7 @@ def calendar_create(req: EventCreateRequest):
 
 
 @app.put("/api/calendar/{event_uid}")
-def calendar_update(event_uid: str, req: EventUpdateRequest):
+def calendar_update(event_uid: str, req: EventUpdateRequest, _: Auth):
     if any(c in event_uid for c in ("/", "\\", "..")):
         raise HTTPException(status_code=400, detail="UID invalide.")
     try:
@@ -297,7 +471,7 @@ def calendar_update(event_uid: str, req: EventUpdateRequest):
 
 
 @app.delete("/api/calendar/{event_uid}")
-def calendar_delete(event_uid: str):
+def calendar_delete(event_uid: str, _: Auth):
     if any(c in event_uid for c in ("/", "\\", "..")):
         raise HTTPException(status_code=400, detail="UID invalide.")
     try:
@@ -312,6 +486,724 @@ def calendar_delete(event_uid: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/calendar/import", status_code=200)
+async def calendar_import(file: UploadFile, _: Auth):
+    """
+    Importe un fichier ICS : fusionne les VEVENTs dans le calendrier local.
+    Les événements dont l'UID existe déjà sont ignorés (pas de doublon).
+    Retourne {"imported": N, "skipped": M}.
+    """
+    try:
+        from Mnemo.tools.calendar_tools import (
+            calendar_is_writable, _load_writable_calendar, _save_calendar
+        )
+        from icalendar import Calendar as _Calendar
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"icalendar non disponible : {e}")
+
+    if not calendar_is_writable():
+        raise HTTPException(status_code=403, detail="Calendrier en lecture seule (URL distante).")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+
+    try:
+        imported_cal = _Calendar.from_ical(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Fichier ICS invalide.")
+
+    local_cal = _load_writable_calendar()
+
+    # Collecte les UIDs déjà présents
+    existing_uids: set[str] = {
+        str(c.get("UID", ""))
+        for c in local_cal.walk()
+        if c.name == "VEVENT"
+    }
+
+    imported = 0
+    skipped = 0
+    for component in imported_cal.walk():
+        if component.name != "VEVENT":
+            continue
+        uid = str(component.get("UID", ""))
+        if uid and uid in existing_uids:
+            skipped += 1
+            continue
+        local_cal.add_component(component)
+        existing_uids.add(uid)
+        imported += 1
+
+    if imported > 0:
+        _save_calendar(local_cal)
+
+    return {"imported": imported, "skipped": skipped}
+
+
+@app.get("/api/reminders")
+async def reminders(_: Auth):
+    """
+    Retourne les rappels présents dans briefing.md (sections ## 🔔 Rappel).
+    Chaque rappel a un `id` (MD5 du message) pour dédupliquer côté client.
+    """
+    from Mnemo.context import get_data_dir
+    briefing_file = get_data_dir() / "briefing.md"
+    if not briefing_file.exists():
+        return {"reminders": []}
+
+    content = briefing_file.read_text(encoding="utf-8")
+    items: list[dict] = []
+
+    # Découpe sur chaque en-tête ## 🔔 Rappel
+    parts = re.split(r"^## 🔔 Rappel\s*$", content, flags=re.MULTILINE)
+    for part in parts[1:]:
+        # Prend le texte jusqu'au prochain ## ou fin de fichier
+        body = re.split(r"^##", part, maxsplit=1, flags=re.MULTILINE)[0].strip()
+        if body:
+            rid = hashlib.md5(body.encode()).hexdigest()[:12]
+            items.append({"id": rid, "message": body})
+
+    return {"reminders": items}
+
+
+# ── Gestion des utilisateurs (admin) ──────────────────────────────
+
+class UserCreateRequest(BaseModel):
+    username: str
+    calendar_source: str = ""
+
+
+@app.post("/api/users", status_code=201)
+async def create_user(
+    req: UserCreateRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """
+    Crée un utilisateur. Protégé par MNEMO_ADMIN_TOKEN (pas par le token utilisateur).
+    Retourne le token en clair une seule fois — non récupérable ensuite.
+    """
+    admin_token = os.getenv("MNEMO_ADMIN_TOKEN", "")
+    if not admin_token or authorization != f"Bearer {admin_token}":
+        raise HTTPException(status_code=403, detail="MNEMO_ADMIN_TOKEN requis")
+
+    username = req.username.strip()
+    if not username or not re.match(r"^[a-zA-Z0-9_-]{1,64}$", username):
+        raise HTTPException(status_code=400, detail="Nom invalide (alphanumérique, 1-64 caractères)")
+
+    users = _load_users()
+    if username in users:
+        raise HTTPException(status_code=409, detail="Utilisateur déjà existant")
+
+    token = f"mnemo_{secrets.token_hex(32)}"
+    users[username] = {
+        "token_hash": _hash_token(token),
+        "calendar_source": req.calendar_source,
+        "created_at": datetime.now().isoformat(),
+    }
+    _save_users(users)
+    _init_user_dir(username, users[username])
+    return {"username": username, "token": token}
+
+
+_ONBOARDING_QUESTIONS = [
+    {"id": "name",     "question": "Comment tu t'appelles ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Nom/Pseudo"},
+    {"id": "job",      "question": "Quelle est ta profession ou ton domaine d'activité ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Métier"},
+    {"id": "location", "question": "Dans quelle ville ou pays tu te trouves ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Profil de base",       "label": "Localisation"},
+    {"id": "style",    "question": "Tu préfères des réponses courtes et directes, ou détaillées ?",
+     "section": "🧑 Identité Utilisateur", "subsection": "Préférences & style",  "label": "Style de communication"},
+    {"id": "agent",    "question": "Comment tu veux appeler l'agent ? Il a un nom ?",
+     "section": "🧑 Identité Agent",       "subsection": "Rôle & personnalité définis", "label": "Nom de l'agent"},
+]
+
+
+@app.get("/api/onboarding/status")
+async def onboarding_status(_: Auth):
+    """
+    Première connexion = memory.md absent ou vide.
+    Dans ce cas, retourne les 5 questions d'initialisation.
+    """
+    from Mnemo.context import get_data_dir
+
+    memory_file = get_data_dir() / "memory.md"
+    is_empty    = (
+        not memory_file.exists()
+        or not memory_file.read_text(encoding="utf-8", errors="ignore").strip()
+    )
+
+    return {
+        "needed":    is_empty,
+        "questions": _ONBOARDING_QUESTIONS if is_empty else [],
+    }
+
+
+class OnboardingAnswerItem(BaseModel):
+    id: str
+    answer: str
+    section: str
+    subsection: str
+    label: str
+
+
+class OnboardingSubmitRequest(BaseModel):
+    answers: list[OnboardingAnswerItem]
+
+
+@app.post("/api/onboarding")
+def onboarding_submit(req: OnboardingSubmitRequest, _: Auth):
+    """
+    Écrit les réponses non vides dans memory.md et synchronise la DB.
+    """
+    from Mnemo.tools.memory_tools import update_markdown_section, sync_markdown_to_db
+
+    written = 0
+    for ans in req.answers:
+        text = ans.answer.strip()
+        if not text:
+            continue
+        content = f"- **{ans.label}** : {text}" if ans.label else text
+        update_markdown_section(
+            section    = ans.section,
+            subsection = ans.subsection,
+            content    = content,
+            category   = "identité",
+        )
+        written += 1
+
+    if written:
+        sync_markdown_to_db()
+
+    return {"ok": True, "written": written}
+
+
+@app.get("/api/auth/whoami")
+async def whoami(username: Auth):
+    users = _load_users()
+    info = users.get(username, {})
+    return {
+        "username": username,
+        "calendar_source": info.get("calendar_source", ""),
+        "created_at": info.get("created_at"),
+    }
+
+
+# ── STT / TTS ─────────────────────────────────────────────────────
+
+@app.post("/api/stt")
+async def speech_to_text(
+    username: Auth,
+    file: UploadFile = File(...),
+):
+    """
+    Transcrit un fichier audio (webm, wav, mp3…) en texte.
+    Nécessite faster-whisper installé (sinon 503).
+    """
+    try:
+        from Mnemo.tools.audio_tools import transcribe_audio  # noqa: PLC0415
+    except ImportError:
+        raise HTTPException(503, "Module STT non disponible — installez faster-whisper")
+
+    audio_bytes = await file.read()
+    loop = asyncio.get_running_loop()
+    try:
+        text = await loop.run_in_executor(None, lambda: transcribe_audio(audio_bytes))
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur STT : {exc}") from exc
+    return {"text": text}
+
+
+class TTSRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/tts")
+async def text_to_speech(
+    req: TTSRequest,
+    username: Auth,
+):
+    """
+    Synthétise `text` en audio WAV.
+    Nécessite kokoro installé (sinon 503).
+    Retourne audio/wav (bytes).
+    """
+    try:
+        from Mnemo.tools.audio_tools import synthesize_speech  # noqa: PLC0415
+    except Exception as exc:
+        raise HTTPException(503, f"Module TTS non disponible : {exc}")
+
+    loop = asyncio.get_running_loop()
+    try:
+        wav_bytes = await loop.run_in_executor(None, lambda: synthesize_speech(req.text))
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).error("TTS synthesis failed: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Erreur TTS : {exc}") from exc
+    if not wav_bytes:
+        raise HTTPException(500, "TTS a retourné des bytes vides")
+    return Response(content=wav_bytes, media_type="audio/wav")
+
+
+# ── Voix — paramétrage UI ──────────────────────────────────────────
+
+_VOICE_SETTINGS_FILE = DATA_PATH / "voice_settings.json"
+_RVC_MODELS_DIR = DATA_PATH / "models" / "rvc"
+
+
+def _list_rvc_models() -> list[dict]:
+    """Liste les modèles .pth disponibles dans DATA_PATH/models/rvc/."""
+    if not _RVC_MODELS_DIR.exists():
+        return []
+    models = []
+    for pth in sorted(_RVC_MODELS_DIR.glob("*.pth")):
+        stem = pth.stem
+        index_file = _RVC_MODELS_DIR / f"{stem}.index"
+        models.append({
+            "name":  stem,
+            "pth":   pth.name,
+            "index": index_file.name if index_file.exists() else None,
+        })
+    return models
+
+
+def _load_voice_settings_on_startup() -> None:
+    """Charge voice_settings.json au démarrage de l'API (si présent)."""
+    import json
+    try:
+        from Mnemo.tools.audio_tools import apply_voice_settings
+        if _VOICE_SETTINGS_FILE.exists():
+            apply_voice_settings(json.loads(_VOICE_SETTINGS_FILE.read_text()))
+            log.info("Paramètres voix chargés depuis %s", _VOICE_SETTINGS_FILE)
+    except Exception as exc:
+        log.warning("Impossible de charger voice_settings.json : %s", exc)
+
+
+# Charge les settings au démarrage du module (uvicorn import)
+_load_voice_settings_on_startup()
+
+
+class VoiceSettingsRequest(BaseModel):
+    rvc_enabled:       bool  | None = None
+    kokoro_voice_fr:   str   | None = None
+    kokoro_voice_ja:   str   | None = None
+    kokoro_speed:      float | None = None
+    rvc_f0_method:     str   | None = None
+    rvc_f0_up_key:     int   | None = None
+    rvc_index_rate:    float | None = None
+    rvc_filter_radius: int   | None = None
+    rvc_rms_mix_rate:  float | None = None
+    rvc_protect:       float | None = None
+
+
+@app.get("/api/voice/settings")
+async def voice_settings_get(_: Auth):
+    """Retourne les paramètres voix actifs + les voix disponibles."""
+    from Mnemo.tools.audio_tools import (  # noqa: PLC0415
+        get_voice_settings, KOKORO_VOICES_FR, KOKORO_VOICES_JA,
+    )
+    s = get_voice_settings()
+    s["available_voices_fr"] = KOKORO_VOICES_FR
+    s["available_voices_ja"] = KOKORO_VOICES_JA
+    s["rvc_service_url"]     = os.getenv("RVC_SERVICE_URL") or None
+    s["available_models"]    = _list_rvc_models()
+    return s
+
+
+@app.post("/api/voice/settings")
+async def voice_settings_post(req: VoiceSettingsRequest, _: Auth):
+    """Met à jour les paramètres voix et les persiste dans voice_settings.json."""
+    import json
+    from Mnemo.tools.audio_tools import (  # noqa: PLC0415
+        get_voice_settings, apply_voice_settings, KOKORO_VOICES_FR, KOKORO_VOICES_JA,
+    )
+    update = {k: v for k, v in req.model_dump().items() if v is not None}
+    apply_voice_settings(update)
+    current = get_voice_settings()
+    try:
+        _VOICE_SETTINGS_FILE.write_text(json.dumps(current, indent=2))
+    except Exception as exc:
+        log.warning("Impossible de persister voice_settings.json : %s", exc)
+    current["available_voices_fr"] = KOKORO_VOICES_FR
+    current["available_voices_ja"] = KOKORO_VOICES_JA
+    current["rvc_service_url"]     = os.getenv("RVC_SERVICE_URL") or None
+    current["available_models"]    = _list_rvc_models()
+    return current
+
+
+class VoiceTestRequest(BaseModel):
+    text:              str   | None = None
+    # Paramètres optionnels — appliqués au runtime sans persistance
+    rvc_enabled:       bool  | None = None
+    kokoro_voice_fr:   str   | None = None
+    kokoro_voice_ja:   str   | None = None
+    kokoro_speed:      float | None = None
+    rvc_f0_method:     str   | None = None
+    rvc_f0_up_key:     int   | None = None
+    rvc_index_rate:    float | None = None
+    rvc_filter_radius: int   | None = None
+    rvc_rms_mix_rate:  float | None = None
+    rvc_protect:       float | None = None
+    rvc_active_model:  str   | None = None
+
+
+@app.post("/api/voice/test")
+async def voice_test(req: VoiceTestRequest, _: Auth):
+    """
+    Synthétise une phrase de test.
+    Si des paramètres sont fournis dans le body, ils sont appliqués au runtime
+    avant la synthèse (sans persistance sur disque) — permet de tester sans sauvegarder.
+    """
+    try:
+        from Mnemo.tools.audio_tools import apply_voice_settings, synthesize_speech  # noqa: PLC0415
+    except Exception as exc:
+        raise HTTPException(503, f"Module TTS non disponible : {exc}")
+
+    # Applique les settings du form au runtime (profil intermédiaire, non persisté)
+    patch = {k: v for k, v in req.model_dump().items() if k != "text" and v is not None}
+    if patch:
+        apply_voice_settings(patch)
+
+    phrase = req.text or "Bonjour, je suis ta voix personnalisée."
+    loop = asyncio.get_running_loop()
+    try:
+        wav = await loop.run_in_executor(None, lambda: synthesize_speech(phrase))
+    except Exception as exc:
+        raise HTTPException(500, f"Erreur test voix : {exc}") from exc
+    if not wav:
+        raise HTTPException(500, "Test voix retourné vide")
+    return Response(content=wav, media_type="audio/wav")
+
+
+@app.post("/api/voice/model", status_code=201)
+def voice_model_upload(
+    pth_file:   UploadFile,
+    _: Auth,
+    index_file: UploadFile | None = None,
+):
+    """
+    Upload un modèle RVC (.pth requis, .index optionnel).
+    Sauvegarde dans DATA_PATH/models/rvc/.
+    Retourne {"name": stem, "pth": filename, "index": filename|null}.
+    """
+    if not pth_file.filename or not pth_file.filename.endswith(".pth"):
+        raise HTTPException(400, "Fichier .pth requis")
+    if index_file and index_file.filename and not index_file.filename.endswith(".index"):
+        raise HTTPException(400, "Le fichier index doit avoir l'extension .index")
+
+    _RVC_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Sécuriser les noms de fichier (pas de path traversal)
+    import re as _re
+    safe_pth   = _re.sub(r"[^\w.\-]", "_", pth_file.filename)
+    stem       = safe_pth[:-4]  # sans ".pth"
+
+    pth_dest = _RVC_MODELS_DIR / safe_pth
+    pth_data = pth_file.file.read()
+    if not pth_data:
+        raise HTTPException(400, "Fichier .pth vide")
+    pth_dest.write_bytes(pth_data)
+
+    index_dest = None
+    if index_file and index_file.filename:
+        safe_idx   = _re.sub(r"[^\w.\-]", "_", index_file.filename)
+        index_dest = _RVC_MODELS_DIR / safe_idx
+        idx_data   = index_file.file.read()
+        if idx_data:
+            index_dest.write_bytes(idx_data)
+        else:
+            index_dest = None
+
+    log.info("Modèle RVC uploadé : %s (index=%s)", safe_pth, index_dest)
+    return {
+        "name":  stem,
+        "pth":   safe_pth,
+        "index": index_dest.name if index_dest else None,
+    }
+
+
+@app.post("/api/voice/model/{model_name}/activate")
+async def voice_model_activate(model_name: str, _: Auth):
+    """
+    Active un modèle RVC uploadé en appelant /reload sur le service RVC.
+    Persiste le modèle actif dans voice_settings.json.
+    """
+    import json
+
+    # Validation nom
+    import re as _re
+    if not _re.match(r"^[\w.\-]+$", model_name):
+        raise HTTPException(400, "Nom de modèle invalide")
+
+    pth_path   = _RVC_MODELS_DIR / f"{model_name}.pth"
+    index_path = _RVC_MODELS_DIR / f"{model_name}.index"
+    if not pth_path.exists():
+        raise HTTPException(404, f"Modèle '{model_name}.pth' introuvable")
+
+    rvc_url = os.getenv("RVC_SERVICE_URL", "").rstrip("/")
+    if rvc_url:
+        # Les chemins dans le container RVC sont sous /models/
+        rvc_model_path = f"/models/{pth_path.name}"
+        rvc_index_path = f"/models/{index_path.name}" if index_path.exists() else ""
+        qs = f"?model_path={urllib.parse.quote(rvc_model_path)}"
+        if rvc_index_path:
+            qs += f"&index_path={urllib.parse.quote(rvc_index_path)}"
+        req = urllib.request.Request(
+            f"{rvc_url}/reload{qs}",
+            data=b"",
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read())
+        except Exception as exc:
+            raise HTTPException(500, f"Erreur reload RVC : {exc}") from exc
+
+    # Persiste le modèle actif
+    from Mnemo.tools.audio_tools import apply_voice_settings  # noqa: PLC0415
+    apply_voice_settings({"rvc_active_model": model_name})
+    try:
+        current_settings = json.loads(_VOICE_SETTINGS_FILE.read_text()) if _VOICE_SETTINGS_FILE.exists() else {}
+        current_settings["rvc_active_model"] = model_name
+        _VOICE_SETTINGS_FILE.write_text(json.dumps(current_settings, indent=2))
+    except Exception as exc:
+        log.warning("Impossible de persister rvc_active_model : %s", exc)
+
+    return {"ok": True, "active_model": model_name}
+
+
+# ── WebSocket streaming ────────────────────────────────────────────
+
+@app.websocket("/ws/message")
+async def ws_message(websocket: WebSocket):
+    """
+    WebSocket endpoint pour le streaming de réponses token par token.
+
+    Protocole client → serveur :
+      {"type": "auth",       "token": "mnemo_..."}
+      {"type": "message",    "message": "...", "session_id": "..."}
+      {"type": "web_answer", "confirmed": bool, "web_query": "...",
+                             "session_id": "...", "original_message": "..."}
+
+    Protocole serveur → client :
+      {"type": "auth_ok",    "username": "..."}
+      {"type": "thinking"}
+      {"type": "token",      "text": "word "}
+      {"type": "done",       "session_id": "..."}
+      {"type": "web_confirm","web_query": "...", "session_id": "...", "original_message": "..."}
+      {"type": "error",      "detail": "..."}
+    """
+    from Mnemo.context import set_data_dir, set_calendar_source
+
+    await websocket.accept()
+
+    # Auth handshake
+    try:
+        auth_msg = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
+    except Exception:
+        await websocket.close(code=4001)
+        return
+
+    if auth_msg.get("type") != "auth":
+        await websocket.send_json({"type": "error", "detail": "Authentification requise"})
+        await websocket.close(code=4001)
+        return
+
+    token = auth_msg.get("token", "")
+    token_hash = _hash_token(token)
+    users = _load_users()
+    username: str | None = None
+    user_info: dict | None = None
+    for u, info in users.items():
+        if info.get("token_hash") == token_hash:
+            username = u
+            user_info = info
+            break
+
+    if not username or user_info is None:
+        await websocket.send_json({"type": "error", "detail": "Token invalide"})
+        await websocket.close(code=4003)
+        return
+
+    user_dir = _init_user_dir(username, user_info)
+    set_data_dir(user_dir)
+    if user_info.get("calendar_source"):
+        set_calendar_source(user_info["calendar_source"])
+
+    # Capture context après set_data_dir — propagé dans run_in_executor
+    user_context = contextvars.copy_context()
+
+    # Consolide les sessions orphelines de la connexion précédente (pas de .done)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: user_context.run(_mnemo_main.consolidate_orphan_sessions)
+    )
+
+    await websocket.send_json({"type": "auth_ok", "username": username})
+
+    async def _run_and_stream(
+        text: str,
+        sid: str,
+        web_confirmed: bool | None = None,
+        web_query: str | None = None,
+    ) -> None:
+        await websocket.send_json({"type": "thinking"})
+        try:
+            result = await loop.run_in_executor(
+                None,
+                lambda: user_context.run(
+                    _handle_message_web, text, sid, web_confirmed, web_query
+                ),
+            )
+        except Exception as e:
+            await websocket.send_json({"type": "error", "detail": str(e)})
+            return
+
+        if isinstance(result, dict) and result.get("__web_confirm__"):
+            await websocket.send_json({
+                "type": "web_confirm",
+                "web_query": result["web_query"],
+                "session_id": sid,
+                "original_message": text,
+            })
+            return
+
+        words = (result or "").split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == len(words) - 1 else word + " "
+            await websocket.send_json({"type": "token", "text": chunk})
+            await asyncio.sleep(0.012)
+
+        await websocket.send_json({"type": "done", "session_id": sid})
+
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            msg_type = msg.get("type")
+
+            if msg_type == "message":
+                text = msg.get("message", "")
+                sid  = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+                await _run_and_stream(text, sid)
+
+            elif msg_type == "web_answer":
+                original  = msg.get("original_message", "")
+                sid       = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+                confirmed = bool(msg.get("confirmed", False))
+                wq        = msg.get("web_query") if confirmed else None
+                await _run_and_stream(original, sid, confirmed, wq)
+
+    except WebSocketDisconnect:
+        pass
+
+
+# ── Base de connaissances (ingestion de fichiers) ──────────────────
+
+@app.get("/api/documents")
+def documents_list(_: Auth):
+    """Liste tous les documents ingérés avec leurs métadonnées."""
+    try:
+        from Mnemo.context import get_data_dir
+        from Mnemo.tools.ingest_tools import list_ingested_documents
+        docs = list_ingested_documents(db_path=get_data_dir() / "memory.db")
+        return {"documents": docs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Formats acceptés pour l'ingestion (sync avec ingest_file dispatcher)
+_INGEST_EXTENSIONS = {
+    ".pdf", ".docx", ".txt", ".md",
+    ".py", ".js", ".ts", ".c", ".cpp", ".h",
+    ".cs", ".java", ".sh", ".bash", ".ps1",
+}
+
+
+@app.post("/api/ingest", status_code=200)
+def ingest_upload(file: UploadFile, _: Auth):
+    """
+    Ingère un fichier uploadé dans la base de connaissances.
+    Le fichier est sauvegardé temporairement, ingéré, puis supprimé.
+    Retourne {status, filename, pages, chunks, doc_id}.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+    from Mnemo.context import get_data_dir
+    from Mnemo.tools.ingest_tools import ingest_file
+
+    filename = file.filename or "upload"
+    ext = _Path(filename).suffix.lower()
+    if ext not in _INGEST_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Format non supporté : {ext}. Acceptés : {', '.join(sorted(_INGEST_EXTENSIONS))}",
+        )
+
+    try:
+        raw = file.file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Lecture du fichier échouée : {e}")
+
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+
+    # Sauvegarde temporaire avec l'extension correcte (ingest_file en a besoin)
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp.write(raw)
+            tmp_path = _Path(tmp.name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur temporaire : {e}")
+
+    try:
+        result = ingest_file(tmp_path, db_path=get_data_dir() / "memory.db")
+        result["filename"] = filename   # remplace le nom tmp par le nom original
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+@app.delete("/api/documents/{doc_id}", status_code=200)
+def document_delete(doc_id: str, _: Auth):
+    """Supprime un document ingéré et tous ses chunks de la base."""
+    if not doc_id or len(doc_id) > 64 or any(c in doc_id for c in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail="doc_id invalide.")
+    try:
+        from Mnemo.context import get_data_dir
+        from Mnemo.tools.ingest_tools import delete_document
+        ok = delete_document(doc_id, db_path=get_data_dir() / "memory.db")
+        if not ok:
+            raise HTTPException(status_code=404, detail="Document introuvable.")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──
+# FastAPI matche les routes dans l'ordre de définition.
+# Ce catch-all doit être après toutes les routes /api/*.
+
+@app.get("/", response_class=HTMLResponse)
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa(full_path: str = ""):
+    """Serve React SPA — catch-all for client-side routing."""
+    html_file = STATIC_DIR / "index.html"
+    if html_file.exists():
+        return HTMLResponse(html_file.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Dashboard unavailable — run: cd frontend && npm run build</h1>", status_code=503)
 
 
 # ── Point d'entrée local ───────────────────────────────────────────

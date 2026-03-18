@@ -20,10 +20,17 @@ from pathlib import Path
 from typing import Optional
 import os
 
-# ── Paths ─────────────────────────────────────────────────────────
-# Identique à memory_tools.py — relatif au WORKDIR (/data dans Docker)
-DB_PATH  = Path("memory.db")
-TASKS_MD = Path("tasks.md")
+# ── Paths (dynamiques — résolus via ContextVar par requête) ───────
+from Mnemo.context import get_data_dir
+
+
+def _db_path() -> Path:
+    return get_data_dir() / "memory.db"
+
+
+def _tasks_md() -> Path:
+    return get_data_dir() / "tasks.md"
+
 
 _JOURS_FR = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 _JOURS_EN = {j: i for i, j in enumerate(_JOURS_FR)}
@@ -34,7 +41,7 @@ _JOURS_EN = {j: i for i, j in enumerate(_JOURS_FR)}
 # ══════════════════════════════════════════════════════════════════
 
 def _get_db() -> sqlite3.Connection:
-    db = sqlite3.connect(DB_PATH)
+    db = sqlite3.connect(_db_path())
     db.row_factory = sqlite3.Row
     return db
 
@@ -287,7 +294,7 @@ def _sync_tasks_md() -> None:
     lines.append(f"\n---\n*Mis à jour : {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
 
     try:
-        TASKS_MD.write_text("\n".join(lines), encoding="utf-8")
+        _tasks_md().write_text("\n".join(lines), encoding="utf-8")
     except Exception:
         pass  # Silencieux si /data non accessible
 

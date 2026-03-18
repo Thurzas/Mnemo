@@ -1,0 +1,162 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 7, 13, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 40px 36px;
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: slideUp 0.25s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.icon {
+  font-size: 2rem;
+  text-align: center;
+}
+
+.title {
+  font-family: var(--display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+  margin: 0;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  text-align: center;
+  margin: 0;
+}
+
+/* Progress */
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progressText {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.progressBar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--a1), var(--a2));
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Question */
+.question {
+  font-size: 1rem;
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Textarea */
+.textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  padding: 10px 12px;
+  resize: none;
+  transition: border-color 0.15s;
+  line-height: 1.5;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--a1);
+}
+
+/* Actions */
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.btnPrimary {
+  background: linear-gradient(135deg, var(--a1), var(--a2));
+  border: none;
+  border-radius: 8px;
+  color: #07070d;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 9px 20px;
+  transition: opacity 0.15s;
+}
+
+.btnPrimary:hover { opacity: 0.88; }
+
+.btnSecondary {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 9px 16px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btnSecondary:hover {
+  border-color: var(--a1);
+  color: var(--text);
+}
+
+.btnGhost {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 9px 8px;
+  margin-right: auto;
+  transition: color 0.15s;
+}
+
+.btnGhost:hover:not(:disabled) { color: var(--text); }
+.btnGhost:disabled { opacity: 0.3; cursor: default; }
