@@ -267,19 +267,28 @@ def _handle_message_web(
             "content": "[pipeline] " + " · ".join(logs),
         })
 
-    # Déclenchement immédiat du plan — PlannerCrew a écrit pending_plan_step dans world_state
+    # Déclenchement immédiat du plan — PlannerCrew a écrit pending_plan_step (et
+    # éventuellement pending_web_search) dans world_state.
     if result.route == "plan":
         try:
             from Mnemo.tools.memory_tools import load_world_state
             from Mnemo.context import get_data_dir
             ws = load_world_state()
-            pending = ws.pop("pending_plan_step", None)
-            if pending:
-                # Supprime la clé (pop déjà fait) et réécrit le dict sans elle
+            pending     = ws.pop("pending_plan_step", None)
+            pending_web = ws.pop("pending_web_search", None)
+            if pending or pending_web:
                 path = get_data_dir() / "world_state.json"
                 path.write_text(
                     json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
+                if pending_web:
+                    # Phase 6.5 — étape 1 est une recherche web : demande confirmation
+                    return {
+                        "__web_confirm__": True,
+                        "web_query":       pending_web["query"],
+                        "_plan_web":       pending_web,
+                        "response":        response,   # texte du plan (affiché avant le modal)
+                    }
                 return {"__plan_created__": True, "response": response, "plan_step": pending}
         except Exception:
             pass
@@ -1123,11 +1132,22 @@ async def ws_message(websocket: WebSocket):
             return
 
         if isinstance(result, dict) and result.get("__web_confirm__"):
+            # Si un texte de plan est présent (Phase 6.5), on le stream d'abord
+            plan_text = result.get("response", "")
+            plan_web  = result.get("_plan_web")
+            if plan_text:
+                words = plan_text.split(" ")
+                for i, word in enumerate(words):
+                    chunk = word if i == len(words) - 1 else word + " "
+                    await websocket.send_json({"type": "token", "text": chunk})
+                    await asyncio.sleep(0.012)
+                await websocket.send_json({"type": "done", "session_id": sid})
             await websocket.send_json({
-                "type": "web_confirm",
-                "web_query": result["web_query"],
-                "session_id": sid,
+                "type":             "web_confirm",
+                "web_query":        result["web_query"],
+                "session_id":       sid,
                 "original_message": text,
+                **({"plan_web": plan_web} if plan_web else {}),
             })
             return
 
@@ -1149,6 +1169,75 @@ async def ws_message(websocket: WebSocket):
         if plan_step:
             await websocket.send_json({"type": "plan_step_ready", **plan_step})
 
+    async def _execute_plan_web_search(
+        sid: str,
+        plan_web: dict,
+        confirmed: bool,
+        web_query: str | None,
+    ) -> None:
+        """
+        Phase 6.5 — Exécute la recherche web pour l'étape 1 d'un plan (après confirmation).
+        Marque l'étape done, émet les résultats, et émet plan_step_ready pour l'étape 2.
+        """
+        await websocket.send_json({"type": "thinking"})
+
+        if not confirmed:
+            await websocket.send_json({"type": "done", "session_id": sid})
+            # Étape 1 non exécutée — plan_step_ready reste disponible (déjà en world_state)
+            return
+
+        import Mnemo.status as _status_mod
+        status_queue: asyncio.Queue = asyncio.Queue()
+        _status_mod.set_session(sid, status_queue, loop)
+
+        def _do_plan_web() -> str:
+            from Mnemo.tools.web_tools import web_search, format_results_for_prompt
+            from Mnemo.tools.plan_tools import PlanStore
+            from pathlib import Path
+            _status_mod.emit(sid, f"Recherche web : {web_query}...")
+            results     = web_search(web_query or plan_web.get("query", ""))
+            web_context = format_results_for_prompt(results) if results else "(aucun résultat)"
+            plan_path   = Path(plan_web["plan_path"])
+            step_label  = plan_web["step_label"]
+            try:
+                PlanStore.mark_done(plan_path, step_label)
+                PlanStore.append_log(plan_path, f"Web search : {web_query} — {len(results)} résultats")
+            except Exception:
+                pass
+            reply = f"**Résultats — Étape 1 : {step_label}**\n\n{web_context}"
+            if plan_web.get("step2_data"):
+                reply += "\n\n→ **Étape 2 prête.** Confirme pour continuer."
+            return reply
+
+        fut = loop.run_in_executor(None, lambda: user_context.run(_do_plan_web))
+        while not fut.done():
+            try:
+                event = status_queue.get_nowait()
+                await websocket.send_json(event)
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.03)
+        while not status_queue.empty():
+            await websocket.send_json(status_queue.get_nowait())
+        _status_mod.clear_session(sid)
+
+        try:
+            result = fut.result()
+        except Exception as e:
+            await websocket.send_json({"type": "error", "detail": str(e)})
+            return
+
+        words = (result or "").split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == len(words) - 1 else word + " "
+            await websocket.send_json({"type": "token", "text": chunk})
+            await asyncio.sleep(0.012)
+
+        await websocket.send_json({"type": "done", "session_id": sid})
+
+        step2 = plan_web.get("step2_data")
+        if step2:
+            await websocket.send_json({"type": "plan_step_ready", **step2})
+
     try:
         while True:
             msg = await websocket.receive_json()
@@ -1164,7 +1253,11 @@ async def ws_message(websocket: WebSocket):
                 sid       = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
                 confirmed = bool(msg.get("confirmed", False))
                 wq        = msg.get("web_query") if confirmed else None
-                await _run_and_stream(original, sid, confirmed, wq)
+                plan_web  = msg.get("plan_web")
+                if plan_web:
+                    await _execute_plan_web_search(sid, plan_web, confirmed, wq)
+                else:
+                    await _run_and_stream(original, sid, confirmed, wq)
 
     except WebSocketDisconnect:
         pass

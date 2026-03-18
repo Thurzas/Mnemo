@@ -42,9 +42,13 @@ def _detect_shell_intent(msg: str) -> bool:
 # ── Scheduler ────────────────────────────────────────────────────────────────
 
 # Keywords forts → bypass LLM déterministe (non ambigus)
+# NOTE : "planifie" et "planifier" seuls ont été retirés — trop ambigus.
+#   "planifier un projet/des étapes" → route plan, pas scheduler.
+#   Seules les formulations avec contexte rappel/tâche sont gardées.
 _SCHEDULER_KEYWORDS_STRONG = [
     "rappelle-moi", "rappelle moi",
-    "planifie", "planifier",
+    "planifie un rappel", "planifie une tâche", "planifie une alerte",
+    "planifier un rappel", "planifier une tâche", "planifier une alerte",
     "chaque lundi", "chaque mardi", "chaque mercredi", "chaque jeudi",
     "chaque vendredi", "chaque samedi", "chaque dimanche",
     "tous les lundis", "tous les mardis", "tous les mercredis",
@@ -206,6 +210,13 @@ def _detect_note_intent(msg: str) -> bool:
 
 # ── Handler ───────────────────────────────────────────────────────────────────
 
+# Seuil de mots au-delà duquel le bypass keyword est désactivé pour les routes
+# ambiguës (scheduler, plan, calendar). Les messages longs sont des discussions,
+# pas des commandes directes — le ML/LLM est plus fiable dans ce cas.
+# Shell et Note restent actifs quelle que soit la longueur (impératifs de sécurité/mémoire).
+_KEYWORD_BYPASS_MAX_WORDS = 12
+
+
 class KeywordHandler(RouterHandler):
     """
     Détection déterministe — confiance absolue (1.0) si match.
@@ -216,27 +227,31 @@ class KeywordHandler(RouterHandler):
     """
 
     def handle(self, ctx: RouterContext) -> RouterResult | None:
-        msg = ctx.message
+        msg  = ctx.message
+        _short = len(msg.split()) <= _KEYWORD_BYPASS_MAX_WORDS
 
-        # ── Note — priorité max (intention explicite d'écriture mémoire) ──
+        # ── Note — priorité max, pas de limite de longueur ────────────────
         if _detect_note_intent(msg):
             return RouterResult("note", 1.0, "keyword")
 
-        # ── Plan fort ─────────────────────────────────────────────────────
-        plan_strong, plan_weak = _detect_plan_intent(msg)
-        if plan_strong:
-            # needs_recon=True systématiquement : le bypass keyword saute le LLM
-            # qui normalement évalue la complexité. On est conservatif.
-            return RouterResult("plan", 1.0, "keyword", {"needs_recon": True})
+        if _short:
+            # ── Plan fort ─────────────────────────────────────────────────
+            plan_strong, plan_weak = _detect_plan_intent(msg)
+            if plan_strong:
+                return RouterResult("plan", 1.0, "keyword", {"needs_recon": True})
 
-        # ── Calendar write ────────────────────────────────────────────────
-        if _detect_calendar_write_intent(msg):
-            return RouterResult("calendar", 1.0, "keyword")
+            # ── Calendar write ────────────────────────────────────────────
+            if _detect_calendar_write_intent(msg):
+                return RouterResult("calendar", 1.0, "keyword")
 
-        # ── Scheduler fort ───────────────────────────────────────────────
-        strong, weak = _detect_scheduler_intent(msg)
-        if strong:
-            return RouterResult("scheduler", 1.0, "keyword")
+            # ── Scheduler fort ────────────────────────────────────────────
+            strong, weak = _detect_scheduler_intent(msg)
+            if strong:
+                return RouterResult("scheduler", 1.0, "keyword")
+        else:
+            # Message long → pas de bypass, mais on calcule quand même les hints
+            _, plan_weak   = _detect_plan_intent(msg)
+            _, weak        = _detect_scheduler_intent(msg)
 
         # ── Dépôt des hints pour les handlers aval ────────────────────────
         ctx._hints["kw_shell"]      = _detect_shell_intent(msg)

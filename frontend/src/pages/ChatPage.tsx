@@ -13,6 +13,7 @@ interface WebConfirmState {
   query: string
   sessionId: string
   originalMessage: string
+  planWeb?: unknown   // contexte plan (Phase 6.5) — forwarded as-is to web_answer
 }
 
 type WsStatus = 'connecting' | 'ready' | 'error'
@@ -148,6 +149,7 @@ export function ChatPage() {
             query: String(data.web_query ?? ''),
             sessionId: String(data.session_id ?? ''),
             originalMessage: String(data.original_message ?? ''),
+            planWeb: data.plan_web ?? undefined,
           })
           setLoading(false)
           streamBufRef.current = ''
@@ -206,6 +208,7 @@ export function ChatPage() {
     sid: string,
     confirmed: boolean,
     query: string,
+    planWeb?: unknown,
   ) => {
     setWebConfirm(null)
     sendWs({
@@ -214,6 +217,7 @@ export function ChatPage() {
       web_query: query,
       session_id: sid,
       original_message: originalMessage,
+      ...(planWeb ? { plan_web: planWeb } : {}),
     })
   }, [])
 
@@ -433,8 +437,8 @@ export function ChatPage() {
         <ConfirmModal
           message={`Lancer une recherche web pour :\n« ${webConfirm.query} » ?`}
           confirmLabel="Rechercher"
-          onConfirm={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, true, webConfirm.query)}
-          onCancel={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, false, webConfirm.query)}
+          onConfirm={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, true, webConfirm.query, webConfirm.planWeb)}
+          onCancel={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, false, webConfirm.query, webConfirm.planWeb)}
         />
       )}
     </div>

@@ -36,8 +36,11 @@ schedule_task:
     ── RÈGLES POUR LES CAS AMBIGUS ──────────────────────────────────
 
     Heure manquante :
-       → Utilise 09:00 par défaut.
-       → Mentionne l'hypothèse dans confirmation_message : "J'ai supposé 9h, tu peux me demander de modifier."
+       → Regarde l'heure actuelle dans le contexte temporel.
+       → Si heure actuelle ≤ 20h : utilise AUJOURD'HUI à (heure actuelle + 1h, arrondie à l'heure suivante).
+         Exemple : contexte = "18:45" → heure par défaut = aujourd'hui à 20:00.
+       → Si heure actuelle > 20h ou < 07h : utilise DEMAIN à 09:00.
+       → Mentionne toujours l'hypothèse dans confirmation_message : "J'ai supposé HH:MM, tu peux me demander de modifier."
 
     Jour manquant pour une récurrence ("chaque semaine", "toutes les semaines") :
        → Utilise lundi par défaut.
@@ -51,8 +54,8 @@ schedule_task:
           → Exemple : contexte = "mardi 10 mars 2026, 11:30" + message "à 14h" → trigger_at = "2026-03-10T14:00:00"
           → Mentionne dans confirmation_message : "J'ai planifié pour aujourd'hui à HH:MM."
        → Si AUCUNE HEURE n'est précisée dans le message :
-          → trigger_at = DEMAIN à 09:00.
-          → Mentionne dans confirmation_message : "J'ai planifié pour demain à 9h, précise une date si besoin."
+          → Applique la règle "Heure manquante" ci-dessus (heure actuelle + 1h si ≤ 20h, sinon demain 09:00).
+          → Mentionne dans confirmation_message : "J'ai planifié pour [aujourd'hui/demain] à HH:MM, précise une heure si besoin."
 
     ── RÈGLES POUR LA MODIFICATION ──────────────────────────────────
 
@@ -97,9 +100,10 @@ schedule_task:
 
     Contexte temporel : "mardi 10 mars 2026, 11:30"
     "rappelle-moi de rappeler le médecin" (pas d'heure)
-      → trigger_at = "2026-03-11T09:00:00"  ← DEMAIN à 09h (pas d'heure → demain)
+      → heure actuelle 11:30 ≤ 20h → AUJOURD'HUI à 12:00 (11h30 + 1h arrondie)
+      → trigger_at = "2026-03-10T12:00:00"
       → [{{ "action": "create", "task_type": "one_shot", "task_action": "reminder",
-             "trigger_at": "2026-03-11T09:00:00", "cron_expr": null,
+             "trigger_at": "2026-03-10T12:00:00", "cron_expr": null,
              "payload": {{"message": "Rappeler le médecin"}}, "task_id_to_cancel": null }}]
 
     "rappelle-moi tous les lundis de faire mon point projets"
