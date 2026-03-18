@@ -1,3 +1,4 @@
+import functools
 import json
 import math
 import sqlite3
@@ -215,14 +216,93 @@ def save_memory_gap_report(report: MemoryGapReport) -> None:
 
 
 def load_world_state() -> dict:
-    """Charge world_state.json, retourne {} si absent ou invalide."""
+    """
+    Charge world_state.json, expire les flags TTL dépassés, retourne {} si absent.
+
+    Les clés suivies par TTL stockent un timestamp `_ts_<key>` lors de l'écriture.
+    À la lecture, si le délai est dépassé, la clé (et son timestamp) sont supprimés
+    et le fichier est réécrit — la prochaine action devra recalculer la valeur.
+    """
     path = get_data_dir() / "world_state.json"
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {}
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    expired = [
+        key for key, ttl in WORLD_STATE_TTL.items()
+        if f"_ts_{key}" in data and (now_ts - data[f"_ts_{key}"]) > ttl
+    ]
+    if expired:
+        for key in expired:
+            data.pop(key, None)
+            data.pop(f"_ts_{key}", None)
+        try:
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    return data
+
+
+# ── World State — TTL et écriture write-through ─────────────────────────────
+
+# Durée de validité (secondes) des flags world_state écrits par write-through.
+# Clés absentes = pas de TTL (géré uniquement par les actions qui les écrivent).
+WORLD_STATE_TTL: dict[str, int] = {
+    "calendar_available": 3_600,    # 1h  — le fichier ICS peut disparaître
+    "briefing_fresh":     86_400,   # 24h — périme en fin de journée
+    "weekly_generated":  604_800,   # 7j  — périme après la semaine
+    "recon_context":      7_200,    # 2h  — le contexte de code peut changer
+}
+
+
+def _apply_world_state_update(updates: dict) -> None:
+    """
+    Applique des mises à jour partielles sur world_state.json.
+
+    Pour les clés présentes dans WORLD_STATE_TTL, écrit également
+    un timestamp `_ts_<key>` utilisé par load_world_state() pour
+    expirer automatiquement les valeurs périmées.
+    """
+    path = get_data_dir() / "world_state.json"
+    existing: dict = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    now_ts = datetime.now(timezone.utc).timestamp()
+    for key, value in updates.items():
+        existing[key] = value
+        if key in WORLD_STATE_TTL:
+            existing[f"_ts_{key}"] = now_ts
+    path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def updates_world_state(updates: dict):
+    """
+    Décorateur factory — applique les mises à jour world_state après l'exécution.
+
+    Usage :
+        @updates_world_state({"memory_synced": True})
+        def sync_markdown_to_db(...):
+            ...
+    """
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            result = fn(*args, **kwargs)
+            try:
+                _apply_world_state_update(updates)
+            except Exception:
+                pass  # ne jamais faire échouer la fonction décorée pour ça
+            return result
+        return wrapper
+    return decorator
 
 
 # ══════════════════════════════════════════════════════════════
@@ -992,6 +1072,7 @@ def upsert_chunk(
     db.commit()
 
 
+@updates_world_state({"memory_synced": True})
 def sync_markdown_to_db(md_path: Path = None):
     if md_path is None:
         md_path = _markdown_path()
@@ -1171,6 +1252,16 @@ def update_session_memory(session_id: str, user_message: str, agent_response: st
     if retrieved_chunk_ids:
         agent_msg["retrieved_chunk_ids"] = retrieved_chunk_ids
     session["messages"].append(agent_msg)
+    path = _sessions_dir() / f"{session_id}.json"
+    path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def append_session_message(session_id: str, entry: dict) -> None:
+    """Ajoute une entrée quelconque à session['messages'] sans écraser les autres."""
+    session = load_session_json(session_id)
+    if not session:
+        return
+    session.setdefault("messages", []).append(entry)
     path = _sessions_dir() / f"{session_id}.json"
     path.write_text(json.dumps(session, ensure_ascii=False, indent=2), encoding="utf-8")
 

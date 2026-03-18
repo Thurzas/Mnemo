@@ -4,6 +4,36 @@
   height: 100%;
 }
 
+.statusLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  font-size: 0.78rem;
+  color: var(--muted, #888);
+  font-style: italic;
+  animation: statusFade 1.8s ease-in-out infinite;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #7c6af7);
+  flex-shrink: 0;
+  animation: statusPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes statusFade {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1;   }
+}
+
+@keyframes statusPulse {
+  0%, 100% { transform: scale(1);    opacity: 0.6; }
+  50%       { transform: scale(1.4); opacity: 1;   }
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;

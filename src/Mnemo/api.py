@@ -245,10 +245,45 @@ def _handle_message_web(
     meta["needs_clarification"] = False
     meta["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
 
+    import Mnemo.status as _status_mod
+
+    _status_mod.emit(session_id, "Analyse de la demande...")
+
     print(f"[EVAL] ({result.handler}) {json.dumps({'route': result.route, 'conf': round(result.confidence, 2), **meta}, ensure_ascii=False)}")
+
+    conf_pct = round(result.confidence * 100)
+    _status_mod.emit(session_id, f"Route : {result.route} · {result.handler} ({conf_pct}%)")
+
     response = dispatch(result, user_message=user_message, session_id=session_id,
                         temporal_ctx=temporal_ctx, web_context=web_context)
     update_session_memory(session_id, user_message, response)
+
+    # Persiste le log pipeline en session pour enrichir la consolidation
+    logs = _status_mod.flush_session_log(session_id)
+    if logs:
+        from Mnemo.tools.memory_tools import append_session_message
+        append_session_message(session_id, {
+            "role": "system",
+            "content": "[pipeline] " + " · ".join(logs),
+        })
+
+    # Déclenchement immédiat du plan — PlannerCrew a écrit pending_plan_step dans world_state
+    if result.route == "plan":
+        try:
+            from Mnemo.tools.memory_tools import load_world_state
+            from Mnemo.context import get_data_dir
+            ws = load_world_state()
+            pending = ws.pop("pending_plan_step", None)
+            if pending:
+                # Supprime la clé (pop déjà fait) et réécrit le dict sans elle
+                path = get_data_dir() / "world_state.json"
+                path.write_text(
+                    json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                return {"__plan_created__": True, "response": response, "plan_step": pending}
+        except Exception:
+            pass
+
     return response
 
 
@@ -1051,14 +1086,38 @@ async def ws_message(websocket: WebSocket):
         web_confirmed: bool | None = None,
         web_query: str | None = None,
     ) -> None:
+        import Mnemo.status as _status_mod
+
+        # Enregistre la queue avant de lancer le thread
+        status_queue: asyncio.Queue = asyncio.Queue()
+        _status_mod.set_session(sid, status_queue, loop)
+
         await websocket.send_json({"type": "thinking"})
+
+        # Lance handle_message dans le thread pool (non-bloquant)
+        fut = loop.run_in_executor(
+            None,
+            lambda: user_context.run(
+                _handle_message_web, text, sid, web_confirmed, web_query
+            ),
+        )
+
+        # Draine la queue de statut en parallèle du thread
+        while not fut.done():
+            try:
+                event = status_queue.get_nowait()
+                await websocket.send_json(event)
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.03)
+
+        # Draine les événements émis juste avant que fut.done() devienne True
+        while not status_queue.empty():
+            await websocket.send_json(status_queue.get_nowait())
+
+        _status_mod.clear_session(sid)
+
         try:
-            result = await loop.run_in_executor(
-                None,
-                lambda: user_context.run(
-                    _handle_message_web, text, sid, web_confirmed, web_query
-                ),
-            )
+            result = fut.result()
         except Exception as e:
             await websocket.send_json({"type": "error", "detail": str(e)})
             return
@@ -1072,6 +1131,12 @@ async def ws_message(websocket: WebSocket):
             })
             return
 
+        # Déclenchement immédiat du plan — extrait avant streaming
+        plan_step = None
+        if isinstance(result, dict) and result.get("__plan_created__"):
+            plan_step = result.get("plan_step")
+            result    = result["response"]
+
         words = (result or "").split(" ")
         for i, word in enumerate(words):
             chunk = word if i == len(words) - 1 else word + " "
@@ -1079,6 +1144,10 @@ async def ws_message(websocket: WebSocket):
             await asyncio.sleep(0.012)
 
         await websocket.send_json({"type": "done", "session_id": sid})
+
+        # Émis après done — le frontend peut ouvrir le modal sans interrompre le streaming
+        if plan_step:
+            await websocket.send_json({"type": "plan_step_ready", **plan_step})
 
     try:
         while True:

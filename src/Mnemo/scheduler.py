@@ -216,10 +216,14 @@ def _build_scheduler_world_state() -> dict:
 
 
 def _update_world_state(updates: dict) -> None:
-    """Applique des mises à jour partielles sur world_state.json."""
-    from Mnemo.tools.memory_tools import load_world_state
+    """Applique des mises à jour partielles sur world_state.json (avec timestamps TTL)."""
+    from Mnemo.tools.memory_tools import load_world_state, WORLD_STATE_TTL
     ws = load_world_state()
-    ws.update(updates)
+    now_ts = time.time()
+    for key, value in updates.items():
+        ws[key] = value
+        if key in WORLD_STATE_TTL:
+            ws[f"_ts_{key}"] = now_ts
     path = DATA_PATH / "world_state.json"
     path.write_text(
         json.dumps(ws, ensure_ascii=False, indent=2),
@@ -345,6 +349,7 @@ def action_briefing() -> None:
     DATA_PATH.mkdir(parents=True, exist_ok=True)
     BRIEFING_OUT.write_text(content, encoding="utf-8")
     log.info(f"Briefing → {BRIEFING_OUT} ({len(content)} car.)")
+    _update_world_state({"briefing_fresh": True})
 
 
 def action_weekly() -> None:
@@ -410,6 +415,7 @@ def action_weekly() -> None:
     DATA_PATH.mkdir(parents=True, exist_ok=True)
     WEEKLY_OUT.write_text(content, encoding="utf-8")
     log.info(f"Weekly → {WEEKLY_OUT} ({len(content)} car.)")
+    _update_world_state({"weekly_generated": True})
 
 
 def action_deadline_alert() -> None:
@@ -444,6 +450,7 @@ def action_deadline_alert() -> None:
         if "## ⚠️ Alertes deadlines" not in current:
             BRIEFING_OUT.write_text(current + alert_block, encoding="utf-8")
             log.info(f"{len(alerts)} alerte(s) injectée(s) dans briefing.md")
+            _update_world_state({"deadline_alerts_sent": True})
         return
 
     now = datetime.now()
@@ -454,6 +461,7 @@ def action_deadline_alert() -> None:
         encoding="utf-8"
     )
     log.info(f"Alertes → {BRIEFING_OUT}")
+    _update_world_state({"deadline_alerts_sent": True})
 
 
 def action_reminder(payload: dict) -> None:

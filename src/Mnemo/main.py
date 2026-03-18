@@ -52,6 +52,7 @@ from Mnemo.tools.memory_tools import (
     score_and_record_chunk_usage,
     adapt_weights_if_ready,
     MemoryGap, MemoryGapReport, save_memory_gap_report,
+    _apply_world_state_update,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
@@ -537,6 +538,13 @@ def end_session(session_id: str) -> tuple:
 
     # Marque la session comme consolidée
     (_sessions_dir() / f"{session_id}.done").touch()
+
+    # ConsolidationCrew vient de modifier memory.md → la DB n'est plus synchro
+    try:
+        _apply_world_state_update({"memory_synced": False})
+    except Exception:
+        pass
+
     return result.raw, session_text
 
 

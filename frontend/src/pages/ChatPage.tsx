@@ -58,6 +58,7 @@ export function ChatPage() {
   )
   const [webConfirm, setWebConfirm]   = useState<WebConfirmState | null>(null)
   const [wsStatus, setWsStatus]       = useState<WsStatus>('connecting')
+  const [statusText, setStatusText]   = useState<string | null>(null)
 
   // ── Audio state ───────────────────────────────────────────────────
   const [recording, setRecording]     = useState(false)
@@ -109,8 +110,13 @@ export function ChatPage() {
 
         case 'thinking':
           setLoading(true)
+          setStatusText(null)
           streamBufRef.current = ''
           setStreamBuffer('')
+          break
+
+        case 'status':
+          setStatusText(String(data.text ?? ''))
           break
 
         case 'token': {
@@ -127,6 +133,7 @@ export function ChatPage() {
           setMessages(prev => [...prev, { role: 'mnemo', content: finalContent }])
           setStreamBuffer('')
           setLoading(false)
+          setStatusText(null)
           setSessionId(sid)
           sessionStorage.setItem(SID_KEY, sid)
           textareaRef.current?.focus()
@@ -367,6 +374,12 @@ export function ChatPage() {
         {messages.map((m, i) => (
           <MessageBubble key={i} role={m.role} content={m.content} />
         ))}
+        {loading && statusText && (
+          <div className={styles.statusLine}>
+            <span className={styles.statusDot} />
+            {statusText}
+          </div>
+        )}
         {loading && !streamBuffer && <MessageBubble role="mnemo" content="" loading />}
         {streamBuffer && <MessageBubble role="mnemo" content={streamBuffer} streaming />}
         <div ref={bottomRef} />

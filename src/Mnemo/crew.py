@@ -891,6 +891,24 @@ class PlannerCrew:
                 suffix = f" _(crew : {crew_t})_" if crew_t else ""
                 lines.append(f"{i}. {step}{suffix}")
 
+            # Déclenchement immédiat — écrit la première étape dans world_state
+            # pour que l'API puisse émettre plan_step_ready sans attendre la prochaine session.
+            if steps:
+                from Mnemo.tools.plan_tools import PlanRunner
+                from Mnemo.tools.memory_tools import _apply_world_state_update
+                first_step  = steps[0]
+                crew_target = crew_targets.get(first_step, "conversation")
+                _apply_world_state_update({
+                    "pending_plan_step": {
+                        "plan_id":    plan_path.stem,
+                        "plan_path":  str(plan_path),
+                        "step_index": 0,
+                        "step_total": len(steps),
+                        "step_label": first_step,
+                        "crew_target": crew_target,
+                    }
+                })
+
             return "\n".join(lines)
 
         except Exception as e:

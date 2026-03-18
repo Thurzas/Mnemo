@@ -225,7 +225,9 @@ class KeywordHandler(RouterHandler):
         # ── Plan fort ─────────────────────────────────────────────────────
         plan_strong, plan_weak = _detect_plan_intent(msg)
         if plan_strong:
-            return RouterResult("plan", 1.0, "keyword")
+            # needs_recon=True systématiquement : le bypass keyword saute le LLM
+            # qui normalement évalue la complexité. On est conservatif.
+            return RouterResult("plan", 1.0, "keyword", {"needs_recon": True})
 
         # ── Calendar write ────────────────────────────────────────────────
         if _detect_calendar_write_intent(msg):

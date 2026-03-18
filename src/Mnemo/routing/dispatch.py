@@ -122,12 +122,19 @@ def dispatch(
         "_web_mode":         metadata.get("_web_mode", False),
     }
 
+    try:
+        from Mnemo.status import emit as _emit
+    except ImportError:
+        def _emit(sid, text): pass  # fallback no-op
+
     if route == "shell":
         from Mnemo.crew import ShellCrew
+        _emit(session_id, "Exécution de la commande...")
         return ShellCrew().run({**base_inputs, "shell_command": shell_command})
 
     if route == "note":
         from Mnemo.crew import NoteWriterCrew
+        _emit(session_id, "Écriture de la note...")
         return NoteWriterCrew().run({"user_message": user_message})
 
     if route == "plan":
@@ -135,16 +142,18 @@ def dispatch(
         needs_recon   = metadata.get("needs_recon", False)
         recon_context = "(non disponible)"
 
-        # Si needs_recon : reconnaissance pré-planification
         if needs_recon:
-            # Les hints sont extraits du message utilisateur (noms de modules/fichiers)
             hints = _extract_hints(user_message)
+            hints_label = ", ".join(hints) if hints else "fichiers clés"
+            _emit(session_id, f"Reconnaissance du code : {hints_label}...")
             recon_result  = ReconnaissanceCrew().run({
                 "goal":  user_message,
                 "hints": hints,
             })
             recon_context = recon_result.get("summary", "(non disponible)")
+            _emit(session_id, "Reconnaissance terminée")
 
+        _emit(session_id, "Planification en cours...")
         return PlannerCrew().run({
             **base_inputs,
             "needs_recon":   needs_recon,
@@ -154,10 +163,17 @@ def dispatch(
     # Tous les autres crews (calendar, scheduler, briefing) — interface uniforme .run()
     crew_cls = registry.get(route)
     if crew_cls and route != "conversation":
+        _STATUS_LABELS = {
+            "calendar":  "Mise à jour du calendrier...",
+            "scheduler": "Création de la tâche planifiée...",
+            "briefing":  "Génération du briefing...",
+        }
+        _emit(session_id, _STATUS_LABELS.get(route, f"Crew {route}..."))
         return crew_cls().run({**base_inputs})
 
     # Conversation (défaut) — interface .crew().kickoff()
     from Mnemo.crew import ConversationCrew
+    _emit(session_id, "Recherche en mémoire...")
     conv_result = ConversationCrew().crew().kickoff(inputs={
         **base_inputs,
         "session_id":     session_id,
