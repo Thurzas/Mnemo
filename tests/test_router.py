@@ -417,3 +417,126 @@ class TestHandleMessage:
              patch.object(mn, "update_session_memory"):
             result = mn.handle_message("test", "s1")
         assert result == "fallback ok"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 5. KeywordHandler — gate longueur de message
+# ══════════════════════════════════════════════════════════════════
+
+class TestKeywordLengthGate:
+    """
+    Le bypass keyword ne doit pas s'activer pour les messages longs.
+    Seuil : _KEYWORD_BYPASS_MAX_WORDS = 12 mots.
+    Shell et Note restent actifs quelle que soit la longueur.
+    """
+
+    def test_scheduler_strong_court_bypass(self):
+        """Message court avec keyword scheduler fort → bypass."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="rappelle-moi de prendre mes médicaments", session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        assert result is not None
+        assert result.route == "scheduler"
+
+    def test_scheduler_strong_long_no_bypass(self):
+        """Message long contenant un keyword scheduler fort → pas de bypass."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        # 20 mots — dépasse le seuil de 12
+        msg = ("hello on va préparer un projet de landing page avec react js "
+               "on va planifier ce projet en étapes pour s organiser")
+        ctx = RouterContext(message=msg, session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        # Doit passer au handler suivant, pas retourner scheduler
+        assert result is None or result.route != "scheduler"
+
+    def test_plan_strong_court_bypass(self):
+        """Message court avec keyword plan fort → bypass plan."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="prépare un plan pour cette feature", session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        assert result is not None
+        assert result.route == "plan"
+
+    def test_plan_strong_long_no_bypass(self):
+        """Message long contenant un keyword plan fort → pas de bypass direct."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        msg = ("je voudrais qu on construise ensemble une stratégie complète "
+               "pour prépare un plan et organiser toutes les étapes du projet")
+        ctx = RouterContext(message=msg, session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        assert result is None or result.route != "plan"
+
+    def test_note_long_toujours_bypass(self):
+        """Note : pas de limite de longueur — bypass même sur message long."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        msg = ("note que j ai décidé d utiliser FastAPI pour le backend "
+               "de ce projet car c est plus simple et plus performant")
+        ctx = RouterContext(message=msg, session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        assert result is not None
+        assert result.route == "note"
+
+    def test_hint_kw_plan_weak_set_sur_message_long(self):
+        """Message long avec plan_weak keyword → hint kw_plan_weak déposé pour ML."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        msg = ("hello on va préparer un projet de landing page avec react js "
+               "on va planifier ce projet en étapes pour s organiser")
+        ctx = RouterContext(message=msg, session_id="s1")
+        KeywordHandler().handle(ctx)
+        assert ctx._hints.get("kw_plan_weak") is True
+
+    def test_hint_kw_sched_weak_non_set_sans_weak_kw(self):
+        """Message sans weak scheduler keyword → kw_sched_weak = False."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="comment vas-tu aujourd hui ?", session_id="s1")
+        KeywordHandler().handle(ctx)
+        assert ctx._hints.get("kw_sched_weak") is False
+
+
+# ══════════════════════════════════════════════════════════════════
+# 6. Plan weak keywords — nouveaux patterns projet
+# ══════════════════════════════════════════════════════════════════
+
+class TestPlanWeakKeywords:
+    """
+    Les nouveaux keywords plan_weak doivent être détectés pour orienter
+    le ML/LLM vers la route 'plan' plutôt que 'scheduler'.
+    """
+
+    def _weak(self, msg: str) -> bool:
+        from Mnemo.routing.handlers.keyword import _detect_plan_intent
+        _, weak = _detect_plan_intent(msg)
+        return weak
+
+    def test_planifier_ce_projet(self):
+        assert self._weak("on va planifier ce projet en étapes")
+
+    def test_planifier_le_projet(self):
+        assert self._weak("je veux planifier le projet correctement")
+
+    def test_planifier_en_etapes(self):
+        assert self._weak("il faudrait planifier en étapes tout ça")
+
+    def test_organiser_ce_projet(self):
+        assert self._weak("on va organiser ce projet ensemble")
+
+    def test_preparer_un_projet(self):
+        assert self._weak("on va préparer un projet de landing page")
+
+    def test_decoupe_en_etapes(self):
+        assert self._weak("on va découper en étapes le développement")
+
+    def test_phrase_non_plan(self):
+        """Phrase neutre → pas de plan_weak."""
+        assert not self._weak("salut comment tu vas aujourd hui")
+
+    def test_rappel_scheduler_pas_plan_weak(self):
+        """Rappel scheduler → pas de plan_weak."""
+        assert not self._weak("rappelle-moi demain de prendre mes médicaments")

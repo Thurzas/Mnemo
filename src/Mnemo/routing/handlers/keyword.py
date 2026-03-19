@@ -161,6 +161,14 @@ _PLAN_KEYWORDS_WEAK = [
     "comment développer", "comment developper",
     "comment construire",
     "par où commencer", "par ou commencer",
+    # Formulations projet/organisation (≠ rappel scheduler)
+    "planifier ce projet", "planifier le projet",
+    "planifier en étapes", "planifier les étapes",
+    "planifier en etapes", "planifier les etapes",
+    "organiser ce projet", "organiser le projet",
+    "préparer un projet", "preparer un projet",
+    "en étapes pour", "en etapes pour",
+    "découper en étapes", "decouper en etapes",
 ]
 
 

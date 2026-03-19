@@ -13,7 +13,7 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 MODEL = os.getenv("MODEL", "ollama/mistral").replace("ollama/", "")
 _DATA  = Path(os.getenv("DATA_PATH", ".")).resolve()
 OUTPUT = _DATA / "training_data.jsonl"
-ROUTES      = ["conversation", "shell", "calendar", "scheduler", "note"]
+ROUTES      = ["conversation", "shell", "calendar", "scheduler", "note", "plan"]
 BATCH_SIZE  = 20
 
 ROUTE_PROMPTS = {
@@ -59,6 +59,19 @@ ROUTE_PROMPTS = {
         "- Taches recurrentes automatiques\n"
         "- Notifications differees\n"
         "- Routines automatisees\n"
+        "Reponds UNIQUEMENT avec JSON : {{\"messages\": [\"msg1\", \"msg2\", ...]}}\n"
+        "Genere exactement {n} messages varies."
+    ),
+    "plan": (
+        "Tu es un utilisateur parlant a Mnemo, un assistant IA personnel.\n"
+        "Genere {n} messages DIFFERENTS de type plan (decomposition de projet en etapes) :\n"
+        "- Demandes de planification de projet ou feature (pas un rappel, pas un RDV)\n"
+        "- Decomposition d une tache complexe en etapes\n"
+        "- Organisation d un developpement logiciel\n"
+        "- Preparation d un projet (documentation, landing page, refactoring...)\n"
+        "- Demandes avec 'etapes', 'plan de travail', 'organiser le projet'\n"
+        "IMPORTANT : un plan c est une sequence d etapes, pas un rappel ni un evenement agenda.\n"
+        "Ne genere PAS de rappels ('rappelle-moi'), ni d evenements agenda, ni de commandes shell.\n"
         "Reponds UNIQUEMENT avec JSON : {{\"messages\": [\"msg1\", \"msg2\", ...]}}\n"
         "Genere exactement {n} messages varies."
     ),
@@ -150,6 +163,22 @@ SEED_DATA = [
     {"text": "alerte dans 45 min fin de reunion", "route": "scheduler"},
     {"text": "tous les 1er du mois rappel backup", "route": "scheduler"},
     {"text": "notifie dans 2h d aller chercher les enfants", "route": "scheduler"},
+    # ── plan ─────────────────────────────────────────────────────────
+    {"text": "construis-moi un plan pour developper la feature auth", "route": "plan"},
+    {"text": "prepare un plan pour refactoriser le module memoire", "route": "plan"},
+    {"text": "fais-moi un plan pour creer une landing page React", "route": "plan"},
+    {"text": "on va planifier ce projet en etapes", "route": "plan"},
+    {"text": "organise les etapes pour implementer le scheduler", "route": "plan"},
+    {"text": "je veux planifier le developpement du dashboard", "route": "plan"},
+    {"text": "decompose la tache migration base de donnees", "route": "plan"},
+    {"text": "cree un plan de travail pour documenter l API", "route": "plan"},
+    {"text": "planifier le projet en plusieurs phases", "route": "plan"},
+    {"text": "comment organiser le developpement de cette feature ?", "route": "plan"},
+    {"text": "redige un plan pour implementer le systeme de cache", "route": "plan"},
+    {"text": "j ai besoin d un plan pour refaire le frontend", "route": "plan"},
+    {"text": "planifie le projet de documentation React JS", "route": "plan"},
+    {"text": "prepare la documentation en etapes pour ce projet", "route": "plan"},
+    {"text": "on commence par preparer la documentation puis planifie les etapes", "route": "plan"},
     # ── note ─────────────────────────────────────────────────────────
     {"text": "note que je prefere vim a vscode", "route": "note"},
     {"text": "retiens que je suis vegetarien", "route": "note"},
