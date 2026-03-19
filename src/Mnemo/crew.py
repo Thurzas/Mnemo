@@ -11,6 +11,12 @@ from Mnemo.tools.memory_tools import (
 )
 from Mnemo.tools.calendar_tools import GetCalendarTool
 from Mnemo.tools.web_tools import WebSearchTool
+from Mnemo.tools.sandbox_tools import (
+    SandboxReadTool,
+    SandboxWriteTool,
+    SandboxShellTool,
+    SandboxListTool,
+)
 
 MODEL    = os.getenv("MODEL", "ollama/mistral")
 API_BASE = os.getenv("API_BASE", "http://localhost:11434")

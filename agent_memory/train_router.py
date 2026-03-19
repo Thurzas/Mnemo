@@ -33,6 +33,31 @@ def load_data(path):
     return texts, labels
 
 
+def load_uncertain(data_dir: Path) -> tuple[list, list]:
+    """
+    Charge uncertain_cases.jsonl (active learning) si présent.
+    Filtre les routes inconnues et les doublons de texte déjà présents.
+    """
+    uncertain_path = data_dir / "uncertain_cases.jsonl"
+    if not uncertain_path.exists():
+        return [], []
+    texts, labels = [], []
+    with open(uncertain_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            try:
+                item = json.loads(line)
+                route = item.get("route", "")
+                if route not in ROUTES:
+                    continue
+                texts.append(item["text"])
+                labels.append(route)
+            except Exception:
+                pass
+    return texts, labels
+
+
 def build_pipeline():
     return Pipeline([
         ("tfidf", TfidfVectorizer(
@@ -82,7 +107,17 @@ def main():
         sys.exit(1)
 
     texts, labels = load_data(args.data)
-    print(f"{len(texts)} exemples")
+
+    # Fusion active learning (uncertain_cases.jsonl)
+    u_texts, u_labels = load_uncertain(args.data.parent)
+    if u_texts:
+        seen = set(texts)
+        added = [(t, l) for t, l in zip(u_texts, u_labels) if t not in seen]
+        texts  += [t for t, _ in added]
+        labels += [l for _, l in added]
+        print(f"  + {len(added)} cas active learning fusionnés (uncertain_cases.jsonl)")
+
+    print(f"{len(texts)} exemples total")
     for r in ROUTES:
         print(f"  {r:15s}: {labels.count(r):4d}")
 

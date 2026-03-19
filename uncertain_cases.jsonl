@@ -1,2 +1,42 @@
-{"text": "Message test", "route": "conversation", "ml_conf": 0.522, "source": "active_learning"}
-{"text": "Message 1", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "ah...retire le rappel pour la conception pour Mnemo.", "route": "conversation", "ml_conf": 0.527, "source": "active_learning"}
+{"text": "salut, note ceci : je préfère quand Mitsune se montre plus chaleureuse dans ses réponses.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "Salut choupinette :)", "route": "conversation", "ml_conf": 0.622, "source": "active_learning"}
+{"text": "salut chaton, on fait un dernier test avant que j'aille en pause ? une petite chanson en japonais ? :)", "route": "conversation", "ml_conf": 0.565, "source": "active_learning"}
+{"text": "salut chaton, on fait un petit test de son, tu veux bien faire m'écrire un petit poème en japonais ?", "route": "conversation", "ml_conf": 0.7, "source": "active_learning"}
+{"text": "ok, j'aimerai apprendre le japonais, tu peux m'aider ?", "route": "conversation", "ml_conf": 0.539, "source": "active_learning"}
+{"text": "on peux faire un peu de conjugaison simple : écris moi un petit cours de japonais comme si tu devais donner cours à un enfant de 5 ans.", "route": "conversation", "ml_conf": 0.612, "source": "active_learning"}
+{"text": "salut, on continue dans les cours ? tu peux me rajouter d'autre verbes que tu qualifierais utiles pour un enfant de 5 ans ?", "route": "conversation", "ml_conf": 0.522, "source": "active_learning"}
+{"text": "un dernier pour ce soir ?", "route": "conversation", "ml_conf": 0.59, "source": "active_learning"}
+{"text": "maintenant, je veux une recherche internet sur la régression linéaire simple", "route": "conversation", "ml_conf": 0.432, "source": "active_learning"}
+{"text": "ok, merci chaton ❤️", "route": "conversation", "ml_conf": 0.455, "source": "active_learning"}
+{"text": "salut, dans la continuité des tests, j'aimerai vérifier si le RVC fonctionne encore", "route": "conversation", "ml_conf": 0.602, "source": "active_learning"}
+{"text": "j'ai effectivement rencontré des problèmes depuis la dernière utilisation, mais tu n'as pas réellement de contrôle sur cet outils. c'est un test de routine pour voir si ta réponse textuel est bien converti en son et modélisé par une \"voix\" RVC (Retrieval Voice Conversation)", "route": "conversation", "ml_conf": 0.501, "source": "active_learning"}
+{"text": "salut, tu pourrais me faire un petit cours de japonais ? écris moi quelque phrases courantes et pratique dans la vie de tout les jours.", "route": "conversation", "ml_conf": 0.516, "source": "active_learning"}
+{"text": "bien, ça fait déjà quelques kanji à apprendre tes éxemples", "route": "conversation", "ml_conf": 0.666, "source": "active_learning"}
+{"text": "parcontre le chinois ma grande, je n'ai absolument AUCUNES bases là dessus ^^' reste un maximum sur le japonais et le français, sinon je n'ai aucune chance de suivre la discussion.", "route": "conversation", "ml_conf": 0.41, "source": "active_learning"}
+{"text": "on reste sur le japonais et le français, voir l'anglais si tu veux, mais le chinois n'est pas prévu pour le moment.", "route": "conversation", "ml_conf": 0.508, "source": "active_learning"}
+{"text": "こんにちは ! お元気ですか、ダーリン？", "route": "conversation", "ml_conf": 0.454, "source": "active_learning"}
+{"text": "私が日本語を学び始めることにとても熱心でいてくれて嬉しいのですが、まだ日本語を読むのがかなり苦手なので、その点はご了承ください ^^' Est ce qu'on peux parler un peu en français chaton, ça m'aidera à apprendre.", "route": "conversation", "ml_conf": 0.46, "source": "active_learning"}
+{"text": "on avait dit, pas de chinois chéri ^^ on peux rester sur le japonais s'il te plait ?", "route": "conversation", "ml_conf": 0.55, "source": "active_learning"}
+{"text": "très bien 👍, on peux commencer par des phrases simple et utile dans la vie de tout les jours. (en japonais hein ^^ )", "route": "conversation", "ml_conf": 0.61, "source": "active_learning"}
+{"text": "こんにちは！今日も元気ですか？ 一日の始まりに、短い詩はいかがですか？", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "tu peux me faire une recherche rapide sur les automates cellulaires ?", "route": "conversation", "ml_conf": 0.535, "source": "active_learning"}
+{"text": "salut, tu peux me faire un recherche sur le pattern \"machines d'états\"", "route": "conversation", "ml_conf": 0.658, "source": "active_learning"}
+{"text": "salut, on va tester une dernière fois le RVC, tu peux me faire un petit poème en japonais ?", "route": "conversation", "ml_conf": 0.657, "source": "active_learning"}
+{"text": "ok, note ceci : Matt est un gros débutant en Japonais, il est même nul pour l'instant. Il faut lui donner la traduction à chaque fois, car il risque de ne rien comprendre.", "route": "conversation", "ml_conf": 0.419, "source": "active_learning"}
+{"text": "salut, on reprend les cours de japonais ? avec les traductions en français s'il te plait ^^'", "route": "conversation", "ml_conf": 0.568, "source": "active_learning"}
+{"text": "bon...tu m'as refais du chinois... marque bien dans la mémoire : pas de chinois dans la discussion.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "salut chaton, J'ai besoin d'un plan pour ajouter un système de notifications push dans Mnemo, la stack technique est orienté react JS", "route": "plan", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "salut, on va plannifier une landing page de test pour un projet.", "route": "plan", "ml_conf": 0.611, "source": "active_learning"}
+{"text": "pour le coup, pas besoin de définir une timeline, on va aller dans de l'expérimental : on va éssayer de mimer le visuel d'un cahier d'enfants.", "route": "conversation", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "re, on reprend le projet de prototype de feature de notifications.", "route": "plan", "ml_conf": 0.46, "source": "active_learning"}
+{"text": "bon, on va continuer les tests de routine, on va voir si j'ai le tracé qui apparait quelque part", "route": "conversation", "ml_conf": 0.594, "source": "active_learning"}
+{"text": "ok, j'ai rien dit, ça semble vraiment fonctionner, alors on va tenter autre chose pour voir les limites : prépares moi un plan pour faire, par exemple, une page web. Tu as le droit d'aller faire des recherches internet si besoin. la seule chose que j'impose c'est une stack technique : on travail en React js", "route": "conversation", "ml_conf": 0.423, "source": "active_learning"}
+{"text": "ok, je voit des lacunes sur react...je vais préparer une doc pour pallier à ça.", "route": "conversation", "ml_conf": 0.489, "source": "active_learning"}
+{"text": "ok, on va reprendre ça, il nous faut de la doc pour pallier aux lacunes : on va faire un petit plan pour documenter une base de connaissance sur react js", "route": "plan", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "on va faire un plan pour documenter le fonctionnement de react.JS", "route": "plan", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "on va faire un plan pour documenter le fonctionnement de react.JS", "route": "plan", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "yo, on va continuer le plan de documentation sur react js", "route": "plan", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "on va faire un plan pour documenter react js, on va faire de la recherche sur le net pour étoffer le plan", "route": "plan", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "on va faire un plan pour documenter react js, on va faire de la recherche sur le net pour étoffer le plan", "route": "plan", "ml_conf": 0.0, "source": "active_learning"}
+{"text": "ok, on prépares un plan pour faire un tutorial sur react ?", "route": "plan", "ml_conf": 0.0, "source": "active_learning"}
