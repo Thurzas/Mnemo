@@ -175,7 +175,7 @@ class MessageResponse(BaseModel):
     web_query: str | None = None
 
 
-# ── Pipeline web (sans confirmation interactive) ───────────────────
+# ── Pipeline web (sans confirmation interactive) ─��─────────────────
 
 _SHELL_BLOCKED = (
     "Les commandes shell ne sont pas disponibles depuis l'interface web. "
@@ -1585,12 +1585,42 @@ def project_get(slug: str, _: Auth):
     return {**manifest, "files": list_files(slug)}
 
 
+@app.post("/api/projects/{slug}/advance")
+def project_advance(slug: str, _: Auth):
+    """Exécute la prochaine étape non cochée du plan (1 seule étape)."""
+    from Mnemo.tools.sandbox_tools import _project_path
+    from Mnemo.tools.plan_tools import PlanRunner, PlanStore
+
+    project_dir = _project_path(slug)
+    plan_path   = project_dir / "plan.md"
+    if not plan_path.exists():
+        raise HTTPException(status_code=404, detail="plan.md introuvable")
+
+    next_step = PlanStore.get_next_step(plan_path)
+    if next_step is None:
+        return {"done": True, "message": "Toutes les étapes sont terminées."}
+
+    runner  = PlanRunner()
+    summary = runner.run(plan_path, max_steps=1)
+    return {"done": PlanStore.is_complete(plan_path), "message": summary}
+
+
+@app.get("/api/projects/{slug}/log")
+def project_log_read(slug: str, _: Auth):
+    """Retourne logs/commands.log — toujours 200, vide si pas encore créé."""
+    from Mnemo.tools.sandbox_tools import read_file
+    res = read_file(slug, "logs/commands.log")
+    return {"content": res["content"], "path": "logs/commands.log"}
+
+
 @app.get("/api/projects/{slug}/file")
 def project_file_read(slug: str, path: str, _: Auth):
     from Mnemo.tools.sandbox_tools import read_file
     res = read_file(slug, path)
     if res["error"]:
-        raise HTTPException(status_code=400, detail=res["error"])
+        # 400 pour chemin interdit, 404 pour fichier absent (polling normal)
+        code = 400 if "interdit" in res["error"] or "échappement" in res["error"] else 404
+        raise HTTPException(status_code=code, detail=res["error"])
     return {"content": res["content"], "path": path}
 
 

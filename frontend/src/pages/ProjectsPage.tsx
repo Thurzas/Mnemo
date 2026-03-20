@@ -37,9 +37,12 @@ function parsePlan(md: string): PlanStep[] {
 
 // ── Component ─────────────────────────────────────────────────────
 
-interface Props { active: boolean }
+interface Props {
+  active: boolean
+  targetSlug?: string | null
+}
 
-export function ProjectsPage({ active }: Props) {
+export function ProjectsPage({ active, targetSlug }: Props) {
   const [projects,     setProjects]     = useState<ProjectManifest[]>([])
   const [slug,         setSlug]         = useState<string | null>(null)
   const [files,        setFiles]        = useState<string[]>([])
@@ -49,6 +52,7 @@ export function ProjectsPage({ active }: Props) {
   const [terminalLog,  setTerminalLog]  = useState('')
   const [gitLog,       setGitLog]       = useState('')
   const [saving,         setSaving]         = useState(false)
+  const [advancing,      setAdvancing]      = useState(false)
   const [creating,       setCreating]       = useState(false)
   const [newName,        setNewName]        = useState('')
   const [newGoal,        setNewGoal]        = useState('')
@@ -70,6 +74,11 @@ export function ProjectsPage({ active }: Props) {
   useEffect(() => {
     if (active) loadProjects()
   }, [active, loadProjects])
+
+  // ── Navigation vers un projet ciblé (depuis ChatPage) ───────────
+  useEffect(() => {
+    if (targetSlug && active) setSlug(targetSlug)
+  }, [targetSlug, active])
 
   // ── Charger les fichiers d'un projet ────────────────────────────
   const loadProject = useCallback(async (s: string) => {
@@ -131,9 +140,9 @@ export function ProjectsPage({ active }: Props) {
     if (!slug) return
     const poll = async () => {
       try {
-        const res = await api.readProjectFile(slug, 'logs/commands.log')
+        const res = await api.readProjectLog(slug)
         setTerminalLog(res.content)
-      } catch { /* pas encore créé */ }
+      } catch { /* ignore */ }
     }
     poll()
     logPollRef.current = setInterval(poll, 3_000)
@@ -157,6 +166,27 @@ export function ProjectsPage({ active }: Props) {
   useEffect(() => {
     if (slug && files.includes('plan.md')) handleOpenFile('plan.md')
   }, [slug, files, handleOpenFile])
+
+  // ── Avancer d'une étape ──────────────────────────────────────────
+  const handleAdvance = useCallback(async () => {
+    if (!slug) return
+    setAdvancing(true)
+    setError(null)
+    try {
+      const res = await api.advanceProject(slug)
+      // Rafraîchit plan + git log après exécution
+      const planRes = await api.readProjectFile(slug, 'plan.md')
+      setFileContent(planRes.content)
+      setPlanSteps(parsePlan(planRes.content))
+      const { log } = await api.getProjectGitLog(slug)
+      setGitLog(log)
+      if (res.done) setError(null)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur avancement')
+    } finally {
+      setAdvancing(false)
+    }
+  }, [slug])
 
   // ── Sauvegarder ─────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
@@ -377,7 +407,19 @@ export function ProjectsPage({ active }: Props) {
 
         {/* Plan panel */}
         <div className={styles.planPanel}>
-          <div className={styles.planTitle}>Plan</div>
+          <div className={styles.planTitle}>
+            Plan
+            {slug && (
+              <button
+                className={styles.btnAdvance}
+                onClick={handleAdvance}
+                disabled={advancing}
+                title="Exécuter la prochaine étape"
+              >
+                {advancing ? '⏳' : '▶ Continuer'}
+              </button>
+            )}
+          </div>
           {planSteps.length === 0 ? (
             <div className={styles.planEmpty}>
               {slug ? 'plan.md vide ou non trouvé' : '—'}

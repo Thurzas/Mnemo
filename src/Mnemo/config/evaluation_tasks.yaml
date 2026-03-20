@@ -112,6 +112,29 @@ evaluate_task:
             "envoie-moi un résumé à 8h"                         → scheduler
             "demain matin, rappel pour le dentiste"             → scheduler
           IMPORTANT : "rappelle-moi" + heure/date → TOUJOURS scheduler, jamais conversation.
+      - "plan"         : l'utilisateur demande de créer un plan de travail, de décomposer
+          un projet en étapes, ou de construire/développer/implémenter quelque chose.
+          Signaux clés : verbes de planification + objet projet/tâche (SANS heure précise).
+          Exemples :
+            "prépare-moi un plan pour apprendre React"          → plan
+            "fais-moi un plan pour développer une API"          → plan
+            "crée un plan pour implémenter le système de cache" → plan
+            "décompose le projet en étapes"                     → plan
+            "comment on va s'organiser pour construire ce projet" → plan
+            "je veux un plan pour documenter mon code"          → plan
+            "construis-moi une application de gestion de tâches" → plan
+            "développe un module de recherche pour le projet"   → plan
+          IMPORTANT : PAS de date/heure précise → c'est "plan", pas "scheduler".
+          IMPORTANT : si l'utilisateur veut réfléchir/discuter d'organisation → "conversation".
+          "plan" = l'utilisateur veut que Mnemo crée un plan d'action EXÉCUTABLE.
+      - "sandbox"      : l'utilisateur veut accéder à un projet sandbox existant, y travailler,
+          ou le reprendre.
+          Signaux clés : référence explicite à un projet nommé ou au sandbox.
+          Exemples :
+            "ouvre le projet mon-api"                           → sandbox
+            "continue le projet react-dashboard"                → sandbox
+            "reprends le projet de documentation"               → sandbox
+            "travaille sur le projet backend"                   → sandbox
       En cas de doute : "conversation".
 
     shell_command : si route est "shell", la commande EXACTE à exécuter,

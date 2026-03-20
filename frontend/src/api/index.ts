@@ -419,6 +419,14 @@ export const api = {
   readProjectFile: (slug: string, path: string) =>
     request<ProjectFile>(`/api/projects/${encodeURIComponent(slug)}/file?path=${encodeURIComponent(path)}`),
 
+  readProjectLog: (slug: string) =>
+    request<ProjectFile>(`/api/projects/${encodeURIComponent(slug)}/log`),
+
+  advanceProject: (slug: string) =>
+    request<{ done: boolean; message: string }>(`/api/projects/${encodeURIComponent(slug)}/advance`, {
+      method: 'POST',
+    }),
+
   writeProjectFile: (slug: string, body: { path: string; content: string; commit_msg?: string }) =>
     request<FileWriteResult>(`/api/projects/${encodeURIComponent(slug)}/file`, {
       method: 'POST',

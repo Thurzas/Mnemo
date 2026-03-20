@@ -72,7 +72,7 @@ ROUTE_PROMPTS = {
         "- Executer du code, des tests dans un projet\n"
         "IMPORTANT : sandbox = travailler DANS un projet existant, pas planifier.\n"
         "Exemples : ouvre le projet X, continue le projet Y, reprends le projet Z.\n"
-        "Reponds UNIQUEMENT avec JSON : {\"messages\": [\"msg1\", ...]}\n"
+        "Reponds UNIQUEMENT avec JSON : {{\"messages\": [\"msg1\", ...]}}\n"
         "Genere exactement {n} messages varies."
     ),
     "plan": (

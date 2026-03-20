@@ -23,6 +23,12 @@ export default function App() {
   const [username, setUsername] = useState<string | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
   const [onboardingQuestions, setOnboardingQuestions] = useState<OnboardingQuestion[] | null>(null)
+  const [targetProjectSlug, setTargetProjectSlug] = useState<string | null>(null)
+
+  const openProject = (slug: string) => {
+    setTargetProjectSlug(slug)
+    setTab('projects')
+  }
 
   const checkOnboarding = async () => {
     try {
@@ -109,7 +115,7 @@ export default function App() {
       <NavBar tab={tab} onTab={setTab} connected={connected} username={username} />
       <main className={styles.main}>
         <div className={tab === 'chat' ? styles.visible : styles.hidden}>
-          <ChatPage />
+          <ChatPage onOpenProject={openProject} />
         </div>
         <div className={tab === 'memory' ? styles.visible : styles.hidden}>
           <MemoryPage active={tab === 'memory'} />
@@ -127,7 +133,7 @@ export default function App() {
           <VoicePage active={tab === 'voice'} />
         </div>
         <div className={tab === 'projects' ? styles.visible : styles.hidden}>
-          <ProjectsPage active={tab === 'projects'} />
+          <ProjectsPage active={tab === 'projects'} targetSlug={targetProjectSlug} />
         </div>
       </main>
       {onboardingQuestions?.length ? (

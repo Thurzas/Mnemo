@@ -73,6 +73,7 @@ class PlanStore:
         steps: list[str],
         context: str = "",
         crew_targets: dict[str, str] | None = None,
+        path: Path | None = None,
     ) -> Path:
         """
         Crée un nouveau plan.md pour le goal donné.
@@ -82,6 +83,7 @@ class PlanStore:
             steps        : liste des étapes (str) dans l'ordre d'exécution
             context      : contexte de planification (recon_context, mémoire...)
             crew_targets : {étape: crew_cible} — optionnel, annoté dans le plan
+            path         : chemin explicite où écrire le plan (sinon plans/plan_<id>.md)
 
         Returns:
             Path du plan créé.
@@ -118,9 +120,10 @@ class PlanStore:
 ## Journal
 - {now} — Plan créé
 """
-        path = _plans_dir() / f"plan_{plan_id}.md"
-        path.write_text(content, encoding="utf-8")
-        return path
+        dest = path if path is not None else _plans_dir() / f"plan_{plan_id}.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        return dest
 
     # ── Lecture ───────────────────────────────────────────────
 
@@ -206,6 +209,19 @@ class PlanStore:
         PlanStore.append_log(plan, f"Étape terminée : {step}")
 
     @staticmethod
+    def mark_failed(plan: Path, step: str, reason: str) -> None:
+        """Marque une étape comme échouée [!] (skippée, pas bloquante)."""
+        lines = plan.read_text(encoding="utf-8").splitlines(keepends=True)
+        now   = _now_iso()
+        for i, line in enumerate(lines):
+            if _RE_STEP_TODO.match(line.strip()) and step in line:
+                indent = len(line) - len(line.lstrip())
+                lines[i] = " " * indent + f"- [!] {step} ⚠ {now}\n"
+                break
+        plan.write_text("".join(lines), encoding="utf-8")
+        PlanStore.append_log(plan, f"Étape échouée (skip) : {step} — {reason[:120]}")
+
+    @staticmethod
     def add_blocker(plan: Path, blocker: str) -> None:
         """Ajoute un bloquant dans la section ## Bloquants."""
         lines = plan.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -267,27 +283,48 @@ def _build_step_executor() -> dict:
     Construit le registre d'exécuteurs d'étapes à la demande (imports différés).
     Chaque exécuteur reçoit (step_text, session_id, base_inputs) → str.
     """
+    def _temporal() -> str:
+        try:
+            from Mnemo.tools.calendar_tools import get_temporal_context
+            return get_temporal_context()
+        except Exception:
+            return ""
+
     def _run_conversation(step: str, session_id: str, inputs: dict) -> str:
         from Mnemo.crew import ConversationCrew
         result = ConversationCrew().crew().kickoff(inputs={
             **inputs,
-            "user_message": step,
-            "session_id":   session_id,
+            "user_message":   step,
+            "session_id":     session_id,
             "memory_context": "",
+            "temporal_context": inputs.get("temporal_context") or _temporal(),
         })
         return result.raw or ""
 
     def _run_shell(step: str, session_id: str, inputs: dict) -> str:
         from Mnemo.crew import ShellCrew
-        return ShellCrew().run({**inputs, "user_message": step, "shell_command": step})
+        return ShellCrew().run({
+            **inputs,
+            "user_message": step,
+            "shell_command": step,
+            "temporal_context": inputs.get("temporal_context") or _temporal(),
+        })
 
     def _run_note(step: str, session_id: str, inputs: dict) -> str:
         from Mnemo.crew import NoteWriterCrew
-        return NoteWriterCrew().run({"user_message": step})
+        return NoteWriterCrew().run({
+            "user_message": step,
+            "temporal_context": inputs.get("temporal_context") or _temporal(),
+        })
 
     def _run_scheduler(step: str, session_id: str, inputs: dict) -> str:
-        from Mnemo.crew import SchedulerCrew
-        return SchedulerCrew().run({**inputs, "user_message": step})
+        # Dans un plan, "crew : scheduler" signifie souvent "planifier/noter une tâche"
+        # → on délègue à NoteWriterCrew plutôt que SchedulerCrew (qui attend une requête agenda)
+        from Mnemo.crew import NoteWriterCrew
+        return NoteWriterCrew().run({
+            "user_message": step,
+            "temporal_context": inputs.get("temporal_context") or _temporal(),
+        })
 
     def _run_recon(step: str, session_id: str, inputs: dict) -> str:
         from Mnemo.crew import ReconnaissanceCrew
@@ -350,6 +387,7 @@ class PlanRunner:
         plan: Path,
         session_id: str = "",
         base_inputs: dict | None = None,
+        max_steps: int = 0,
     ) -> str:
         """
         Exécute le plan jusqu'à complétion ou premier bloquant.
@@ -358,6 +396,7 @@ class PlanRunner:
             plan        : chemin du plan.md
             session_id  : session courante (pour les crews qui en ont besoin)
             base_inputs : inputs de base transmis à chaque crew
+            max_steps   : nombre maximum d'étapes à exécuter (0 = illimité)
 
         Returns:
             Résumé de l'exécution (étapes faites, bloquant éventuel).
@@ -367,6 +406,8 @@ class PlanRunner:
         blocked  = False
 
         while True:
+            if max_steps and executed >= max_steps:
+                break
             step_raw = PlanStore.get_next_step(plan)
             if step_raw is None:
                 break  # toutes les étapes sont faites
