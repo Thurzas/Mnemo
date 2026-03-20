@@ -2,7 +2,7 @@
 
 ## Vue d'ensemble
 
-Mnemo est composé de **8 crews spécialisés**, chacun avec un rôle précis. Un "crew" CrewAI est un ensemble d'agents et de tâches qui collaborent séquentiellement.
+Mnemo est composé de **11 crews spécialisés**, chacun avec un rôle précis. Un "crew" CrewAI est un ensemble d'agents et de tâches qui collaborent séquentiellement.
 
 Tous les crews partagent la même configuration LLM (modèle Ollama, URL API) mais avec des températures différentes selon le besoin de créativité vs déterminisme.
 
@@ -21,6 +21,9 @@ Tous les crews partagent la même configuration LLM (modèle Ollama, URL API) ma
 | `SchedulerCrew` | route = `scheduler` | 0.0 | Planification en langage naturel |
 | `CalendarWriteCrew` | route = `calendar` | 0.0 | CRUD calendrier |
 | `NoteWriterCrew` | route = `note` | 0.0 | Écriture directe en mémoire |
+| `ReconnaissanceCrew` | route = `plan` (si `needs_recon=True`) | 0.0 | Analyse l'objectif, produit `recon_context` |
+| `PlannerCrew` | route = `plan` | 0.0 | Génère un plan GOAP pour un projet sandbox |
+| `SandboxCrew` | route = `sandbox` | 0.0 | Orchestre le travail dans un projet sandbox |
 
 ---
 
@@ -209,6 +212,89 @@ Voir [calendar.md](calendar.md) pour le détail complet.
 **Cas d'usage :** "Mémorise que je préfère les réponses courtes", "Note que le projet Phoenix est en pause".
 
 **Différence avec ConsolidationCrew :** la consolidation attend la fin de session et analyse l'ensemble des échanges. `NoteWriterCrew` écrit immédiatement ce que l'utilisateur lui demande explicitement.
+
+---
+
+## ReconnaissanceCrew
+
+**Rôle :** analyser l'objectif utilisateur pour identifier le module ou la technologie cible, et écrire le résultat dans `world_state.json`.
+
+**Agent :** `recon_agent` (1 agent)
+
+**Déclenchement :** appelé par `PlannerCrew` quand `needs_recon=True` dans le `RouterResult`.
+
+**Output :** écrit la clé `recon_context` dans `users/<username>/world_state.json`. Ce contexte est injecté dans le prompt de `PlannerCrew` pour produire un plan plus précis.
+
+**Exemple :**
+```json
+{
+  "recon_context": {
+    "target_module": "frontend",
+    "technology": "React + TypeScript",
+    "relevant_files": ["frontend/src/App.tsx", "frontend/src/api/index.ts"]
+  }
+}
+```
+
+---
+
+## PlannerCrew
+
+**Rôle :** recevoir un objectif utilisateur et générer un `plan.md` structuré dans le répertoire du projet sandbox cible.
+
+**Agent :** `planner_agent` (1 agent)
+
+**Pipeline :**
+```
+route=plan détecté
+  -> si needs_recon=True : ReconnaissanceCrew() -> recon_context dans world_state
+  -> PlannerCrew.run(goal, recon_context)
+      -> GOAP backward chaining sur ACTION_REGISTRY
+      -> génère plan.md (étapes checkboxes)
+      -> peut émettre pending_web_search dans world_state (si recherche nécessaire)
+      -> peut émettre pending_plan_step dans world_state (prochaine étape à exécuter)
+```
+
+**Output dans `plan.md` :**
+```markdown
+# Plan : <objectif>
+
+## Étapes
+- [ ] Étape 1 : analyser la structure existante
+- [ ] Étape 2 : implémenter le composant X
+- [ ] Étape 3 : écrire les tests
+```
+
+**Interactions avec world_state :**
+- `pending_web_search` : émis si le plan nécessite une recherche web préalable. Intercepté par `api.py` → confirmation utilisateur → `_execute_plan_web_search()`.
+- `pending_plan_step` : étape prête à exécuter. Consommée par `api.py` pour lancer `SandboxCrew`.
+
+---
+
+## SandboxCrew
+
+**Rôle :** orchestrer le travail dans un projet sandbox — lire et écrire des fichiers, exécuter des commandes shell confinées au répertoire du projet.
+
+**Agent :** `sandbox_agent` (1 agent, max 15 itérations)
+
+**Structure d'un projet sandbox :**
+```
+users/<username>/projects/<slug>/
+  project.json      ← manifest (slug, name, goal, status, created_at)
+  plan.md           ← plan GOAP (étapes checkboxes)
+  memory.md         ← mémoire locale au projet
+  logs/commands.log ← sorties des commandes shell
+  .git/             ← dépôt git auto-initialisé
+```
+
+**Outils disponibles :**
+- Lecture de fichiers dans le répertoire projet
+- Écriture de fichiers (commit git automatique)
+- Exécution de commandes shell confinées au projet
+
+**Sécurité :** les commandes shell sont soumises au même système de whitelist que `ShellCrew`. Les actions risquées (shell, npm, pip, python) passent par `pending_confirmations` dans `world_state.json` avant d'être exécutées — voir [sandbox.md](sandbox.md).
+
+Voir [sandbox.md](sandbox.md) pour la documentation complète (API REST, confirmations, cycle de vie).
 
 ---
 

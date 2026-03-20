@@ -4,42 +4,50 @@
 
 Quand tu envoies un message à Mnemo, il doit décider ce qu'il doit faire : répondre comme un assistant, exécuter une commande, ajouter un rappel au calendrier, planifier une tâche...
 
-Ce choix s'appelle le **routing**. Il suit une hiérarchie à 3 niveaux, du plus rapide au plus intelligent :
+Ce choix s'appelle le **routing**. Il est implémenté en **Chain of Responsibility** (package `src/Mnemo/routing/`) avec 3 handlers en séquence, du plus rapide au plus intelligent :
 
 ```
-1. Mots-clés déterministes    (< 1ms, règles fixes)
+1. KeywordHandler    (< 1ms, règles fixes)
       │ si confiance haute
       ▼
-2. Classifieur ML              (< 10ms, sklearn TF-IDF)
+2. MLHandler         (< 10ms, sklearn TF-IDF)
       │ si ML insuffisant
       ▼
-3. LLM EvaluationCrew         (2–5s, analyse sémantique)
+3. LLMHandler        (2–5s, analyse sémantique — EvaluationCrew)
 ```
+
+Chaque handler retourne un `RouterResult(route, confidence, source, metadata)` ou passe la main au suivant.
 
 ---
 
-## Niveau 1 — Mots-clés déterministes
+## Niveau 1 — KeywordHandler (mots-clés déterministes)
 
-Quatre familles de patterns, chacune associée à une route :
+Six familles de patterns, chacune associée à une route :
 
-| Route | Détecteur | Exemples de triggers |
-|-------|-----------|----------------------|
-| `shell` | `_detect_shell_intent()` | `"liste les fichiers"`, `"lis le contenu de"`, `"ls /data"` |
-| `scheduler` | `_detect_scheduler_intent()` | `"planifie"`, `"programme un rappel"`, `"rappelle-moi"` |
-| `note` | `_detect_note_intent()` | `"note que"`, `"mémorise"`, `"souviens-toi"` |
-| `calendar` | `_detect_calendar_write_intent()` | `"ajoute au calendrier"`, `"crée un événement"`, `"supprime"` |
+| Route | Exemples de triggers |
+|-------|----------------------|
+| `shell` | `"liste les fichiers"`, `"lis le contenu de"`, `"ls /data"` |
+| `scheduler` | `"planifie"`, `"programme un rappel"`, `"rappelle-moi"` |
+| `note` | `"note que"`, `"mémorise"`, `"souviens-toi"` |
+| `calendar` | `"ajoute au calendrier"`, `"crée un événement"`, `"supprime"` |
+| `plan` | `"crée un plan"`, `"planifie le projet"`, `"je veux documenter X"` |
+| `sandbox` | `"ouvre le projet"`, `"travaille sur le projet"` |
+
+**Keyword length gate :** les keywords ne bypassent le LLM que sur des messages **courts (≤ ~12 mots)**. Sur un message long, même si un keyword est présent, le handler passe la main à MLHandler/LLMHandler pour éviter les faux positifs. Exemple : une longue phrase de contexte qui contient le mot "planifie" ne sera pas routée directement vers `scheduler`.
+
+**Résultat fort pour `plan` :** si le keyword `plan` est détecté avec `needs_recon=True`, le `RouterResult` transporte `{"needs_recon": True}` dans les métadonnées, ce qui déclenche `ReconnaissanceCrew` avant `PlannerCrew`.
 
 **Important :** les keywords `scheduler` ont été resserrés pour éviter les faux positifs. `"programme"` seul ne déclenche plus rien — il faut `"programme un ..."` ou `"programme cette ..."`. Le mot `"programme"` (nom commun = emploi du temps) est correctement routé vers `conversation`.
 
 ---
 
-## Niveau 2 — Classifieur ML
+## Niveau 2 — MLHandler (classifieur ML)
 
 Un modèle `TF-IDF → Logistic Regression` entraîné sur `training_data.jsonl`.
 
 **Routes connues du modèle :**
 ```
-calendar | conversation | note | scheduler | shell
+calendar | conversation | note | plan | sandbox | scheduler | shell
 ```
 
 **Seuils de confiance :**
@@ -57,7 +65,7 @@ calendar | conversation | note | scheduler | shell
 
 ---
 
-## Niveau 3 — EvaluationCrew (LLM)
+## Niveau 3 — LLMHandler (EvaluationCrew)
 
 Si les deux premières couches n'ont pas tranché, l'EvaluationCrew analyse sémantiquement le message et produit un JSON de routing :
 
@@ -78,7 +86,7 @@ Si les deux premières couches n'ont pas tranché, l'EvaluationCrew analyse sém
 
 | Champ | Usage |
 |-------|-------|
-| `route` | Crew cible : `conversation`, `shell`, `scheduler`, `calendar`, `note` |
+| `route` | Crew cible : `conversation`, `shell`, `scheduler`, `calendar`, `note`, `plan`, `sandbox` |
 | `needs_memory` | Si vrai : le `memory_retriever` cherche dans `memory.md` |
 | `needs_calendar` | Si vrai : les événements calendrier sont pré-chargés |
 | `needs_web` | Si vrai : demande confirmation utilisateur avant recherche |
@@ -90,7 +98,8 @@ Si les deux premières couches n'ont pas tranché, l'EvaluationCrew analyse sém
 
 Quand les deux couches ont un avis :
 
-- **ML ≥ 0.84 ET LLM dit autre chose** → le ML prévaut (comportement configuré)
+- **ML ≥ 0.85 ET LLM dit `conversation`** → le ML prévaut (comportement configuré)
+- **ML ≥ 0.84 ET LLM dit autre chose** → le ML prévaut
 - **ML < 0.84** → le LLM prévaut
 
 Ce comportement évite que le LLM réinterprète des intentions clairement identifiées par le ML (ex : une commande shell explicite).
@@ -106,6 +115,8 @@ Ce comportement évite que le LLM réinterprète des intentions clairement ident
 | `scheduler` | `SchedulerCrew` | Planification de tâches |
 | `calendar` | `CalendarWriteCrew` | Ajout/modification/suppression d'événements |
 | `note` | `NoteWriterCrew` | Écriture directe dans `memory.md` |
+| `plan` | `ReconnaissanceCrew` → `PlannerCrew` | Analyse objectif + génération plan GOAP |
+| `sandbox` | `SandboxCrew` | Travail dans un projet sandbox |
 
 ---
 
@@ -157,3 +168,17 @@ python agent_memory/train_router.py
 **`"ls /data/docs"`**
 → Keyword `"ls"` matche shell.
 → Route directe : `ShellCrew` (après confirmation).
+
+**`"crée un plan pour documenter l'API"`**
+→ Keyword `"crée un plan"` matche (message court).
+→ RouterResult avec `needs_recon=True`.
+→ Route : `ReconnaissanceCrew` → `PlannerCrew`.
+
+**`"j'aimerais que tu crées un plan détaillé pour refactoriser le système de routing et documenter toutes les routes existantes"`**
+→ Message long (> 12 mots), keyword length gate actif.
+→ Passe au MLHandler, puis LLMHandler si nécessaire.
+→ Route : `plan` ou `conversation` selon analyse sémantique.
+
+**`"ouvre le projet waifuclawd"`**
+→ Keyword `"ouvre le projet"` matche sandbox.
+→ Route directe : `SandboxCrew`.
