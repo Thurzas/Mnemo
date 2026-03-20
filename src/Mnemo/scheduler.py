@@ -482,6 +482,195 @@ def action_reminder(payload: dict) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Phase 7.4 — Boucle d'autonomie GOAP (sandbox projects)
+# ══════════════════════════════════════════════════════════════════
+
+# Actions considérées comme risquées → confirmation utilisateur requise
+_RISKY_KEYWORDS = ("shell", "npm", "pip", "node", "python", "docker", "install", "build", "run")
+
+
+def _is_risky(action_label: str) -> bool:
+    label = action_label.lower()
+    return any(k in label for k in _RISKY_KEYWORDS)
+
+
+def _check_command_available(cmd: str) -> bool:
+    import subprocess
+    try:
+        subprocess.run(cmd.split(), capture_output=True, timeout=3)
+        return True
+    except Exception:
+        return False
+
+
+def _build_project_world_state(project_dir: Path) -> dict:
+    """WorldState minimal pour évaluer les préconditions d'un projet sandbox."""
+    return {
+        "sandbox_open":      True,
+        "sandbox_readonly":  False,
+        "web_available":     True,
+        "node_available":    _check_command_available("node --version"),
+        "python_available":  _check_command_available("python3 --version"),
+    }
+
+
+def _push_pending_confirmation(
+    username: str, slug: str, step_label: str, action_label: str
+) -> None:
+    """
+    Ajoute une action risquée dans pending_confirmations du world_state utilisateur.
+    Évite les doublons (même action + même projet).
+    """
+    import uuid
+    ws_path = DATA_PATH / "users" / username / "world_state.json"
+    ws: dict = {}
+    if ws_path.exists():
+        try:
+            ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    confirmations: list = ws.get("pending_confirmations", [])
+    # Dédoublonnage
+    if any(c.get("action") == action_label and c.get("project_slug") == slug
+           for c in confirmations):
+        return
+
+    confirmations.append({
+        "id":           uuid.uuid4().hex[:12],
+        "project_slug": slug,
+        "username":     username,
+        "step_label":   step_label,
+        "action":       action_label,
+        "description":  (f"Exécuter '{action_label}' "
+                         f"pour l'étape '{step_label}' (projet {slug})"),
+        "ts":           datetime.now().isoformat(timespec="seconds"),
+    })
+    ws["pending_confirmations"] = confirmations
+    ws_path.write_text(
+        json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    log.info(f"[autonomy] Confirmation en attente : {action_label!r} → {slug} ({username})")
+
+
+def _advance_project(
+    username: str, db_path: Path, manifest: dict, project_dir: Path
+) -> None:
+    """
+    Tente d'avancer d'une étape sur un projet sandbox actif.
+
+    Logique :
+      1. Lit plan.md, trouve la première étape non cochée
+      2. Interroge le KG pour les actions disponibles pour cette étape
+      3. Pour chaque action : vérifie les préconditions vs world_state projet
+      4a. Préconditions OK + non risquée → exécute (sandbox_write, sandbox_read)
+      4b. Préconditions OK + risquée    → pending_confirmations
+      4c. Préconditions KO              → log et passe à la suivante
+      5. Toutes les étapes cochées → marque le projet "done"
+    """
+    from Mnemo.tools.kg_tools import kg_actions_for_step
+    from Mnemo.goap.planner import build_action_from_kg
+
+    slug      = manifest["slug"]
+    plan_path = project_dir / "plan.md"
+    if not plan_path.exists():
+        return
+
+    plan_text = plan_path.read_text(encoding="utf-8", errors="replace")
+    steps = [
+        (bool(re.match(r'- \[x\]', line, re.IGNORECASE)), re.sub(r'^- \[[ xX]\]\s*', '', line).strip())
+        for line in plan_text.splitlines()
+        if re.match(r'\s*- \[[ xX]\]', line)
+    ]
+
+    if not steps:
+        return
+
+    # Projet terminé si toutes les étapes sont cochées
+    if all(done for done, _ in steps):
+        manifest["status"] = "done"
+        (project_dir / "project.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        log.info(f"[autonomy] Projet {slug!r} terminé pour {username!r}")
+        return
+
+    # Première étape non cochée
+    step_label = next((label for done, label in steps if not done), None)
+    if not step_label:
+        return
+
+    actions_rows = kg_actions_for_step(db_path, step_label)
+    if not actions_rows:
+        log.debug(f"[autonomy] Aucune action KG pour '{step_label}' — {slug}")
+        return
+
+    world_state = _build_project_world_state(project_dir)
+
+    for row in actions_rows:
+        action_label = row["dst_label"]
+        action       = build_action_from_kg(db_path, action_label)
+
+        # Préconditions satisfaites ?
+        preconds_ok = all(
+            world_state.get(k) == v
+            for k, v in action.preconditions.items()
+        )
+        if not preconds_ok:
+            log.debug(f"[autonomy] Préconditions KO pour {action_label!r} — {slug}")
+            continue
+
+        if _is_risky(action_label):
+            _push_pending_confirmation(username, slug, step_label, action_label)
+        else:
+            # Action non risquée : log uniquement pour l'instant
+            # (l'exécution effective viendra avec les outils SandboxCrew)
+            log.info(
+                f"[autonomy] Action non risquée disponible : {action_label!r} "
+                f"→ étape '{step_label}' ({slug}/{username})"
+            )
+        break  # une action par tick par projet
+
+
+def _goap_autonomy_tick() -> None:
+    """
+    Tick de la boucle d'autonomie Phase 7.4.
+    Scanne tous les projets sandbox actifs de tous les utilisateurs.
+    Appelé toutes les 60s depuis run_scheduler().
+    """
+    users_dir = DATA_PATH / "users"
+    if not users_dir.exists():
+        return
+
+    for user_dir in sorted(users_dir.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        username = user_dir.name
+        db_path  = user_dir / "memory.db"
+        if not db_path.exists():
+            continue
+
+        projects_dir = user_dir / "projects"
+        if not projects_dir.exists():
+            continue
+
+        for project_dir in sorted(projects_dir.iterdir()):
+            manifest_file = project_dir / "project.json"
+            if not manifest_file.exists():
+                continue
+            try:
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+                if manifest.get("status") != "in_progress":
+                    continue
+                _advance_project(username, db_path, manifest, project_dir)
+            except Exception as e:
+                log.warning(
+                    f"[autonomy] Erreur sur {username}/{project_dir.name} : {e}",
+                    exc_info=True,
+                )
+
+
+# ══════════════════════════════════════════════════════════════════
 # Dispatch
 # ══════════════════════════════════════════════════════════════════
 
@@ -579,6 +768,12 @@ def run_scheduler() -> None:
                     mark_error(tid, str(e))
         except Exception as e:
             log.error(f"Erreur boucle : {e}", exc_info=True)
+
+        # Phase 7.4 — Boucle d'autonomie GOAP
+        try:
+            _goap_autonomy_tick()
+        except Exception as e:
+            log.error(f"[autonomy] Erreur tick : {e}", exc_info=True)
 
         time.sleep(60)
 
