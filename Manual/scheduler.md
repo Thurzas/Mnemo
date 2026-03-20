@@ -113,6 +113,59 @@ get_due_tasks()  -> taches pending dont next_run <= now
 
 ---
 
+## Couche 3 : Boucle d'autonomie GOAP
+
+Le scheduler intègre une troisième couche qui s'exécute en parallèle de la boucle principale (tick 60s) : `_goap_autonomy_tick()`. Elle pilote l'avancement automatique des projets sandbox `in_progress`.
+
+### `_goap_autonomy_tick()`
+
+Appelé à chaque tick. Scanne tous les projets avec `status=in_progress` dans `users/*/projects/*/project.json`.
+
+Pour chaque projet trouvé :
+1. Charge `plan.md` et liste les étapes non cochées (`- [ ] ...`)
+2. Appelle `_advance_project(project, step)` sur la première étape non cochée
+3. Si toutes les étapes sont cochées → marque le projet `done`
+
+### `_advance_project(project, step_text)`
+
+Évalue les préconditions GOAP pour l'étape en cours :
+1. Interroge le HP-KG (`goap/planner.py`) pour déterminer l'action GOAP correspondant à l'étape
+2. Consulte `world_state.json` pour vérifier si les préconditions sont satisfaites
+3. Dispatch selon le type d'action :
+
+| Type d'action | Comportement |
+|---------------|-------------|
+| `sandbox_read`, `web_search`, `memory_read` | Exécution automatique sans confirmation |
+| `sandbox_shell`, `npm`, `pip`, `python`, `file_write` | Ajout dans `pending_confirmations` |
+| Inconnu / préconditions manquantes | Loggé dans `logs/commands.log`, étape ignorée ce tick |
+
+### `pending_confirmations` — format et déduplication
+
+Les actions risquées sont écrites dans `users/<username>/world_state.json` sous la clé `pending_confirmations` :
+
+```json
+{
+  "pending_confirmations": [
+    {
+      "id": "proj_waifuclawd_step_2_1711234567",
+      "project_slug": "waifuclawd",
+      "step": "Installer les dépendances npm",
+      "action": "sandbox_shell",
+      "command": "npm install",
+      "created_at": "2026-03-20T10:30:00"
+    }
+  ]
+}
+```
+
+**Déduplication :** avant d'ajouter une entrée, le scheduler vérifie que l'`id` (construit depuis `<slug>_step_<n>_<timestamp>`) n'est pas déjà présent. Une confirmation en attente pour la même étape ne génère pas de doublon.
+
+**Consommation :** l'API REST (`GET /api/confirmations`, `POST /api/confirmations/{id}`) expose ces entrées au dashboard. L'approbation déclenche l'exécution réelle de la commande dans le projet ; le rejet supprime l'entrée sans exécution.
+
+Voir [sandbox.md](sandbox.md) pour la documentation complète des confirmations.
+
+---
+
 ## Couche transverse : `tools/scheduler_tasks.py` (CRUD + mirror)
 
 ### Format cron simplifie

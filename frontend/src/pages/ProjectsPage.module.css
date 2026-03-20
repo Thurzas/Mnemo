@@ -283,6 +283,96 @@
   padding: 0.25rem;
 }
 
+/* ── Confirmations GOAP ── */
+
+.confirmPanel {
+  background: #1e1e2e;
+  border-bottom: 1px solid #fab3872a;
+  padding: 0.5rem 1rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.confirmTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fab387;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.confirmCard {
+  background: #181825;
+  border: 1px solid #fab38733;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.confirmDesc {
+  font-size: 12px;
+  color: #cdd6f4;
+  line-height: 1.4;
+}
+
+.confirmMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.confirmBadge {
+  background: #313244;
+  color: #fab387;
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.confirmTs {
+  color: #585b70;
+  font-size: 11px;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btnApprove {
+  background: #a6e3a1;
+  color: #1e1e2e;
+  border: none;
+  border-radius: 4px;
+  padding: 0.2rem 0.7rem;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btnApprove:hover    { background: #94e2d5; }
+.btnApprove:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btnReject {
+  background: transparent;
+  color: #f38ba8;
+  border: 1px solid #f38ba8;
+  border-radius: 4px;
+  padding: 0.2rem 0.7rem;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btnReject:hover    { background: #f38ba822; }
+.btnReject:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ── Terminal ── */
 
 .terminal {
