@@ -12,7 +12,23 @@ GOAP-ready : CREW_REGISTRY est l'embryon d'ActionLibrary.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date as _date
+
+
+def _extract_hints(message: str) -> list[str]:
+    """
+    Extrait les noms de fichiers/modules mentionnés dans le message utilisateur.
+    Cherche les patterns : fichier.py, module_name, src/..., tests/...
+    """
+    hints = []
+    # Fichiers .py explicites
+    hints += re.findall(r'\b[\w/]+\.py\b', message)
+    # Chemins src/ ou tests/
+    hints += re.findall(r'\b(?:src|tests)/[\w/]+\b', message)
+    # Noms snake_case qui ressemblent à des modules (ex: memory_tools, plan_tools)
+    hints += re.findall(r'\b[a-z][a-z0-9]+(?:_[a-z0-9]+){1,}\b', message)
+    return list(dict.fromkeys(hints))[:5]  # déduplique, max 5
 
 from .context import RouterResult
 
@@ -28,7 +44,7 @@ def _get_crew_registry() -> dict:
     """Retourne le registre — imports différés pour éviter les circulaires."""
     from Mnemo.crew import (
         ConversationCrew, ShellCrew, CalendarWriteCrew,
-        SchedulerCrew, NoteWriterCrew, BriefingCrew,
+        SchedulerCrew, NoteWriterCrew, BriefingCrew, SandboxCrew,
     )
     return {
         "conversation": ConversationCrew,
@@ -37,6 +53,7 @@ def _get_crew_registry() -> dict:
         "scheduler":    SchedulerCrew,
         "note":         NoteWriterCrew,
         "briefing":     BriefingCrew,
+        "sandbox":      SandboxCrew,
     }
 
 
@@ -106,21 +123,59 @@ def dispatch(
         "_web_mode":         metadata.get("_web_mode", False),
     }
 
+    try:
+        from Mnemo.status import emit as _emit
+    except ImportError:
+        def _emit(sid, text): pass  # fallback no-op
+
     if route == "shell":
         from Mnemo.crew import ShellCrew
+        _emit(session_id, "Exécution de la commande...")
         return ShellCrew().run({**base_inputs, "shell_command": shell_command})
 
     if route == "note":
         from Mnemo.crew import NoteWriterCrew
+        _emit(session_id, "Écriture de la note...")
         return NoteWriterCrew().run({"user_message": user_message})
+
+    if route == "plan":
+        from Mnemo.crew import PlannerCrew, ReconnaissanceCrew
+        needs_recon   = metadata.get("needs_recon", False)
+        recon_context = "(non disponible)"
+
+        if needs_recon:
+            hints = _extract_hints(user_message)
+            hints_label = ", ".join(hints) if hints else "fichiers clés"
+            _emit(session_id, f"Reconnaissance du code : {hints_label}...")
+            recon_result  = ReconnaissanceCrew().run({
+                "goal":  user_message,
+                "hints": hints,
+            })
+            recon_context = recon_result.get("summary", "(non disponible)")
+            _emit(session_id, "Reconnaissance terminée")
+
+        _emit(session_id, "Planification en cours...")
+        return PlannerCrew().run({
+            **base_inputs,
+            "needs_recon":   needs_recon,
+            "recon_context": recon_context,
+        })
 
     # Tous les autres crews (calendar, scheduler, briefing) — interface uniforme .run()
     crew_cls = registry.get(route)
     if crew_cls and route != "conversation":
+        _STATUS_LABELS = {
+            "calendar":  "Mise à jour du calendrier...",
+            "scheduler": "Création de la tâche planifiée...",
+            "briefing":  "Génération du briefing...",
+            "sandbox":   "Travail dans le sandbox projet...",
+        }
+        _emit(session_id, _STATUS_LABELS.get(route, f"Crew {route}..."))
         return crew_cls().run({**base_inputs})
 
     # Conversation (défaut) — interface .crew().kickoff()
     from Mnemo.crew import ConversationCrew
+    _emit(session_id, "Recherche en mémoire...")
     conv_result = ConversationCrew().crew().kickoff(inputs={
         **base_inputs,
         "session_id":     session_id,

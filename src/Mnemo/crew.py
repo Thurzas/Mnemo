@@ -11,6 +11,12 @@ from Mnemo.tools.memory_tools import (
 )
 from Mnemo.tools.calendar_tools import GetCalendarTool
 from Mnemo.tools.web_tools import WebSearchTool
+from Mnemo.tools.sandbox_tools import (
+    SandboxReadTool,
+    SandboxWriteTool,
+    SandboxShellTool,
+    SandboxListTool,
+)
 
 MODEL    = os.getenv("MODEL", "ollama/mistral")
 API_BASE = os.getenv("API_BASE", "http://localhost:11434")
@@ -639,3 +645,502 @@ class SchedulerCrew:
             return (confirmation or "Planification partielle.") + suffix
 
         return confirmation or "Tâches planifiées."
+
+
+# ══════════════════════════════════════════════════════════════
+# ReconnaissanceCrew — Phase 6 : exploration code pré-planification
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class ReconnaissanceCrew:
+    """
+    Crew de reconnaissance : lit le code source pertinent et produit
+    un recon_context structuré pour PlannerCrew.
+
+    La lecture des fichiers est faite côté Python (pas de LLM).
+    Le LLM ne reçoit que les contenus déjà chargés — il ne peut pas halluciner
+    des fichiers qu'il n'a pas lus.
+
+    Flux :
+      1. Python résout les hints (noms de modules → chemins de fichiers)
+      2. Python lit les fichiers et tronque si nécessaire
+      3. LLM synthétise → JSON {files_read, symbols_found, summary, ...}
+      4. recon_context stocké dans world_state.json["recon_context"]
+    """
+    agents_config = "config/recon_agents.yaml"
+    tasks_config  = "config/recon_tasks.yaml"
+
+    # Taille max du contenu d'un fichier transmis au LLM (en caractères)
+    _MAX_FILE_CHARS = 3000
+
+    @agent
+    def recon_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["recon_agent"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=2,
+            llm=_llm(0.0),
+        )
+
+    @task
+    def recon_task(self) -> Task:
+        return Task(config=self.tasks_config["recon_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    @staticmethod
+    def _resolve_hints(hints: list[str]) -> list[str]:
+        """
+        Convertit des noms de modules/fichiers en chemins réels.
+        Cherche dans src/ et tests/ à partir du répertoire courant.
+        """
+        import glob as _glob
+        resolved = []
+        for hint in hints:
+            # Chemin direct
+            from pathlib import Path as _Path
+            p = _Path(hint)
+            if p.exists():
+                resolved.append(str(p))
+                continue
+            # Recherche par nom de fichier
+            name = _Path(hint).name
+            if not name.endswith(".py"):
+                name += ".py"
+            matches = _glob.glob(f"**/{name}", recursive=True)
+            resolved.extend(matches[:2])  # max 2 fichiers par hint
+        return list(dict.fromkeys(resolved))  # déduplique en préservant l'ordre
+
+    @staticmethod
+    def _load_files(paths: list[str], max_chars: int) -> dict[str, str]:
+        """Lit les fichiers et tronque si nécessaire."""
+        from pathlib import Path as _Path
+        contents = {}
+        for path in paths:
+            try:
+                text = _Path(path).read_text(encoding="utf-8", errors="ignore")
+                if len(text) > max_chars:
+                    text = text[:max_chars] + f"\n... [tronqué à {max_chars} caractères]"
+                contents[path] = text
+            except OSError:
+                contents[path] = f"(impossible de lire : {path})"
+        return contents
+
+    def run(self, inputs: dict) -> dict:
+        """
+        Exécute la reconnaissance et retourne le recon_context (dict).
+        Met aussi à jour world_state.json["recon_context"].
+
+        Args:
+            inputs : {"goal": str, "hints": list[str] | str}
+
+        Returns:
+            recon_context dict avec files_read, symbols_found, summary, etc.
+        """
+        import json as _json
+        from Mnemo.tools.memory_tools import save_memory_gap_report, load_world_state
+
+        goal  = inputs.get("goal", "")
+        hints = inputs.get("hints", [])
+        if isinstance(hints, str):
+            hints = [h.strip() for h in hints.split(",") if h.strip()]
+
+        # ── Lecture Python (sans LLM) ──────────────────────────────────
+        resolved_paths = self._resolve_hints(hints)
+        file_contents  = self._load_files(resolved_paths, self._MAX_FILE_CHARS)
+
+        file_contents_str = "\n\n".join(
+            f"### {path}\n```python\n{content}\n```"
+            for path, content in file_contents.items()
+        ) if file_contents else "(non disponible — aucun fichier trouvé)"
+
+        hints_str = ", ".join(hints) if hints else "(aucun hint fourni)"
+
+        # ── Synthèse LLM ───────────────────────────────────────────────
+        try:
+            result = self.crew().kickoff(inputs={
+                "goal":          goal,
+                "hints":         hints_str,
+                "file_contents": file_contents_str,
+            })
+            raw   = result.raw.strip() if result.raw else ""
+            start = raw.find("{")
+            end   = raw.rfind("}") + 1
+            if start == -1 or end <= start:
+                raise ValueError("JSON introuvable")
+            recon_context = _json.loads(raw[start:end])
+        except Exception as e:
+            recon_context = {
+                "files_read":    resolved_paths,
+                "symbols_found": {},
+                "existing_tests": [],
+                "key_imports":   [],
+                "entry_points":  [],
+                "todos_stubs":   [],
+                "summary":       f"Reconnaissance partielle — erreur LLM : {e}",
+            }
+
+        # ── Persistance dans world_state.json ─────────────────────────
+        try:
+            ws = load_world_state()
+            ws["recon_context"] = recon_context
+            ws["knows_module"]  = bool(resolved_paths)
+            from Mnemo.context import get_data_dir
+            import json as _j
+            (get_data_dir() / "world_state.json").write_text(
+                _j.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        return recon_context
+
+
+# ══════════════════════════════════════════════════════════════
+# PlannerCrew — Phase 6 : planification persistante (plan.md)
+# ══════════════════════════════════════════════════════════════
+
+# ── Détection d'actions immédiates (Phase 6.5) ────────────────
+
+_WEB_INTENT_KEYWORDS = [
+    "recherche", "cherche", "trouve", "explore", "documente",
+    "ressources", "sources", "références", "tutoriels", "liens",
+    "web", "internet", "documentation officielle",
+]
+
+_RECON_INTENT_KEYWORDS = [
+    "analyse le code", "explore le code", "lis le fichier",
+    "comprendre la structure", "inspecte", "examine",
+]
+
+
+def _detect_immediate_actions(step_text: str, crew_target: str) -> dict | None:
+    """
+    Analyse une étape de plan et retourne l'action immédiate détectée, ou None.
+
+    Retourne un dict :
+      {"type": "web_search", "query": "React.js documentation tutorial"}
+      {"type": "recon",      "hints": ["react", "components"]}
+      None  → étape non exécutable immédiatement
+    """
+    import re as _re
+    text_lower = step_text.lower()
+
+    # ── Détection recon ───────────────────────────────────────
+    if crew_target == "reconnaissance" or any(kw in text_lower for kw in _RECON_INTENT_KEYWORDS):
+        # Extraire les hints (noms de fichiers/modules potentiels)
+        hints = []
+        hints += _re.findall(r'\b[\w/]+\.py\b', step_text)
+        hints += _re.findall(r'\b(?:src|tests)/[\w/]+\b', step_text)
+        hints += _re.findall(r'\b[a-z][a-z0-9]+(?:_[a-z0-9]+){1,}\b', step_text)
+        hints = list(dict.fromkeys(hints))[:5]
+        return {"type": "recon", "hints": hints}
+
+    # ── Détection web search ──────────────────────────────────
+    if crew_target in ("web", "conversation") and any(kw in text_lower for kw in _WEB_INTENT_KEYWORDS):
+        # Extraire la query depuis le texte de l'étape
+        # Supprime les mots d'action au début pour garder le sujet
+        query = _re.sub(
+            r'^(?:recherche(?:r|z)?|cherche(?:r|z)?|trouve(?:r|z)?|explore(?:r|z)?|documente(?:r|z)?)\s+',
+            '', step_text, flags=_re.IGNORECASE
+        ).strip()
+        if not query:
+            query = step_text
+        return {"type": "web_search", "query": query}
+
+    return None
+
+@CrewBase
+class PlannerCrew:
+    """
+    Crew pour la décomposition d'un goal complexe en plan persistant (plan.md).
+
+    Flux :
+      1. Reçoit goal + recon_context (optionnel) + memory_gap_summary + needs_recon
+      2. Si needs_recon=True et recon_context vide → insère étape "Explorer le code"
+      3. LLM décompose le goal → JSON {title, steps, crew_targets, context_summary}
+      4. PlanStore.create() écrit plan.md dans /data/plans/
+      5. Retourne la confirmation avec le chemin du plan créé
+    """
+    agents_config = "config/planner_agents.yaml"
+    tasks_config  = "config/planner_tasks.yaml"
+
+    @agent
+    def planner_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["planner_agent"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=2,
+            llm=_llm(0.2),
+        )
+
+    @task
+    def planner_task(self) -> Task:
+        return Task(config=self.tasks_config["planner_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        import json as _json
+        from Mnemo.tools.plan_tools import PlanStore
+        from Mnemo.tools.memory_tools import load_world_state
+
+        goal         = inputs.get("user_message", "")
+        recon_context = inputs.get("recon_context", "(non disponible)")
+        needs_recon  = inputs.get("needs_recon", False)
+
+        # Résumé des lacunes mémoire depuis le WorldState
+        ws = load_world_state()
+        last_report  = ws.get("last_gap_report", {})
+        blocking     = last_report.get("blocking_gaps", [])
+        gap_summary  = "\n".join(
+            f"- [BLOQUANT] {g.get('description', '')}" for g in blocking
+        ) if blocking else "(aucune lacune bloquante connue)"
+
+        try:
+            result = self.crew().kickoff(inputs={
+                "goal":             goal,
+                "recon_context":    recon_context,
+                "memory_gap_summary": gap_summary,
+            })
+            raw = result.raw.strip() if result.raw else ""
+            start = raw.find("{")
+            end   = raw.rfind("}") + 1
+            if start == -1 or end <= start:
+                raise ValueError("JSON introuvable dans la réponse du LLM")
+
+            plan_data     = _json.loads(raw[start:end])
+            title         = plan_data.get("title", goal[:60])
+            steps         = plan_data.get("steps", [])
+            crew_targets  = plan_data.get("crew_targets", {})
+            ctx_summary   = plan_data.get("context_summary", "")
+
+            if not steps:
+                return "Le planificateur n'a pas pu décomposer ce goal. Peux-tu le reformuler ?"
+
+            plan_path = PlanStore.create(
+                goal         = goal,
+                steps        = steps,
+                context      = ctx_summary,
+                crew_targets = crew_targets,
+            )
+
+            lines = [f"**Plan créé** : `{plan_path.name}`", f"**Goal** : {goal}", ""]
+            for i, step in enumerate(steps, 1):
+                crew_t = crew_targets.get(step, "")
+                suffix = f" _(crew : {crew_t})_" if crew_t else ""
+                lines.append(f"{i}. {step}{suffix}")
+
+            plan_text = "\n".join(lines)
+
+            # Phase 6.5 — Déclenchement immédiat : détecter si l'étape 1 est exécutable maintenant
+            from Mnemo.tools.memory_tools import _apply_world_state_update
+            from pathlib import Path as _Path
+
+            first_step  = steps[0]
+            crew_target = crew_targets.get(first_step, "conversation")
+            immediate   = _detect_immediate_actions(first_step, crew_target)
+
+            # Données étape 2 (pour pending_plan_step après exécution étape 1)
+            step2_data: dict | None = None
+            if len(steps) > 1:
+                step2 = steps[1]
+                step2_data = {
+                    "plan_id":    plan_path.stem,
+                    "plan_path":  str(plan_path),
+                    "step_index": 1,
+                    "step_total": len(steps),
+                    "step_label": step2,
+                    "crew_target": crew_targets.get(step2, "conversation"),
+                }
+
+            if immediate is None:
+                # Pas d'action immédiate → plan seul
+                _apply_world_state_update({
+                    "pending_plan_step": {
+                        "plan_id":    plan_path.stem,
+                        "plan_path":  str(plan_path),
+                        "step_index": 0,
+                        "step_total": len(steps),
+                        "step_label": first_step,
+                        "crew_target": crew_target,
+                    }
+                })
+                return plan_text
+
+            elif immediate["type"] == "recon":
+                # Exécution autonome de la reconnaissance
+                try:
+                    recon = ReconnaissanceCrew().run({
+                        "goal":  first_step,
+                        "hints": immediate["hints"],
+                    })
+                    from Mnemo.tools.plan_tools import PlanStore as _PS
+                    _PS.mark_done(_Path(plan_path), first_step)
+                    summary = recon.get("summary", "") if isinstance(recon, dict) else str(recon)
+                    _PS.append_log(_Path(plan_path), f"Recon terminé : {summary[:200]}")
+                    _apply_world_state_update(
+                        {"pending_plan_step": step2_data} if step2_data else {}
+                    )
+                    # Ligne 1 marquée ✅ dans le plan affiché
+                    lines[3] = f"1. ✅ {first_step}"  # index 3 = première étape (après header + goal + blank)
+                    enriched = "\n".join(lines)
+                    enriched += f"\n\n---\n**Reconnaissance terminée — Étape 1 :**\n{summary[:500]}"
+                    if step2_data:
+                        enriched += f"\n\n→ **Étape 2 prête.** Confirme pour continuer."
+                    return enriched
+                except Exception as e_recon:
+                    # En cas d'échec recon → fallback plan seul
+                    _apply_world_state_update({
+                        "pending_plan_step": {
+                            "plan_id":    plan_path.stem,
+                            "plan_path":  str(plan_path),
+                            "step_index": 0,
+                            "step_total": len(steps),
+                            "step_label": first_step,
+                            "crew_target": crew_target,
+                        }
+                    })
+                    return plan_text
+
+            elif immediate["type"] == "web_search":
+                # Requiert confirmation → déléguer à api.py via pending_web_search
+                _apply_world_state_update({
+                    "pending_plan_step": {
+                        "plan_id":    plan_path.stem,
+                        "plan_path":  str(plan_path),
+                        "step_index": 0,
+                        "step_total": len(steps),
+                        "step_label": first_step,
+                        "crew_target": crew_target,
+                    },
+                    "pending_web_search": {
+                        "plan_id":    plan_path.stem,
+                        "plan_path":  str(plan_path),
+                        "step_index": 0,
+                        "query":      immediate["query"],
+                        "step_label": first_step,
+                        "step2_data": step2_data,
+                    },
+                })
+                return plan_text
+
+            # Fallback (ne devrait pas arriver)
+            _apply_world_state_update({
+                "pending_plan_step": {
+                    "plan_id":    plan_path.stem,
+                    "plan_path":  str(plan_path),
+                    "step_index": 0,
+                    "step_total": len(steps),
+                    "step_label": first_step,
+                    "crew_target": crew_target,
+                }
+            })
+            return plan_text
+
+        except Exception as e:
+            return f"Erreur lors de la planification : {e}"
+
+
+# ══════════════════════════════════════════════════════════════
+# SandboxCrew — Phase 7 : environnement de travail isolé
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class SandboxCrew:
+    """
+    Crew qui travaille dans un projet sandbox isolé (dépôt git).
+    Reçoit : project_slug, project_goal, current_step, user_message.
+    Dispose des outils SandboxRead/Write/Shell/List.
+    Chaque écriture est automatiquement commitée en git.
+    """
+    agents_config = "config/sandbox_agents.yaml"
+    tasks_config  = "config/sandbox_tasks.yaml"
+
+    @agent
+    def sandbox_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["sandbox_agent"],
+            verbose=False,
+            allow_delegation=False,
+            tools=[
+                SandboxReadTool(),
+                SandboxWriteTool(),
+                SandboxShellTool(),
+                SandboxListTool(),
+            ],
+            max_iter=12,
+            llm=_llm(0.2),
+        )
+
+    @task
+    def sandbox_task(self) -> Task:
+        return Task(config=self.tasks_config["sandbox_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        """
+        Point d'entrée depuis dispatch().
+        Prépare le project_context (liste fichiers + état git) et kickoff.
+        """
+        from Mnemo.tools.sandbox_tools import (
+            get_project, create_project, list_files, _project_path, _git
+        )
+
+        slug        = inputs.get("project_slug", "")
+        goal        = inputs.get("project_goal", inputs.get("user_message", ""))
+        user_msg    = inputs.get("user_message", "")
+        current_step = inputs.get("current_step", "(voir plan.md)")
+
+        # Création automatique si le projet n'existe pas encore
+        if not slug:
+            import re as _re
+            slug = _re.sub(r"[^\w\s-]", "", goal.lower())[:30].strip()
+            slug = _re.sub(r"[\s_]+", "-", slug).strip("-") or "projet"
+        project = get_project(slug)
+        if project is None:
+            name = inputs.get("project_name", goal[:60])
+            project = create_project(slug, name, goal)
+
+        # Context projet : fichiers + dernier commit
+        root  = _project_path(slug)
+        files = list_files(slug)
+        _, log_out = _git(root, "log", "--oneline", "-5")
+        project_context = (
+            f"Fichiers : {', '.join(files[:20]) or '(vide)'}\n"
+            f"Derniers commits :\n{log_out or '(aucun)'}"
+        )
+
+        result = self.crew().kickoff(inputs={
+            **inputs,
+            "project_slug":    slug,
+            "project_goal":    project.get("goal", goal),
+            "current_step":    current_step,
+            "project_context": project_context,
+            "user_message":    user_msg,
+        })
+        return result.raw.strip()

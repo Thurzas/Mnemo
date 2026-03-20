@@ -4,7 +4,7 @@ import json
 import uuid
 import warnings
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
@@ -51,6 +51,8 @@ from Mnemo.tools.memory_tools import (
     _sessions_dir, _markdown_path,
     score_and_record_chunk_usage,
     adapt_weights_if_ready,
+    MemoryGap, MemoryGapReport, save_memory_gap_report,
+    _apply_world_state_update,
 )
 from Mnemo.tools.ingest_tools import ingest_file, list_ingested_documents
 from Mnemo.tools.calendar_tools import (
@@ -266,7 +268,7 @@ def _collect_answers(questions: list[dict]) -> list[dict]:
     return answers
 
 
-def curiosity_session(session_content: str) -> None:
+def curiosity_session(session_content: str, session_id: str = "") -> None:
     """
     Lance une session de questionnement proactif post-consolidation.
 
@@ -301,12 +303,32 @@ def curiosity_session(session_content: str) -> None:
     if remaining_slots > 0 and session_content:
         print("\n🔍 Analyse contextuelle en cours...")
         try:
+            from Mnemo.tools.memory_tools import (
+                _build_memory_overview, retrieve_all,
+                _compress_chunks, _record_retrieved_chunks,
+            )
+            memory_overview = _build_memory_overview()
+            chunks_recent   = retrieve_all(
+                session_content[:400], top_k_final=3, profile="curiosity"
+            )
+            if session_id and chunks_recent:
+                _record_retrieved_chunks(
+                    session_id, [c["id"] for c in chunks_recent], profile="curiosity"
+                )
+            memory_recent = _compress_chunks(chunks_recent, max_tokens=300)
+        except Exception as e:
+            print(f"  ⚠️  Retrieval curiosity ignoré : {e}")
+            memory_overview = memory_content[:1500]
+            memory_recent   = ""
+
+        try:
             structural_summary = "\n".join(
                 f"- {g['question']}" for g in structural_gaps
             ) or "Aucun trou structurel détecté."
 
             result = CuriosityCrew().crew().kickoff(inputs={
-                "memory_content":     memory_content[:6000],
+                "memory_overview":    memory_overview,
+                "memory_recent":      memory_recent,
                 "session_summary":    session_content,
                 "skipped_questions":  skipped_text,
                 "structural_gaps":    structural_summary,
@@ -318,13 +340,67 @@ def curiosity_session(session_content: str) -> None:
             end   = raw.rfind("}") + 1
             if start != -1 and end > start:
                 detection = json.loads(raw[start:end])
-                if detection.get("has_gaps"):
-                    for q in detection.get("questions", [])[:remaining_slots]:
-                        q_id = q.get("id") or compute_hash(q.get("question", ""))
-                        if q_id not in skipped_ids:
-                            q["id"]   = q_id
-                            q["type"] = "contextual"
-                            contextual_gaps.append(q)
+                # Nouveau format : blocking_gaps + enriching_gaps
+                for gap_dict in detection.get("blocking_gaps", []):
+                    q_id = compute_hash(gap_dict.get("question", "") or gap_dict.get("description", ""))
+                    if q_id not in skipped_ids and gap_dict.get("question"):
+                        gap_dict["id"]   = q_id
+                        gap_dict["type"] = "contextual_blocking"
+                        contextual_gaps.append(gap_dict)
+                for gap_dict in detection.get("enriching_gaps", []):
+                    q_id = compute_hash(gap_dict.get("question", "") or gap_dict.get("description", ""))
+                    if q_id not in skipped_ids and gap_dict.get("question"):
+                        gap_dict["id"]   = q_id
+                        gap_dict["type"] = "contextual_enriching"
+                        contextual_gaps.append(gap_dict)
+                # Complétude mémoire pour le MemoryGapReport
+                llm_completeness = float(detection.get("memory_completeness", 0.0))
+                llm_blocking  = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("description", ""),
+                        affects     = g.get("affects", []),
+                        priority    = g.get("priority", 1),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in detection.get("blocking_gaps", [])
+                ]
+                llm_enriching = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("description", ""),
+                        affects     = g.get("affects", []),
+                        priority    = g.get("priority", 3),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in detection.get("enriching_gaps", [])
+                ]
+                # Lacunes structurelles → bloquantes par nature
+                struct_as_gaps = [
+                    MemoryGap(
+                        section     = g.get("section", ""),
+                        subsection  = g.get("subsection", ""),
+                        description = g.get("question", ""),
+                        priority    = g.get("priority", 2),
+                        label       = g.get("label", ""),
+                        question    = g.get("question", ""),
+                    )
+                    for g in structural_gaps
+                ]
+                gap_report = MemoryGapReport(
+                    assessed_at         = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+                    memory_completeness = llm_completeness,
+                    blocking_gaps       = struct_as_gaps + llm_blocking,
+                    enriching_gaps      = llm_enriching,
+                )
+                save_memory_gap_report(gap_report)
+                print(f"  📊 Complétude mémoire : {llm_completeness:.0%} | "
+                      f"{len(gap_report.blocking_gaps)} bloquante(s), "
+                      f"{len(gap_report.enriching_gaps)} enrichissante(s)")
         except Exception as e:
             print(f"  ⚠️  Analyse contextuelle ignorée : {e}")
 
@@ -452,14 +528,23 @@ def end_session(session_id: str) -> tuple:
     except Exception:
         pass
 
-    # Phase 5.4 — adaptation des poids si données suffisantes
+    # Phase 5.5 — adaptation des poids par profil si données suffisantes
     try:
-        adapt_weights_if_ready()
+        adapt_weights_if_ready("global")
+        for _profile in ("conversation", "briefing", "curiosity"):
+            adapt_weights_if_ready(_profile)
     except Exception:
         pass
 
     # Marque la session comme consolidée
     (_sessions_dir() / f"{session_id}.done").touch()
+
+    # ConsolidationCrew vient de modifier memory.md → la DB n'est plus synchro
+    try:
+        _apply_world_state_update({"memory_synced": False})
+    except Exception:
+        pass
+
     return result.raw, session_text
 
 
@@ -564,6 +649,25 @@ def run():
     # 2. Rattrape les sessions orphelines des runs précédents
     consolidate_orphan_sessions()
 
+    # 3. Plans actifs — propose la reprise si un plan est en cours
+    try:
+        from Mnemo.tools.plan_tools import check_active_plans, PlanRunner
+        active_plans = check_active_plans()
+        if active_plans:
+            plan = active_plans[0]
+            print(f"\n📋 Plan en cours détecté : `{plan.name}`")
+            print("   Veux-tu reprendre ce plan ? (o/n)")
+            try:
+                answer = input("   > ").strip().lower()
+                if answer in ("o", "oui", "y", "yes"):
+                    print("\n▶️  Reprise du plan...")
+                    summary = PlanRunner().run(plan)
+                    print(f"\n{summary}\n")
+            except (EOFError, KeyboardInterrupt):
+                pass
+    except Exception as _plan_e:
+        print(f"[WARN] Vérification plans actifs échouée : {_plan_e}")
+
     session_id = new_session_id()
     print(f"\n🧠 Agent démarré — session : {session_id}")
     print("Tape 'exit' pour terminer proprement.")
@@ -644,7 +748,7 @@ def run():
         # Questionnement proactif — déclenché même si le résumé est vide
         # (les trous structurels sont détectés par Python, pas par le LLM)
         try:
-            curiosity_session(session_text or session_summary or "")
+            curiosity_session(session_text or session_summary or "", session_id=session_id)
         except Exception as e:
             print(f"  ⚠️  Questionnement ignoré : {e}")
 
@@ -763,7 +867,7 @@ def debug_curiosity() -> None:
     print()
 
     # Lance le questionnaire avec un résumé de test
-    curiosity_session("Session de debug — test du questionnement proactif.")
+    curiosity_session("Session de debug — test du questionnement proactif.", session_id="debug")
 
 
 

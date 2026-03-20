@@ -13,7 +13,7 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 MODEL = os.getenv("MODEL", "ollama/mistral").replace("ollama/", "")
 _DATA  = Path(os.getenv("DATA_PATH", ".")).resolve()
 OUTPUT = _DATA / "training_data.jsonl"
-ROUTES      = ["conversation", "shell", "calendar", "scheduler", "note"]
+ROUTES      = ["conversation", "shell", "calendar", "scheduler", "note", "plan", "sandbox"]
 BATCH_SIZE  = 20
 
 ROUTE_PROMPTS = {
@@ -59,6 +59,32 @@ ROUTE_PROMPTS = {
         "- Taches recurrentes automatiques\n"
         "- Notifications differees\n"
         "- Routines automatisees\n"
+        "Reponds UNIQUEMENT avec JSON : {{\"messages\": [\"msg1\", \"msg2\", ...]}}\n"
+        "Genere exactement {n} messages varies."
+    ),
+    "sandbox": (
+        "Tu es un utilisateur parlant a Mnemo, un assistant IA personnel.\n"
+        "Genere {n} messages DIFFERENTS de type sandbox (travail actif dans un projet existant) :\n"
+        "- Reprendre/continuer un projet en cours (landing page, app, module...)\n"
+        "- Ouvrir ou retourner sur un projet specifique\n"
+        "- Travailler sur une feature dans un projet existant\n"
+        "- Continuer le developpement d une feature commencee\n"
+        "- Executer du code, des tests dans un projet\n"
+        "IMPORTANT : sandbox = travailler DANS un projet existant, pas planifier.\n"
+        "Exemples : ouvre le projet X, continue le projet Y, reprends le projet Z.\n"
+        "Reponds UNIQUEMENT avec JSON : {\"messages\": [\"msg1\", ...]}\n"
+        "Genere exactement {n} messages varies."
+    ),
+    "plan": (
+        "Tu es un utilisateur parlant a Mnemo, un assistant IA personnel.\n"
+        "Genere {n} messages DIFFERENTS de type plan (decomposition de projet en etapes) :\n"
+        "- Demandes de planification de projet ou feature (pas un rappel, pas un RDV)\n"
+        "- Decomposition d une tache complexe en etapes\n"
+        "- Organisation d un developpement logiciel\n"
+        "- Preparation d un projet (documentation, landing page, refactoring...)\n"
+        "- Demandes avec 'etapes', 'plan de travail', 'organiser le projet'\n"
+        "IMPORTANT : un plan c est une sequence d etapes, pas un rappel ni un evenement agenda.\n"
+        "Ne genere PAS de rappels ('rappelle-moi'), ni d evenements agenda, ni de commandes shell.\n"
         "Reponds UNIQUEMENT avec JSON : {{\"messages\": [\"msg1\", \"msg2\", ...]}}\n"
         "Genere exactement {n} messages varies."
     ),
@@ -150,6 +176,38 @@ SEED_DATA = [
     {"text": "alerte dans 45 min fin de reunion", "route": "scheduler"},
     {"text": "tous les 1er du mois rappel backup", "route": "scheduler"},
     {"text": "notifie dans 2h d aller chercher les enfants", "route": "scheduler"},
+    # ── sandbox ───────────────────────────────────────────────────────
+    {"text": "ouvre le projet landing-page", "route": "sandbox"},
+    {"text": "continue le projet react-doc", "route": "sandbox"},
+    {"text": "reprends le projet de landing page", "route": "sandbox"},
+    {"text": "travaille sur le projet notifications", "route": "sandbox"},
+    {"text": "retourne sur le projet mnemo-frontend", "route": "sandbox"},
+    {"text": "ouvre ce projet et continue l etape en cours", "route": "sandbox"},
+    {"text": "reprend le projet documentation react js", "route": "sandbox"},
+    {"text": "continue le developpement du projet landing page", "route": "sandbox"},
+    {"text": "travaille sur le projet auth et avance sur l etape 2", "route": "sandbox"},
+    {"text": "ouvre le projet scheduler et execute les tests", "route": "sandbox"},
+    {"text": "retourne dans le projet et ecris le composant Header", "route": "sandbox"},
+    {"text": "reprends le projet et installe les dependances npm", "route": "sandbox"},
+    {"text": "continue le projet et lance pytest", "route": "sandbox"},
+    {"text": "ouvre le projet web-scraper et corrige le bug", "route": "sandbox"},
+    {"text": "travaille sur le projet api-rest et ecris les tests", "route": "sandbox"},
+    # ── plan ─────────────────────────────────────────────────────────
+    {"text": "construis-moi un plan pour developper la feature auth", "route": "plan"},
+    {"text": "prepare un plan pour refactoriser le module memoire", "route": "plan"},
+    {"text": "fais-moi un plan pour creer une landing page React", "route": "plan"},
+    {"text": "on va planifier ce projet en etapes", "route": "plan"},
+    {"text": "organise les etapes pour implementer le scheduler", "route": "plan"},
+    {"text": "je veux planifier le developpement du dashboard", "route": "plan"},
+    {"text": "decompose la tache migration base de donnees", "route": "plan"},
+    {"text": "cree un plan de travail pour documenter l API", "route": "plan"},
+    {"text": "planifier le projet en plusieurs phases", "route": "plan"},
+    {"text": "comment organiser le developpement de cette feature ?", "route": "plan"},
+    {"text": "redige un plan pour implementer le systeme de cache", "route": "plan"},
+    {"text": "j ai besoin d un plan pour refaire le frontend", "route": "plan"},
+    {"text": "planifie le projet de documentation React JS", "route": "plan"},
+    {"text": "prepare la documentation en etapes pour ce projet", "route": "plan"},
+    {"text": "on commence par preparer la documentation puis planifie les etapes", "route": "plan"},
     # ── note ─────────────────────────────────────────────────────────
     {"text": "note que je prefere vim a vscode", "route": "note"},
     {"text": "retiens que je suis vegetarien", "route": "note"},

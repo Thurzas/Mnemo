@@ -1,0 +1,39 @@
+sandbox_task:
+  description: >
+    Projet sandbox : {project_slug}
+    Objectif du projet : {project_goal}
+
+    Étape courante du plan :
+    {current_step}
+
+    Contexte projet (fichiers existants, état git) :
+    {project_context}
+
+    Demande utilisateur :
+    {user_message}
+
+    Tu dois avancer sur l'étape courante du plan.
+
+    ── RÈGLES ─────────────────────────────────────────────────────────────────
+
+    1. Commence par lire le plan.md pour confirmer l'étape courante.
+    2. Liste les fichiers existants avec sandbox_list pour comprendre l'état.
+    3. Lis les fichiers pertinents avec sandbox_read avant de les modifier.
+    4. Écris ou modifie les fichiers avec sandbox_write (un fichier à la fois).
+    5. Si l'étape nécessite d'exécuter du code, utilise sandbox_shell.
+    6. Vérifie le résultat de chaque commande avant de continuer.
+    7. Si une commande échoue, lis le log d'erreur et adapte.
+    8. Marque l'étape comme ✅ dans plan.md quand elle est complète.
+    9. Si tu rencontres un blocage que tu ne peux pas résoudre seul,
+       décris clairement le problème dans ta réponse.
+
+    ── FORMAT DE RÉPONSE ──────────────────────────────────────────────────────
+
+    Résume ce que tu as fait, les fichiers créés/modifiés, et le résultat
+    des commandes exécutées. Indique l'étape suivante du plan si disponible.
+
+  expected_output: >
+    Un résumé des actions effectuées : fichiers créés/modifiés, commandes
+    exécutées et leurs résultats, état de l'étape (complète ou bloquée),
+    prochaine étape recommandée.
+  agent: sandbox_agent

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { MessageBubble } from '@/components/MessageBubble'
 import { ConfirmModal } from '@/components/ConfirmModal'
+import { WebSuggestPanel, type WebSuggestion } from '@/components/WebSuggestPanel'
 import { auth, api } from '@/api'
 import styles from './ChatPage.module.css'
 
@@ -13,6 +14,7 @@ interface WebConfirmState {
   query: string
   sessionId: string
   originalMessage: string
+  planWeb?: unknown   // contexte plan (Phase 6.5) — forwarded as-is to web_answer
 }
 
 type WsStatus = 'connecting' | 'ready' | 'error'
@@ -56,8 +58,10 @@ export function ChatPage() {
   const [sessionId, setSessionId]     = useState<string | undefined>(
     sessionStorage.getItem(SID_KEY) ?? undefined
   )
-  const [webConfirm, setWebConfirm]   = useState<WebConfirmState | null>(null)
-  const [wsStatus, setWsStatus]       = useState<WsStatus>('connecting')
+  const [webConfirm, setWebConfirm]     = useState<WebConfirmState | null>(null)
+  const [webSuggestions, setWebSuggestions] = useState<{ suggestions: WebSuggestion[], sessionId: string, originalQuery: string } | null>(null)
+  const [wsStatus, setWsStatus]         = useState<WsStatus>('connecting')
+  const [statusText, setStatusText]     = useState<string | null>(null)
 
   // ── Audio state ───────────────────────────────────────────────────
   const [recording, setRecording]     = useState(false)
@@ -109,8 +113,13 @@ export function ChatPage() {
 
         case 'thinking':
           setLoading(true)
+          setStatusText(null)
           streamBufRef.current = ''
           setStreamBuffer('')
+          break
+
+        case 'status':
+          setStatusText(String(data.text ?? ''))
           break
 
         case 'token': {
@@ -127,6 +136,7 @@ export function ChatPage() {
           setMessages(prev => [...prev, { role: 'mnemo', content: finalContent }])
           setStreamBuffer('')
           setLoading(false)
+          setStatusText(null)
           setSessionId(sid)
           sessionStorage.setItem(SID_KEY, sid)
           textareaRef.current?.focus()
@@ -141,10 +151,19 @@ export function ChatPage() {
             query: String(data.web_query ?? ''),
             sessionId: String(data.session_id ?? ''),
             originalMessage: String(data.original_message ?? ''),
+            planWeb: data.plan_web ?? undefined,
           })
           setLoading(false)
           streamBufRef.current = ''
           setStreamBuffer('')
+          break
+
+        case 'web_suggest':
+          setWebSuggestions({
+            suggestions:   (data.suggestions as WebSuggestion[]) ?? [],
+            sessionId:     String(data.session_id ?? ''),
+            originalQuery: String(data.original_query ?? ''),
+          })
           break
 
         case 'error':
@@ -199,6 +218,7 @@ export function ChatPage() {
     sid: string,
     confirmed: boolean,
     query: string,
+    planWeb?: unknown,
   ) => {
     setWebConfirm(null)
     sendWs({
@@ -207,8 +227,21 @@ export function ChatPage() {
       web_query: query,
       session_id: sid,
       original_message: originalMessage,
+      ...(planWeb ? { plan_web: planWeb } : {}),
     })
   }, [])
+
+  const handleExploreLink = useCallback((suggestion: WebSuggestion) => {
+    const sid = webSuggestions?.sessionId
+    sendWs({
+      type:           'web_link_explore',
+      url:            suggestion.url,
+      title:          suggestion.title,
+      original_query: webSuggestions?.originalQuery ?? suggestion.title,
+      session_id:     sid,
+    })
+    setWebSuggestions(null)
+  }, [webSuggestions])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -367,6 +400,12 @@ export function ChatPage() {
         {messages.map((m, i) => (
           <MessageBubble key={i} role={m.role} content={m.content} />
         ))}
+        {loading && statusText && (
+          <div className={styles.statusLine}>
+            <span className={styles.statusDot} />
+            {statusText}
+          </div>
+        )}
         {loading && !streamBuffer && <MessageBubble role="mnemo" content="" loading />}
         {streamBuffer && <MessageBubble role="mnemo" content={streamBuffer} streaming />}
         <div ref={bottomRef} />
@@ -416,12 +455,22 @@ export function ChatPage() {
         </button>
       </div>
 
+      {webSuggestions && webSuggestions.suggestions.length > 0 && (
+        <WebSuggestPanel
+          suggestions={webSuggestions.suggestions}
+          originalQuery={webSuggestions.originalQuery}
+          sessionId={webSuggestions.sessionId}
+          onExplore={handleExploreLink}
+          onDismiss={() => setWebSuggestions(null)}
+        />
+      )}
+
       {webConfirm && (
         <ConfirmModal
           message={`Lancer une recherche web pour :\n« ${webConfirm.query} » ?`}
           confirmLabel="Rechercher"
-          onConfirm={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, true, webConfirm.query)}
-          onCancel={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, false, webConfirm.query)}
+          onConfirm={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, true, webConfirm.query, webConfirm.planWeb)}
+          onCancel={() => handleWebResult(webConfirm.originalMessage, webConfirm.sessionId, false, webConfirm.query, webConfirm.planWeb)}
         />
       )}
     </div>

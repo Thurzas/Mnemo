@@ -42,9 +42,13 @@ def _detect_shell_intent(msg: str) -> bool:
 # ── Scheduler ────────────────────────────────────────────────────────────────
 
 # Keywords forts → bypass LLM déterministe (non ambigus)
+# NOTE : "planifie" et "planifier" seuls ont été retirés — trop ambigus.
+#   "planifier un projet/des étapes" → route plan, pas scheduler.
+#   Seules les formulations avec contexte rappel/tâche sont gardées.
 _SCHEDULER_KEYWORDS_STRONG = [
     "rappelle-moi", "rappelle moi",
-    "planifie", "planifier",
+    "planifie un rappel", "planifie une tâche", "planifie une alerte",
+    "planifier un rappel", "planifier une tâche", "planifier une alerte",
     "chaque lundi", "chaque mardi", "chaque mercredi", "chaque jeudi",
     "chaque vendredi", "chaque samedi", "chaque dimanche",
     "tous les lundis", "tous les mardis", "tous les mercredis",
@@ -135,6 +139,85 @@ def _detect_calendar_write_intent(msg: str) -> bool:
     return has_verb and has_ctx
 
 
+# ── Plan ──────────────────────────────────────────────────────────────────────
+
+_PLAN_KEYWORDS_STRONG = [
+    "construis-moi", "construis moi",
+    "développe", "developpe",
+    "implémente", "implemente",
+    "prépare un plan", "prepare un plan",
+    "fais-moi un plan", "fais moi un plan",
+    "décompose la tâche", "decompose la tache",
+    "organise les étapes", "organise les etapes",
+    "crée un plan", "cree un plan",
+    "écris un plan", "ecris un plan",
+    "planifie le développement", "planifie le developpement",
+    "rédige le plan", "redige le plan",
+]
+
+# Keywords faibles — hint pour ML (ambigus sans contexte)
+_PLAN_KEYWORDS_WEAK = [
+    "comment implémenter", "comment implementer",
+    "comment développer", "comment developper",
+    "comment construire",
+    "par où commencer", "par ou commencer",
+    # Formulations projet/organisation (≠ rappel scheduler)
+    "planifier ce projet", "planifier le projet",
+    "planifier en étapes", "planifier les étapes",
+    "planifier en etapes", "planifier les etapes",
+    "organiser ce projet", "organiser le projet",
+    "préparer un projet", "preparer un projet",
+    "en étapes pour", "en etapes pour",
+    "découper en étapes", "decouper en etapes",
+]
+
+
+def _detect_plan_intent(msg: str) -> tuple[bool, bool]:
+    """Retourne (strong, weak).
+
+    Les keywords multi-mots sont testés par substring (suffisant car non ambigus).
+    Les keywords mono-mots (verbes impératifs courts) sont testés avec \b pour
+    éviter de matcher des formes infinitives (ex: "implémente" ≠ "implémenter").
+    """
+    import re
+    m    = msg.lower()
+    strong = False
+    for kw in _PLAN_KEYWORDS_STRONG:
+        if " " in kw or "-" in kw:
+            if kw in m:
+                strong = True
+                break
+        else:
+            if re.search(r"\b" + re.escape(kw) + r"\b", m):
+                strong = True
+                break
+    weak = any(kw in m for kw in _PLAN_KEYWORDS_WEAK)
+    return strong, weak
+
+
+# ── Sandbox ───────────────────────────────────────────────────────────────────
+
+_SANDBOX_KEYWORDS_STRONG = [
+    "ouvre le projet", "ouvre ce projet",
+    "travaille sur le projet", "continue le projet",
+    "reprends le projet", "reprend le projet",
+    "retourne sur le projet", "retourne dans le projet",
+]
+
+_SANDBOX_KEYWORDS_WEAK = [
+    "dans le sandbox", "dans le projet sandbox",
+    "crée le projet", "cree le projet",
+    "nouveau projet sandbox",
+]
+
+
+def _detect_sandbox_intent(msg: str) -> tuple[bool, bool]:
+    m      = msg.lower()
+    strong = any(kw in m for kw in _SANDBOX_KEYWORDS_STRONG)
+    weak   = any(kw in m for kw in _SANDBOX_KEYWORDS_WEAK)
+    return strong, weak
+
+
 # ── Note ──────────────────────────────────────────────────────────────────────
 
 _NOTE_KEYWORDS = [
@@ -158,6 +241,13 @@ def _detect_note_intent(msg: str) -> bool:
 
 # ── Handler ───────────────────────────────────────────────────────────────────
 
+# Seuil de mots au-delà duquel le bypass keyword est désactivé pour les routes
+# ambiguës (scheduler, plan, calendar). Les messages longs sont des discussions,
+# pas des commandes directes — le ML/LLM est plus fiable dans ce cas.
+# Shell et Note restent actifs quelle que soit la longueur (impératifs de sécurité/mémoire).
+_KEYWORD_BYPASS_MAX_WORDS = 12
+
+
 class KeywordHandler(RouterHandler):
     """
     Détection déterministe — confiance absolue (1.0) si match.
@@ -168,23 +258,42 @@ class KeywordHandler(RouterHandler):
     """
 
     def handle(self, ctx: RouterContext) -> RouterResult | None:
-        msg = ctx.message
+        msg  = ctx.message
+        _short = len(msg.split()) <= _KEYWORD_BYPASS_MAX_WORDS
 
-        # ── Note — priorité max (intention explicite d'écriture mémoire) ──
+        # ── Note — priorité max, pas de limite de longueur ────────────────
         if _detect_note_intent(msg):
             return RouterResult("note", 1.0, "keyword")
 
-        # ── Calendar write ────────────────────────────────────────────────
-        if _detect_calendar_write_intent(msg):
-            return RouterResult("calendar", 1.0, "keyword")
+        if _short:
+            # ── Sandbox fort ──────────────────────────────────────────────
+            sandbox_strong, sandbox_weak = _detect_sandbox_intent(msg)
+            if sandbox_strong:
+                return RouterResult("sandbox", 1.0, "keyword")
 
-        # ── Scheduler fort ───────────────────────────────────────────────
-        strong, weak = _detect_scheduler_intent(msg)
-        if strong:
-            return RouterResult("scheduler", 1.0, "keyword")
+            # ── Plan fort ─────────────────────────────────────────────────
+            plan_strong, plan_weak = _detect_plan_intent(msg)
+            if plan_strong:
+                return RouterResult("plan", 1.0, "keyword", {"needs_recon": True})
+
+            # ── Calendar write ────────────────────────────────────────────
+            if _detect_calendar_write_intent(msg):
+                return RouterResult("calendar", 1.0, "keyword")
+
+            # ── Scheduler fort ────────────────────────────────────────────
+            strong, weak = _detect_scheduler_intent(msg)
+            if strong:
+                return RouterResult("scheduler", 1.0, "keyword")
+        else:
+            # Message long → pas de bypass, mais on calcule quand même les hints
+            _, sandbox_weak = _detect_sandbox_intent(msg)
+            _, plan_weak    = _detect_plan_intent(msg)
+            _, weak         = _detect_scheduler_intent(msg)
 
         # ── Dépôt des hints pour les handlers aval ────────────────────────
-        ctx._hints["kw_shell"]      = _detect_shell_intent(msg)
-        ctx._hints["kw_sched_weak"] = weak
+        ctx._hints["kw_shell"]        = _detect_shell_intent(msg)
+        ctx._hints["kw_sched_weak"]   = weak
+        ctx._hints["kw_plan_weak"]    = plan_weak
+        ctx._hints["kw_sandbox_weak"] = sandbox_weak
 
         return self._pass(ctx)

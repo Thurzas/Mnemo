@@ -1,25 +1,25 @@
 {"text": "salut", "route": "conversation"}
 {"text": "comment tu vas ?", "route": "conversation"}
-{"text": "c est quoi le tdd ?", "route": "conversation"}
+{"text": "c est quoi le TDD ?", "route": "conversation"}
 {"text": "explique-moi les transformers", "route": "conversation"}
 {"text": "qu est-ce que j ai prevu demain ?", "route": "conversation"}
 {"text": "resume ce que tu sais sur moi", "route": "conversation"}
-{"text": "cherche la doc fastapi routing", "route": "conversation"}
-{"text": "j ai fini le module 3 du cours coursera", "route": "conversation"}
-{"text": "quelle difference entre docker et podman ?", "route": "conversation"}
+{"text": "cherche la doc FastAPI routing", "route": "conversation"}
+{"text": "j ai fini le module 3 du cours Coursera", "route": "conversation"}
+{"text": "quelle difference entre Docker et Podman ?", "route": "conversation"}
 {"text": "mon agenda cette semaine ?", "route": "conversation"}
 {"text": "qu est-ce que j avais prevu lundi ?", "route": "conversation"}
 {"text": "je t ai dit que j avais change de job", "route": "conversation"}
-{"text": "cherche les news python 3.14", "route": "conversation"}
-{"text": "quel est mon niveau en python ?", "route": "conversation"}
+{"text": "cherche les news Python 3.14", "route": "conversation"}
+{"text": "quel est mon niveau en Python ?", "route": "conversation"}
 {"text": "explique les embeddings", "route": "conversation"}
 {"text": "tu te souviens de mon projet ?", "route": "conversation"}
-{"text": "difference entre ram et vram ?", "route": "conversation"}
+{"text": "difference entre RAM et VRAM ?", "route": "conversation"}
 {"text": "resume ma semaine", "route": "conversation"}
 {"text": "qu est-ce que j apprends en ce moment ?", "route": "conversation"}
 {"text": "explique-moi le machine learning", "route": "conversation"}
 {"text": "liste les fichiers dans docs", "route": "shell"}
-{"text": "liste les pdf dans data/docs", "route": "shell"}
+{"text": "liste les PDF dans data/docs", "route": "shell"}
 {"text": "qu est-ce qu il y a dans le dossier data ?", "route": "shell"}
 {"text": "affiche le contenu de notes.txt", "route": "shell"}
 {"text": "trouve tous les fichiers .py dans data", "route": "shell"}
@@ -31,27 +31,27 @@
 {"text": "montre-moi les fichiers dans scripts", "route": "shell"}
 {"text": "va fouiller dans data/docs", "route": "shell"}
 {"text": "commande shell : liste le dossier docs", "route": "shell"}
-{"text": "t aurais pas mes pdf de cours dans data ?", "route": "shell"}
+{"text": "t aurais pas mes PDF de cours dans data ?", "route": "shell"}
 {"text": "donne-moi la premiere page du rapport.pdf", "route": "shell"}
 {"text": "liste les dossiers dans data", "route": "shell"}
 {"text": "cherche les fichiers .txt dans data", "route": "shell"}
 {"text": "affiche les 10 premieres lignes de log.txt", "route": "shell"}
 {"text": "combien de fichiers dans data/docs ?", "route": "shell"}
-{"text": "lit moi le fichier readme.md", "route": "shell"}
-{"text": "cree un rdv dentiste vendredi 15h", "route": "calendar"}
+{"text": "lit moi le fichier README.md", "route": "shell"}
+{"text": "cree un RDV dentiste vendredi 15h", "route": "calendar"}
 {"text": "ajoute une reunion lundi matin 10h", "route": "calendar"}
 {"text": "decale le cours de yoga de jeudi a vendredi", "route": "calendar"}
 {"text": "annule le rendez-vous de demain", "route": "calendar"}
 {"text": "bloque-moi 2h mercredi pour coder", "route": "calendar"}
-{"text": "supprime la reunion projects du calendrier", "route": "calendar"}
+{"text": "supprime la reunion Projects du calendrier", "route": "calendar"}
 {"text": "ajoute demo produit mardi 14h", "route": "calendar"}
-{"text": "modifie le rdv medecin a 11h", "route": "calendar"}
+{"text": "modifie le RDV medecin a 11h", "route": "calendar"}
 {"text": "mets appel client jeudi 16h dans mon agenda", "route": "calendar"}
 {"text": "ajoute vacances 15-22 juillet dans le calendrier", "route": "calendar"}
 {"text": "change l heure de la reunion de demain a 9h", "route": "calendar"}
 {"text": "programme session sport samedi 8h", "route": "calendar"}
-{"text": "inscris formation python 3-5 mars dans agenda", "route": "calendar"}
-{"text": "nouveau rdv ophtalmo mercredi 11h", "route": "calendar"}
+{"text": "inscris formation Python 3-5 mars dans agenda", "route": "calendar"}
+{"text": "nouveau RDV ophtalmo mercredi 11h", "route": "calendar"}
 {"text": "efface la reunion du lundi de mon calendrier", "route": "calendar"}
 {"text": "rappelle-moi dans 3h de prendre mes medicaments", "route": "scheduler"}
 {"text": "envoie-moi un resume tous les soirs a 20h", "route": "scheduler"}
@@ -68,509 +68,663 @@
 {"text": "alerte dans 45 min fin de reunion", "route": "scheduler"}
 {"text": "tous les 1er du mois rappel backup", "route": "scheduler"}
 {"text": "notifie dans 2h d aller chercher les enfants", "route": "scheduler"}
+{"text": "construis-moi un plan pour developper la feature auth", "route": "plan"}
+{"text": "prepare un plan pour refactoriser le module memoire", "route": "plan"}
+{"text": "fais-moi un plan pour creer une landing page React", "route": "plan"}
+{"text": "on va planifier ce projet en etapes", "route": "plan"}
+{"text": "organise les etapes pour implementer le scheduler", "route": "plan"}
+{"text": "je veux planifier le developpement du dashboard", "route": "plan"}
+{"text": "decompose la tache migration base de donnees", "route": "plan"}
+{"text": "cree un plan de travail pour documenter l API", "route": "plan"}
+{"text": "planifier le projet en plusieurs phases", "route": "plan"}
+{"text": "comment organiser le developpement de cette feature ?", "route": "plan"}
+{"text": "redige un plan pour implementer le systeme de cache", "route": "plan"}
+{"text": "j ai besoin d un plan pour refaire le frontend", "route": "plan"}
+{"text": "planifie le projet de documentation React JS", "route": "plan"}
+{"text": "prepare la documentation en etapes pour ce projet", "route": "plan"}
+{"text": "on commence par preparer la documentation puis planifie les etapes", "route": "plan"}
 {"text": "note que je prefere vim a vscode", "route": "note"}
 {"text": "retiens que je suis vegetarien", "route": "note"}
-{"text": "memorise que mon langage prefere c est python", "route": "note"}
+{"text": "memorise que mon langage prefere c est Python", "route": "note"}
 {"text": "n oublie pas que je travaille en freelance", "route": "note"}
-{"text": "souviens-toi que j habite a lyon", "route": "note"}
+{"text": "souviens-toi que j habite a Lyon", "route": "note"}
 {"text": "garde en memoire que je prefere les reponses courtes", "route": "note"}
-{"text": "enregistre que mon projet principal s appelle mnemo", "route": "note"}
+{"text": "enregistre que mon projet principal s appelle Mnemo", "route": "note"}
 {"text": "je veux que tu saches que j ai change de boulot", "route": "note"}
-{"text": "note que j ai decide d utiliser fastapi pour le backend", "route": "note"}
+{"text": "note que j ai decide d utiliser FastAPI pour le backend", "route": "note"}
 {"text": "retiens que je me leve tous les jours a 7h", "route": "note"}
 {"text": "memorise : allergique aux arachides", "route": "note"}
-{"text": "important a noter : je n utilise plus windows", "route": "note"}
+{"text": "important a noter : je n utilise plus Windows", "route": "note"}
 {"text": "ajoute a ma memoire que je parle anglais et espagnol", "route": "note"}
 {"text": "garde ca en memoire : objectif terminer le cours d ici mars", "route": "note"}
-{"text": "note que j ai commence a apprendre le rust", "route": "note"}
+{"text": "note que j ai commence a apprendre le Rust", "route": "note"}
 {"text": "enregistre ceci : j ai adopte la methode pomodoro", "route": "note"}
-{"text": "retiens bien que je prefere docker a podman pour ce projet", "route": "note"}
+{"text": "retiens bien que je prefere Docker a Podman pour ce projet", "route": "note"}
 {"text": "souviens-toi que ma deadline projet c est le 15 mars", "route": "note"}
 {"text": "je veux que tu retiennes que j utilise arch linux", "route": "note"}
 {"text": "a noter : j ai decide de passer a neovim", "route": "note"}
-{"text": "comment puis-je vous aider aujourd'hui?", "route": "conversation"}
-{"text": "pourriez-vous m'expliquer comment fonctionne la mémoire à court terme?", "route": "conversation"}
-{"text": "bonjour, comment ça va aujourd'hui?", "route": "conversation"}
-{"text": "merci d'avoir demandé, je vais bien. et toi?", "route": "conversation"}
-{"text": "je cherche des informations sur la nasa.", "route": "conversation"}
-{"text": "très bien, je lance une recherche sur la nasa. voici ce que j'ai trouvé :...", "route": "conversation"}
-{"text": "je me demande si je devrais prendre des notes à la main ou taper directement dans un ordinateur.", "route": "conversation"}
-{"text": "il a été démontré que prendre des notes à la main peut améliorer la mémorisation des informations. cependant, cela dépend de ce qui vous convient le mieux.", "route": "conversation"}
-{"text": "bonjour! comment allez-vous?", "route": "conversation"}
-{"text": "je vais bien, merci. et vous?", "route": "conversation"}
-{"text": "il fait beau dehors aujourd'hui.", "route": "conversation"}
-{"text": "oui, il fait soleil et il y a 25 degrés celsius aujourd'hui. voulez-vous que je planifie une sortie en plein air pour vous?", "route": "conversation"}
-{"text": "je suis intéressé par l'apprentissage de la méditation.", "route": "conversation"}
-{"text": "très bien, voici quelques liens utiles pour apprendre à méditer :...", "route": "conversation"}
-{"text": "qu'est-ce que la mémoire personnelle?", "route": "conversation"}
-{"text": "pouvez-vous m'expliquer les différentes formes de mémoire?", "route": "conversation"}
-{"text": "rappelez-moi, où ai-je mis mes clés?", "route": "conversation"}
-{"text": "qui a peint le plafond de la chapelle sixtine?", "route": "conversation"}
-{"text": "quel est mon programme pour demain?", "route": "conversation"}
-{"text": "hello! what's up?", "route": "conversation"}
-{"text": "quelles sont les dernières nouvelles concernant ma commande en cours?", "route": "conversation"}
-{"text": "pouvez-vous définir la cognition?", "route": "conversation"}
-{"text": "pourquoi avons-nous besoin de dormir?", "route": "conversation"}
-{"text": "quels événements ont eu lieu hier?", "route": "conversation"}
-{"text": "why do leaves change color in autumn?", "route": "conversation"}
-{"text": "how many books are there in the bible?", "route": "conversation"}
-{"text": "what's the capital of france?", "route": "conversation"}
-{"text": "who wrote the novel 'to kill a mockingbird'?", "route": "conversation"}
-{"text": "good morning! it's a beautiful day, isn't it?", "route": "conversation"}
-{"text": "how do i improve my memory skills?", "route": "conversation"}
-{"text": "what are some common myths about memory?", "route": "conversation"}
-{"text": "how can i contact customer service for my isp?", "route": "conversation"}
-{"text": "when is the next full moon?", "route": "conversation"}
-{"text": "what's the largest planet in our solar system?", "route": "conversation"}
-{"text": "have a great day! the sun is shone!", "route": "conversation"}
-{"text": "qu'est-ce qu'une intelligence artificielle ?", "route": "conversation"}
-{"text": "explique-moi comment fonctionne la mémoire humaine.", "route": "conversation"}
-{"text": "quel est mon planning pour demain?", "route": "conversation"}
-{"text": "bonjour, comment vas-tu aujourd'hui?", "route": "conversation"}
-{"text": "pourrais-tu me donner des informations sur la ville de paris?", "route": "conversation"}
-{"text": "qui était albert einstein ?", "route": "conversation"}
-{"text": "quel est mon anniversaire?", "route": "conversation"}
-{"text": "comment va ma famille ?", "route": "conversation"}
-{"text": "quelles sont mes tâches pour les prochains jours?", "route": "conversation"}
-{"text": "as-tu besoin de mises à jour d'informations personnelles?", "route": "conversation"}
-{"text": "comment puis-je améliorer ma mémoire personnelle?", "route": "conversation"}
-{"text": "quels sont les événements importantes cette semaine?", "route": "conversation"}
-{"text": "peux-tu me donner la définition de 'quantique'?", "route": "conversation"}
-{"text": "quel est le temps qu'il fait aujourd'hui ?", "route": "conversation"}
-{"text": "connais-tu des astuces pour mieux gérer mon temps?", "route": "conversation"}
-{"text": "que signifie l'acronyme ia?", "route": "conversation"}
-{"text": "as-tu besoin d'une mise à jour sur mes préférences alimentaires?", "route": "conversation"}
-{"text": "pourrais-tu me parler des différents types de mémoires?", "route": "conversation"}
-{"text": "qu'est-ce que la physique quantique?", "route": "conversation"}
-{"text": "comment fonctionne ma mémoire à court terme?", "route": "conversation"}
-{"text": "peux-tu m'expliquer ce qu'est un algorithme?", "route": "conversation"}
-{"text": "bonjour mnemo, comment vas-tu aujourd'hui?", "route": "conversation"}
-{"text": "quel est mon emploi du temps pour demain?", "route": "conversation"}
-{"text": "mettre à jour mon adresse e-mail personnelle : example@email.com", "route": "conversation"}
-{"text": "combien de langues existe-t-il dans le monde?", "route": "conversation"}
-{"text": "je me sens stressé ces derniers temps. as-tu des conseils pour gérer le stress?", "route": "conversation"}
-{"text": "y a-t-il eu des avancées récentes dans la recherche sur le cancer?", "route": "conversation"}
-{"text": "peux-tu m'expliquer en quoi consiste l'intelligence artificielle?", "route": "conversation"}
-{"text": "quels sont les bienfaits de la méditation?", "route": "conversation"}
-{"text": "bonjour mnemo! comment vas-tu?", "route": "conversation"}
-{"text": "je dois préparer un exposé sur les changements climatiques. as-tu des informations à ce sujet?", "route": "conversation"}
-{"text": "comment puis-je améliorer ma capacité de concentration?", "route": "conversation"}
-{"text": "quel célèbre peintre est né le 28 février?", "route": "conversation"}
-{"text": "peux-tu me donner la définition d'un paradoxe?", "route": "conversation"}
-{"text": "bonjour mnemo! comment allons-nous aujourd'hui?", "route": "conversation"}
-{"text": "je voudrais en savoir plus sur la vie des abeilles.", "route": "conversation"}
-{"text": "comment puis-je améliorer ma mémoire visuelle?", "route": "conversation"}
-{"text": "bonjour mnemo ! comment vas-tu aujourd'hui?", "route": "conversation"}
-{"text": "qu'est-ce que la mémoire personnelle et comment puis-je l'améliorer?", "route": "conversation"}
-{"text": "correction de mes informations personnelles : mon adresse est maintenant 123 rue de la paix.", "route": "conversation"}
-{"text": "salut mnemo, ça va?", "route": "conversation"}
-{"text": "quels sont les événements à venir dans mon agenda aujourd'hui?", "route": "conversation"}
-{"text": "pouvez-vous m'expliquer ce qu'est l'intelligence artificielle?", "route": "conversation"}
-{"text": "je voudrais mettre à jour ma date de naissance. ma nouvelle date de naissance est le 01/01/2000.", "route": "conversation"}
-{"text": "bonjour mnemo, comment vas-tu?", "route": "conversation"}
-{"text": "peux-tu me rappeler ce que je devrais faire aujourd'hui?", "route": "conversation"}
-{"text": "pouvez-vous m'expliquer ce qu'est la synesthésie?", "route": "conversation"}
-{"text": "comment puis-je améliorer ma mémoire de travail?", "route": "conversation"}
-{"text": "salut mnemo, as-tu des nouvelles à partager?", "route": "conversation"}
-{"text": "je voudrais rechercher sur le web des informations sur 'l'histoire de l'ia'.", "route": "conversation"}
-{"text": "quels sont mes événements prévus pour cette semaine?", "route": "conversation"}
-{"text": "pouvez-vous m'expliquer comment fonctionne la mémoire à court terme?", "route": "conversation"}
-{"text": "afficher tous les fichiers dans le dossier data : ```ls /data```", "route": "shell"}
-{"text": "afficher les fichiers texte dans le dossier data : ```ls /data/*.txt```", "route": "shell"}
-{"text": "chercher un fichier nommé 'rapport.pdf' dans le répertoire actuel : ```find . -name 'rapport.pdf'```", "route": "shell"}
-{"text": "lire le contenu d'un fichier texte nommé 'note.txt' : ```cat /chemin/vers/note.txt```", "route": "shell"}
-{"text": "afficher tous les fichiers pdf dans le dossier docs/ : ```ls /docs/*.pdf```", "route": "shell"}
-{"text": "créer un nouveau fichier texte nommé 'nouveau_fichier.txt' : ```touch /chemin/vers/nouveau\\_fichier.txt```", "route": "shell"}
-{"text": "supprimer le fichier nommé 'oldfile.txt' : ```rm /chemin/vers/oldfile.txt```", "route": "shell"}
-{"text": "déplacer le fichier nommé 'movehere.txt' dans le dossier data/ : ```mv /chemin/vers/movehere.txt /data/```", "route": "shell"}
-{"text": "afficher les fichiers contenant le mot-clé 'search_key' : ```grep -r 'search\\_key' /chemin/vers/dossier```", "route": "shell"}
-{"text": "copier le fichier nommé 'copythis.txt' dans le dossier backup/ : ```cp /chemin/vers/copythis.txt /backup/```", "route": "shell"}
-{"text": "afficher les fichiers triés par date de modification dans le dossier images/ : ```ls -lt /images/```", "route": "shell"}
-{"text": "lancer un script python nommé 'script.py' situé dans le dossier scripts/ : ```python3 /scripts/script.py```", "route": "shell"}
-{"text": "afficher l'arborescence du dossier courant : ```tree```", "route": "shell"}
-{"text": "trouver tous les fichiers avec l'extension '.png' dans le répertoire actuel et ses sous-dossiers : ```find . -name '*.png'```", "route": "shell"}
-{"text": "afficher le nombre de lignes dans un fichier nommé 'countlines.txt' : ```wc -l /chemin/vers/countlines.txt```", "route": "shell"}
-{"text": "afficher les 10 dernières lignes d'un fichier nommé 'last10lines.txt' : ```tail -n 10 /chemin/vers/last10lines.txt```", "route": "shell"}
-{"text": "créer un dossier nommé 'newfolder' dans le répertoire actuel : ```mkdir newfolder```", "route": "shell"}
-{"text": "afficher l'utilisation du disque dans le répertoire actuel : ```df .```", "route": "shell"}
-{"text": "trouver tous les fichiers vides dans le répertoire actuel : ```find . -empty```", "route": "shell"}
-{"text": "afficher tous les fichiers et dossiers dans le répertoire /data", "route": "shell"}
-{"text": "ouvrir et lire le fichier readme.md situé dans le dossier /documents", "route": "shell"}
-{"text": "trouver tous les fichiers pdf dans l'arborescence actuelle", "route": "shell"}
-{"text": "créer un nouveau fichier texte nommé \\", "route": "shell"}
-{"text": "supprimer le fichier \\", "route": "shell"}
-{"text": "si existe dans /data", "route": "shell"}
-{"text": "déplacer le dossier /images vers le dossier /assets", "route": "shell"}
-{"text": "exécuter le script python \\", "route": "shell"}
-{"text": "situé dans le dossier /scripts", "route": "shell"}
-{"text": "affiche tous les fichiers et dossiers dans le r\\xe9pertoire /data.", "route": "shell"}
-{"text": "montre-moi tous mes fichiers pdf.", "route": "shell"}
-{"text": "cherche un fichier appel\\xe9 'exemple.py'.", "route": "shell"}
-{"text": "creer un nouveau fichier vide nomm\\xe9 'nouveau.fichier'.", "route": "shell"}
-{"text": "supprime le fichier 'temp.txt'.", "route": "shell"}
-{"text": "d├ęplace le fichier 'document.pdf' vers /documents.", "route": "shell"}
-{"text": "lance le script python se trouvant dans /scripts/mon_script.py.", "route": "shell"}
-{"text": "affiche tous les fichiers texte (.txt) dans le r\\xe9pertoire courant.", "route": "shell"}
-{"text": "montre-moi toutes les images (jpg et png) sur mon bureau.", "route": "shell"}
-{"text": "cherche un fichier appel\\xe9 'rapport.xls' et affiche son chemin complet.", "route": "shell"}
-{"text": "creer un nouveau dossier nomm\\xe9 'projets'.", "route": "shell"}
-{"text": "supprime le dossier '/old_projects'.", "route": "shell"}
-{"text": "d├ęplace tous les fichiers .mp3 dans /musique/.", "route": "shell"}
-{"text": "lance une recherche pour trouver tous les fichiers '.docx' sur mon ordinateur.", "route": "shell"}
-{"text": "affiche toutes les informations sur l'utilisation de l'espace disque.", "route": "shell"}
-{"text": "montre-moi tous les fichiers avec extension '.sh'.", "route": "shell"}
-{"text": "cherche le fichier 'config.yaml' et affiche son contenu.", "route": "shell"}
-{"text": "creer un fichier texte vide nomm\\xe9 'note.txt'.", "route": "shell"}
-{"text": "supprime tous les fichiers temporaires *.tmp dans /temp/", "route": "shell"}
-{"text": "/data/document.txt", "route": "shell"}
-{"text": "rapport.pdf", "route": "shell"}
-{"text": "/data/nouveau_fichier.txt", "route": "shell"}
-{"text": "/data/image.jpg", "route": "shell"}
-{"text": "destination", "route": "shell"}
-{"text": "/home/utilisateur/images", "route": "shell"}
-{"text": "/data/fichier_a_supprimer.txt", "route": "shell"}
-{"text": "/home/utilisateur/books/book1.pdf", "route": "shell"}
-{"text": "/data/new_folder", "route": "shell"}
-{"text": "/path/to/script.py", "route": "shell"}
-{"text": "/etc/hosts", "route": "shell"}
-{"text": "confidential", "route": "shell"}
-{"text": "ancien_nom", "route": "shell"}
-{"text": "ancient_name", "route": "shell"}
-{"text": "nouveau_nom", "route": "shell"}
-{"text": "new_name.txt", "route": "shell"}
-{"text": "/home/utilisateur/music/*.mp3", "route": "shell"}
-{"text": "~/documents", "route": "shell"}
-{"text": "date_modification'},\n  {", "route": "shell"}
-{"text": "/data/file1.txt", "route": "shell"}
-{"text": "/home/utilisateur/documents/file1_copy.txt", "route": "shell"}
-{"text": "/var/log/syslog", "route": "shell"}
-{"text": "ls -l data/", "route": "shell"}
-{"text": "/data/report.pdf", "route": "shell"}
-{"text": "nouveau_fichier.txt", "route": "shell"}
-{"text": "vieux_fichier.txt", "route": "shell"}
-{"text": "deplacer_fichier.txt", "route": "shell"}
-{"text": "/data/from/", "route": "shell"}
+{"text": "Bonjour Mnemo, comment ├ža va aujourd'hui?", "route": "conversation"}
+{"text": "Qu'est-ce que l'IA?", "route": "conversation"}
+{"text": "Pourrais-tu m'expliquer comment fonctionne la memoire humaine?", "route": "conversation"}
+{"text": "Quels sont mes prochains rendez-vous?", "route": "conversation"}
+{"text": "Mettre a jour mon adresse: 123 rue de la Paix", "route": "conversation"}
+{"text": "Je suis interess├ę par l'histoire de la France, peux-tu faire une recherche a ce sujet?", "route": "conversation"}
+{"text": "Comment puis-je ameliober ma memoire personnelle?", "route": "conversation"}
+{"text": "Mnemo, peux-tu me donner des exemples d'IA fortes?", "route": "conversation"}
+{"text": "Bonjour Mnemo, comment puis-je aider aujourd'hui?", "route": "conversation"}
+{"text": "Je rechercherais un restaurant pr├Ęs de chez moi, peux-tu m'aider?", "route": "conversation"}
+{"text": "Pourrais-tu m'expliquer les differentes theories de la memoire?", "route": "conversation"}
+{"text": "Mettre a jour mon numero de telephone: 06 12 34 56 78", "route": "conversation"}
+{"text": "Je suis curieux au sujet de l'espace, peux-tu faire une recherche a ce sujet?", "route": "conversation"}
+{"text": "Qu'est-ce que la memoire de travail?", "route": "conversation"}
+{"text": "Salut Mnemo!", "route": "conversation"}
+{"text": "Peux-tu m'expliquer ce qu'est un algorithme?", "route": "conversation"}
+{"text": "Je recherche des informations sur les langages de programmation, peux-tu m'aider?", "route": "conversation"}
+{"text": "Qu'est-ce que l'apprentissage automatique?", "route": "conversation"}
+{"text": "Je suis a la recherche d'un livre sur l'IA, peux-tu me recommander quelque chose?", "route": "conversation"}
+{"text": "Au revoir Mnemo!", "route": "conversation"}
+{"text": "Comment ça va aujourd'hui?", "route": "conversation"}
+{"text": "Pouvez-vous m'expliquer comment fonctionne la mémoire à court terme?", "route": "conversation"}
+{"text": "Quels sont mes événements prévus pour aujourd'hui?", "route": "conversation"}
+{"text": "Bonjour! Comment puis-je vous aider aujourd'hui?", "route": "conversation"}
+{"text": "Peux-tu m'expliquer ce qu'est l'intelligence artificielle?", "route": "conversation"}
+{"text": "Je suis fatigué. Est-ce que je devrais dormir plus?", "route": "conversation"}
+{"text": "Qu'est-ce que la mémoire personnelle?", "route": "conversation"}
+{"text": "Je veux ajouter un rendez-vous à mon agenda. Pouvez-vous m'aider?", "route": "conversation"}
+{"text": "Quels sont les bienfaits de la méditation?", "route": "conversation"}
+{"text": "Je me sens un peu stressé en ce moment. Est-ce que la méditation peut aider?", "route": "conversation"}
+{"text": "Qu'est-ce que je faisais hier à cette heure-ci?", "route": "conversation"}
+{"text": "Est-ce que je devrais prendre des notes plus souvent pour améliorer ma mémoire?", "route": "conversation"}
+{"text": "Peux-tu me dire quel est le temps qu'il fait aujourd'hui?", "route": "conversation"}
+{"text": "Quelles sont les nouvelles les plus récentes concernant la tech?", "route": "conversation"}
+{"text": "J'aimerais savoir plus sur l'apprentissage profond. Peux-tu m'aider?", "route": "conversation"}
+{"text": "Quels sont les événements importants qui se sont produits dans le monde cette semaine?", "route": "conversation"}
+{"text": "Je suis intéressé par l'apprentissage automatique. Qu'est-ce que c'est?", "route": "conversation"}
+{"text": "Quel est le capitale de la France?", "route": "conversation"}
+{"text": "La capitale de la France est Paris.", "route": "conversation"}
+{"text": "Peux-tu expliquer ce qu'est un algorithme?", "route": "conversation"}
+{"text": "Un algorithme est une suite finie d'opérations bien définies, utilisées ... pour résoudre un problème ou effectuer une tâche.", "route": "conversation"}
+{"text": "Comment puis-je améliorer ma mémoire personnelle?", "route": "conversation"}
+{"text": "Il existe plusieurs techniques pour améliorer la mémoire personnelle, telles que la méthode des loci, la technique de la répétition ...}},\n  {", "route": "conversation"}
+{"text": "Je suis allergique aux chats. N'oublie pas de mise à jour dans mes informations personnelles.", "route": "conversation"}
+{"text": "Noté. Je mets à jour vos informations personnelles avec votre allergie aux chats.", "route": "conversation"}
+{"text": "Bonjour, comment vas-tu aujourd'hui?", "route": "conversation"}
+{"text": "Bonjour! Je suis une intelligence artificielle, donc je n'ai pas de sentiments, mais je suis prêt à vous aider.", "route": "conversation"}
+{"text": "Trouve des informations sur la ville de New York.", "route": "conversation"}
+{"text": "Comment puis-je vous aider aujourd'hui?", "route": "conversation"}
+{"text": "Pouvez-vous m'expliquer ce qu'est l'intelligence artificielle?", "route": "conversation"}
+{"text": "Savez-vous comment fonctionne la mémoire humaine?", "route": "conversation"}
+{"text": "Pourriez-vous me rappeler ce que j'avais prévu pour ce week-end?", "route": "conversation"}
+{"text": "Bonjour! Comment allez-vous aujourd'hui?", "route": "conversation"}
+{"text": "Peut-être pourriez-vous me parler de mes projets pour la semaine prochaine?", "route": "conversation"}
+{"text": "Connaissez-vous la définition de l'apprentissage automatique?", "route": "conversation"}
+{"text": "Pourriez-vous me dire ce que j'ai mangé hier au dîner?", "route": "conversation"}
+{"text": "Je recherche des informations sur la programmation en Python. Pouvez-vous m'aider?", "route": "conversation"}
+{"text": "Quels sont mes prochains rendez-vous cet après-midi?", "route": "conversation"}
+{"text": "Savez-vous qui est Albert Einstein?", "route": "conversation"}
+{"text": "Je voulais vous parler de mes projets pour les prochaines vacances.", "route": "conversation"}
+{"text": "Pouvez-vous m'expliquer ce qu'est un algorithme?", "route": "conversation"}
+{"text": "Je suis désolé, je ne me souviens pas de ce que j'ai fait hier soir. Pouvez-vous me rappeler?", "route": "conversation"}
+{"text": "Connaissez-vous la différence entre l'IA et la robotique?", "route": "conversation"}
+{"text": "Pourriez-vous me donner des informations sur la ville de Paris?", "route": "conversation"}
+{"text": "Je voulais vous demander si vous pouvez m'aider à mieux organiser mon temps.", "route": "conversation"}
+{"text": "Quels sont mes engagements pour la journée de demain?", "route": "conversation"}
+{"text": "Pouvez-vous m'expliquer en quoi consiste la réalité augmentée?", "route": "conversation"}
+{"text": "Je suis fatigué, pouvez-vous me rappeler ce que j'ai prévu pour demain matin?", "route": "conversation"}
+{"text": "Qu'est-ce que l'intelligence artificielle?", "route": "conversation"}
+{"text": "Comment fonctionne la mémoire à court terme?", "route": "conversation"}
+{"text": "Quel est mon emploi du temps pour demain?", "route": "conversation"}
+{"text": "Bonjour Mnemo, comment vas-tu?", "route": "conversation"}
+{"text": "Connais-tu la définition de la physique quantique?", "route": "conversation"}
+{"text": "Quel est le dernier livre que j'ai lu?", "route": "conversation"}
+{"text": "Peux-tu me donner des conseils pour améliorer ma mémoire?", "route": "conversation"}
+{"text": "Salut Mnemo, il fait beau aujourd'hui!", "route": "conversation"}
+{"text": "Connais-tu la recette de la tourte à la viande?", "route": "conversation"}
+{"text": "Quels sont mes projets pour la semaine prochaine?", "route": "conversation"}
+{"text": "Qu'est-ce que le syndrome de la page blanche?", "route": "conversation"}
+{"text": "Bonjour Mnemo, puis-je avoir les prévisions météo pour la journée?", "route": "conversation"}
+{"text": "Existe-t-il des techniques de mémorisation efficaces?", "route": "conversation"}
+{"text": "Qu'est-ce que le théorème de Fermat?", "route": "conversation"}
+{"text": "As-tu des films à me recommander?", "route": "conversation"}
+{"text": "Qu'est-ce que la théorie de la relativité d'Einstein?", "route": "conversation"}
+{"text": "Bonjour Mnemo, comment puis-je mieux organiser mon temps?", "route": "conversation"}
+{"text": "Pourrais-tu me donner une citation inspirante?", "route": "conversation"}
+{"text": "As-tu des conseils pour mieux gérer mon stress?", "route": "conversation"}
+{"text": "Qu'est-ce que l'intelligence artificielle ?", "route": "conversation"}
+{"text": "Peux-tu m'expliquer comment fonctionne un algorithme?", "route": "conversation"}
+{"text": "As-tu déjà entendu parler de la mémotechnique de la méthode des loci?", "route": "conversation"}
+{"text": "Bonjour Mnemo, comment vas-tu aujourd'hui?", "route": "conversation"}
+{"text": "Je vais bien, merci. Et toi?", "route": "conversation"}
+{"text": "Pourrais-tu me donner la définition de la psychologie?", "route": "conversation"}
+{"text": "Quel est mon prochain rendez-vous aujourd'hui?", "route": "conversation"}
+{"text": "J'ai une réunion avec mon équipe à 14h", "route": "conversation"}
+{"text": "Merci, est-ce qu'il y a autre chose que je devrais savoir?", "route": "conversation"}
+{"text": "Oui, il y a une réunion d'information sur les nouveaux outils de travail à distance à 16h", "route": "conversation"}
+{"text": "D'accord, note-la dans mon agenda s'il te plaît", "route": "conversation"}
+{"text": "Bien sûr, je l'aiadded.", "route": "conversation"}
+{"text": "Connais-tu la date de mon anniversaire?", "route": "conversation"}
+{"text": "Oui, ton anniversaire est le 15 mars.", "route": "conversation"}
+{"text": "Je vais faire une recherche sur les bienfaits des fruits pour la santé", "route": "conversation"}
+{"text": "Très bien, voici les résultats de ma recherche: [liens vers les articles pertinents]", "route": "conversation"}
+{"text": "Merci Mnemo, bonne journée", "route": "conversation"}
+{"text": "De même, n'hésite pas à me demander si tu as besoin de quelque chose.", "route": "conversation"}
+{"text": "Je suis intéressé par la méditation, peux-tu me donner des informations sur ses effets sur la mémoire?", "route": "conversation"}
+{"text": "Bien sûr, la méditation régulière peut aider à améliorer la mémoire de travail et la concentration.", "route": "conversation"}
+{"text": "Je suis impatient de commencer", "route": "conversation"}
+{"text": "C'est formidable, n'hésite pas à me tenir au courant de tes progrès.", "route": "conversation"}
+{"text": "ls /data", "route": "shell"}
+{"text": "cat /data/rapport.txt", "route": "shell"}
+{"text": "less /data/rapport.pdf", "route": "shell"}
+{"text": "find /data -name '*.txt'", "route": "shell"}
+{"text": "rm /data/fichier.txt", "route": "shell"}
+{"text": "mv /data/fichier.txt /archive", "route": "shell"}
+{"text": "touch /data/Nouveau_fichier.txt", "route": "shell"}
+{"text": "grep -r 'mot clé' /data", "route": "shell"}
+{"text": "find /data -type d", "route": "shell"}
+{"text": "chmod +x /data/script.sh", "route": "shell"}
+{"text": "python /data/script.py", "route": "shell"}
+{"text": "tree /data", "route": "shell"}
+{"text": "cd /data", "route": "shell"}
+{"text": "find /data -iname '*pdf*'", "route": "shell"}
+{"text": "cp /data/fichier.txt /backup", "route": "shell"}
+{"text": "mkdir /data/nouveau_dossier", "route": "shell"}
+{"text": "rmdir /data/dossier_vide", "route": "shell"}
+{"text": "find /data -maxdepth 1", "route": "shell"}
+{"text": "sort /data/fichier.txt", "route": "shell"}
+{"text": "uniques /data/fichier.txt", "route": "shell"}
+{"text": "diff /data/fichier1.txt /data/fichier2.txt", "route": "shell"}
+{"text": "find /data -name 'rapport*.txt'", "route": "shell"}
+{"text": "rm /data/rapport.txt", "route": "shell"}
+{"text": "mv /data/rapport.pdf /data/archives/", "route": "shell"}
+{"text": "python3 /data/script.py", "route": "shell"}
+{"text": "grep -r 'mot_clé' /data", "route": "shell"}
+{"text": "find /data -type f -name '*.txt'", "route": "shell"}
+{"text": "rmdir /data/vide", "route": "shell"}
+{"text": "cp /data/fichier1.txt /data/fichier2.txt", "route": "shell"}
+{"text": "mv /data/fichier1.txt /data/fichier2.txt", "route": "shell"}
+{"text": "ls -l /data", "route": "shell"}
+{"text": "tar -czvf /data/backup.tar.gz /data/fichiers", "route": "shell"}
+{"text": "apt update", "route": "shell"}
+{"text": "apt upgrade", "route": "shell"}
+{"text": "ssh username@hostname", "route": "shell"}
+{"text": "wget https://example.com/fichier.tar.gz", "route": "shell"}
+{"text": "crontab -e", "route": "shell"}
+{"text": "sudo apt install paquet", "route": "shell"}
+{"text": "/data/file.txt", "route": "shell"}
+{"text": "/data/file.pdf", "route": "shell"}
+{"text": "/data -name '*.txt'", "route": "shell"}
+{"text": "/data -name '*.pdf'", "route": "shell"}
+{"text": "/data/new\\_file.txt", "route": "shell"}
+{"text": "/data/old\\_file.txt", "route": "shell"}
+{"text": "/data/old\\_file.txt /new\\_dir/", "route": "shell"}
 {"text": "/data/script.py", "route": "shell"}
-{"text": "cat /data/info.txt", "route": "shell"}
-{"text": "createfolder", "route": "shell"}
-{"text": "nouveau_dossier", "route": "shell"}
-{"text": "vieux_dossier", "route": "shell"}
-{"text": "/data/to/vieux_dossier", "route": "shell"}
-{"text": "ls -lh /data/", "route": "shell"}
-{"text": "/data/rapport.pdf", "route": "shell"}
-{"text": "search_term", "route": "shell"}
-{"text": "creer un evenement appellé 'réunion de projet' le 25/04/2023 à 14h", "route": "calendar"}
-{"text": "modifier l'evenement 'déjeuner avec amigos' au 28/04/2023 à midi", "route": "calendar"}
-{"text": "deplander l'evenement 'cours de yoga' du 30/04/2023 au 01/05/2023", "route": "calendar"}
-{"text": "supprimer l'evenement 'anniversaire de jean' le 05/05/2023", "route": "calendar"}
-{"text": "creer un nouveau rdv avec le dentiste le 12/05/2023 à 9h", "route": "calendar"}
-{"text": "modifier le rdv chez le dermatologue au 18/05/2023 à 16h", "route": "calendar"}
-{"text": "deplander l'evenement 'congrès sur l'ia' du 23/05/2023 au 25/05/2023", "route": "calendar"}
-{"text": "bloquer du temps pour travailler sur le rapport de fin d'etude les 04 et 05 juin 2023", "route": "calendar"}
-{"text": "creer un evenement appele 'week-end en famille' le weekend du 17 et 18 juin 2023", "route": "calendar"}
-{"text": "modifier l'evenement 'cours de cuisine' au 29/06/2023 à 19h", "route": "calendar"}
-{"text": "deplander l'evenement 'séance photo' du 05/07/2023 au 07/07/2023", "route": "calendar"}
-{"text": "supprimer l'evenement 'congrès sur la durabilité' le 12/07/2023", "route": "calendar"}
-{"text": "creer un nouveau rdv avec le conseiller financier le 19/07/2023 à 10h", "route": "calendar"}
-{"text": "modifier le rdv de controle technique au 26/07/2023 à midi.", "route": "calendar"}
-{"text": "deplander l'evenement 'festival de musique' du 09/08/2023 au 11/08/2023", "route": "calendar"}
-{"text": "bloquer du temps pour travailler sur le projet de recherche les 25 et 26 août 2023.", "route": "calendar"}
-{"text": "créer un événement appelé 'rendez-vous chez le dentiste' le 25 juin à 14h.", "route": "calendar"}
-{"text": "modifier l'événement 'réunion de projet' au 15 juillet à 9h30.", "route": "calendar"}
-{"text": "déplacer l'événement 'anniversaire de marie' au 18 août à 20h.", "route": "calendar"}
-{"text": "supprimer l'événement 'café avec julie' prévu le 7 septembre.", "route": "calendar"}
-{"text": "annuler l'événement 'conférence sur l'ia' du 3 octobre.", "route": "calendar"}
-{"text": "bloquer du temps pour travailler sur le projet x le 4 novembre de 10h à 12h.", "route": "calendar"}
-{"text": "créer un nouveau rendez-vous avec m. dupond le 9 décembre à 15h.", "route": "calendar"}
-{"text": "modifier l'heure de mon cours de yoga du mardi soir au 8 janvier à 19h30.", "route": "calendar"}
-{"text": "déplacer l'événement 'séminaire sur la gestion de projet' au 12 février.", "route": "calendar"}
-{"text": "supprimer l'événement 'dîner avec les amis' prévu le 4 mars.", "route": "calendar"}
-{"text": "annuler l'événement 'formation en communication' du 8 avril.", "route": "calendar"}
-{"text": "bloquer du temps pour travailler sur mon mémoire le 6 mai de 9h à midi.", "route": "calendar"}
-{"text": "créer un nouvel événement appelé 'congrès sur l'intelligence artificielle' le 20 juin.", "route": "calendar"}
-{"text": "modifier la durée de l'événement 'formation en développement web' au 10 août.", "route": "calendar"}
-{"text": "déplacer l'événement 'soirée d'anniversaire' au 15 septembre à 21h.", "route": "calendar"}
-{"text": "supprimer l'événement 'rencontre avec les anciens élèves' prévu le 6 octobre.", "route": "calendar"}
-{"text": "annuler l'événement 'sortie en nature' du 3 novembre.", "route": "calendar"}
-{"text": "bloquer du temps pour travailler sur mon projet personnel le 8 décembre de 14h à 16h.", "route": "calendar"}
-{"text": "créer un nouvel événement appelé 'café avec les amis' le 20 janvier.", "route": "calendar"}
-{"text": "créer un événement appel 'réunion projet' le 3 mai à 14h.", "route": "calendar"}
-{"text": "modifier l'événement 'dîner avec amis' au 5 juin à 20h.", "route": "calendar"}
-{"text": "déplacer l'événement 'rdv chez le dentiste' au 28 avril à 16h.", "route": "calendar"}
-{"text": "annuler l'événement 'cours de yoga' le 4 mai à 9h.", "route": "calendar"}
-{"text": "bloquer du temps pour travailler sur le rapport du 7 au 9 mai.", "route": "calendar"}
-{"text": "créer un événement 'rendez-vous chez le médecin' le 12 mai à 10h.", "route": "calendar"}
-{"text": "déplacer l'événement 'séance de sport' au 15 mai à 18h.", "route": "calendar"}
-{"text": "calendrier : créer un nouvel événement pour le 15 mars à 14h.", "route": "calendar"}
-{"text": "modification agenda : annuler le rendez-vous du 17 février.", "route": "calendar"}
-{"text": "bloquer une plage de temps dans l'agenda la semaine prochaine.", "route": "calendar"}
-{"text": "ajouter une réunion avec john demain à 9h.", "route": "calendar"}
-{"text": "déplacer l'événement 'projection' au 25 mars à 18h.", "route": "calendar"}
-{"text": "supprimer le rdv chez le dentiste le 7 avril.", "route": "calendar"}
-{"text": "créer un événement privé pour le 10 mai.", "route": "calendar"}
-{"text": "annuler l'événement 'fête d'anniversaire' du 12 juin.", "route": "calendar"}
-{"text": "bloquer une pause déjeuner tous les jours à partir du 8 juillet.", "route": "calendar"}
-{"text": "modifier la durée de la réunion avec sarah au 9 août de 2 heures à 1h30.", "route": "calendar"}
-{"text": "créer un événement récurrent pour chaque mardi et jeudi.", "route": "calendar"}
-{"text": "supprimer tous les événements entre le 15 et le 21 septembre.", "route": "calendar"}
-{"text": "bloquer une journée complète de travail le 3 octobre.", "route": "calendar"}
-{"text": "modifier l'heure du déjeuner du vendredi au 12h30.", "route": "calendar"}
-{"text": "annuler l'événement 'congrès' du 11 novembre.", "route": "calendar"}
-{"text": "créer un événement 'fête des mères' pour le 26 mai.", "route": "calendar"}
-{"text": "supprimer tous les événements pendant la semaine de noël.", "route": "calendar"}
-{"text": "bloquer une heure chaque jour à partir du 3 janvier pour la préparation d'un projet.", "route": "calendar"}
-{"text": "modifier l'emplacement du rdv chez le médecin du 14 février au cabinet b.", "route": "calendar"}
-{"text": "rappeler de prendre mon déjeuner dans 30 minutes", "route": "scheduler"}
-{"text": "envoyer un email à john tous les matins à 8h", "route": "scheduler"}
-{"text": "rappeler de payer mes factures le 5 de chaque mois", "route": "scheduler"}
-{"text": "mettre automatiquement en sourdine mon téléphone pendant les réunions", "route": "scheduler"}
-{"text": "rappeler de faire des étirements toutes les heures", "route": "scheduler"}
-{"text": "envoyer une notification pour l'anniversaire de ma soeur dans 2 semaines", "route": "scheduler"}
-{"text": "rappeler de remplir le distributeur d'eau tous les soirs", "route": "scheduler"}
-{"text": "mettre en place une routine automatique pour préparer mon petit déjeuner chaque matin", "route": "scheduler"}
-{"text": "rappeler de rappeler à mes collègues de la réunion hebdomadaire tous les lundis à 9h", "route": "scheduler"}
-{"text": "envoyer un message d'encouragement à moi-même chaque jour à midi", "route": "scheduler"}
-{"text": "rappeler de faire des courses pour la semaine prochaine le week-end prochain", "route": "scheduler"}
-{"text": "mettre en place une routine automatique pour sauvegarder mes fichiers importants chaque soir", "route": "scheduler"}
-{"text": "rappeler de téléphoner à ma mère tous les dimanches à 18h", "route": "scheduler"}
-{"text": "envoyer une notification pour l'échéance de mon contrat de location dans un mois", "route": "scheduler"}
-{"text": "rappeler de faire de l'exercice tous les soirs après le travail", "route": "scheduler"}
-{"text": "mettre en place une routine automatique pour éteindre toutes les lumières de la maison avant d'aller me coucher", "route": "scheduler"}
-{"text": "rappeler de vérifier mes plantes chaque matin", "route": "scheduler"}
-{"text": "envoyer une notification chaque fois que je reçois un email important", "route": "scheduler"}
-{"text": "rappeler de prendre des notes pendant ma formation en ligne cet après-midi", "route": "scheduler"}
-{"text": "mettre en place une routine automatique pour préparer mon café chaque matin", "route": "scheduler"}
-{"text": "rappelle-moi dans 30 minutes de travailler sur le projet x.", "route": "scheduler"}
-{"text": "tâche récurrente: rappeller tous les lundis à 9h.", "route": "scheduler"}
-{"text": "notification différée pour envoyer un message à john dans 1 heure.", "route": "scheduler"}
-{"text": "automatiser la routine du matin : réveil, douche et petit déjeuner.", "route": "scheduler"}
-{"text": "rappelle-moi chaque jour à 15h de prendre une pause.',", "route": "scheduler"}
-{"text": "notification différée pour rappeler l'anniversaire de marie dans 5 jours.", "route": "scheduler"}
-{"text": "automatiser la routine du soir : préparation de la valise et lecture avant d'aller dormir.", "route": "scheduler"}
-{"text": "rappelle-moi chaque semaine le mardi à 18h de faire mes courses.", "route": "scheduler"}
-{"text": "tâche récurrente automatique: envoyer un message à mon équipe tous les vendredis à midi pour faire un point sur l'avancement.", "route": "scheduler"}
-{"text": "notification différée pour me rappeler de commander des fleurs pour ma mère dans 2 semaines.", "route": "scheduler"}
-{"text": "automatiser la routine du déjeuner : préparation d'une salade pendant que je mange une pomme.", "route": "scheduler"}
-{"text": "rappelle-moi chaque mois le 15 à 10h de payer mes factures.',", "route": "scheduler"}
-{"text": "notification différée pour me rappeler de réserver un hôtel pour mon voyage dans 3 mois.", "route": "scheduler"}
-{"text": "automatiser la routine de nettoyage : passer l'aspirateur et faire la vaisselle tous les jeudis à midi.", "route": "scheduler"}
-{"text": "rappelle-moi chaque année le 20 décembre à 17h de commencer mes achats de noël.", "route": "scheduler"}
-{"text": "tâche récurrente automatique: envoyer un email à mon professeur tous les samedis pour lui poser des questions sur les cours.", "route": "scheduler"}
-{"text": "notification différée pour me rappeler de réserver une table pour mon anniversaire dans 6 mois.", "route": "scheduler"}
-{"text": "automatiser la routine du week-end : préparation d'un barbecue avec mes amis tous les dimanches après-midi.", "route": "scheduler"}
-{"text": "rappel dans 30 minutes pour appeler le client", "route": "scheduler"}
-{"text": "tâche récurrente toutes les heures : envoyer un rapport de vente", "route": "scheduler"}
-{"text": "notification différée demain à 9h pour rappeler l'anniversaire de jean", "route": "scheduler"}
-{"text": "routine automatique tous les jours à midi : faire une pause déjeuner", "route": "scheduler"}
-{"text": "tâche récurrente toutes les semaines le lundi : planifier les réunions hebdomadaires", "route": "scheduler"}
-{"text": "rappel dans 4 heures pour envoyer la proposition commerciale au client", "route": "scheduler"}
-{"text": "notification différée demain soir à 19h pour rappeler l'entraînement de foot", "route": "scheduler"}
-{"text": "tâche récurrente chaque mois le premier jour du mois : mettre à jour les informations fiscales", "route": "scheduler"}
-{"text": "routine automatique tous les dimanches matin : passer la serpillère dans le salon", "route": "scheduler"}
-{"text": "rappel dans une heure pour appeler le médecin et prendre rendez-vous", "route": "scheduler"}
-{"text": "notification différée dans 3 jours pour rappeler l'échéance de la facture d'électricité", "route": "scheduler"}
-{"text": "tâche récurrente chaque trimestre le premier jour du mois : envoyer un rapport trimestriel au siège", "route": "scheduler"}
-{"text": "routine automatique tous les mercredis soirs : préparer la liste de courses", "route": "scheduler"}
-{"text": "rappel dans 15 minutes pour rappeler à anne qu'elle a un entretien d'embauche", "route": "scheduler"}
-{"text": "tâche récurrente chaque année le 31 décembre : préparer la déclaration de revenus annuelle", "route": "scheduler"}
-{"text": "notification différée dimanche prochain à midi pour rappeler l'anniversaire de paul", "route": "scheduler"}
-{"text": "routine automatique tous les vendredis soirs : ranger et nettoyer la cuisine après avoir cuisiné pour le week-end", "route": "scheduler"}
-{"text": "tâche récurrente chaque année le premier janvier : établir un plan d'action annuel", "route": "scheduler"}
-{"text": "rappel dans une heure et demie pour appeler le fournisseur de services et poser une question", "route": "scheduler"}
-{"text": "rappelez-moi dans 30 minutes d'acheter du lait.", "route": "scheduler"}
-{"text": "faire la lessive tous les dimanches à 14h.", "route": "scheduler"}
-{"text": "daysofweek", "route": "scheduler"}
-{"text": "notification", "route": "scheduler"}
-{"text": "envoyer un email à jean pour son anniversaire dans une semaine.", "route": "scheduler"}
-{"text": "automatic_task", "route": "scheduler"}
-{"text": "sauvegarder mes données tous les vendredis à midi.", "route": "scheduler"}
-{"text": "préparer un entretien d embauche dans 48 heures.", "route": "scheduler"}
-{"text": "faire du sport trois fois par semaine à 19h.", "route": "scheduler"}
-{"text": "envoyer une invitation pour la fête d'anniversaire de sophie dans deux mois.", "route": "scheduler"}
-{"text": "payer mes factures le 5 de chaque mois à 9h.", "route": "scheduler"}
-{"text": "daysofmonth", "route": "scheduler"}
-{"text": "rappeler le médecin pour un rendez-vous dans une semaine et demi.", "route": "scheduler"}
-{"text": "faire les courses tous les samedis à 10h.", "route": "scheduler"}
-{"text": "envoyer un message d'anniversaire à mon frère dans trois semaines.", "route": "scheduler"}
-{"text": "sauvegarder mes photos toutes les nuits à 23h.", "route": "scheduler"}
-{"text": "chaque jour", "route": "scheduler"}
-{"text": "étudier pour l'examen de mathématiques dans dix jours.", "route": "scheduler"}
-{"text": "faire du bénévolat tous les mardis et jeudis à 18h.", "route": "scheduler"}
-{"text": "rappel dans 30 minutes de rappeler jean pour confirmer le déjeuner.", "route": "scheduler"}
-{"text": "tâche récurrente automatique tous les lundis à 9h: envoyer un rapport hebdomadaire.", "route": "scheduler"}
-{"text": "notification différée pour l'anniversaire de marie dans 2 semaines", "route": "scheduler"}
-{"text": "routine automatisée tous les vendredis à midi : commander des fleurs pour la maison", "route": "scheduler"}
-{"text": "rappel dans 1 heure de prendre son billet de train pour le week-end", "route": "scheduler"}
-{"text": "tâche récurrente automatique tous les mardi à 14h: appeler le client pour suivre l'avancement du projet.", "route": "scheduler"}
-{"text": "notification différée pour le rendez-vous chez le dentiste dans 3 mois", "route": "scheduler"}
-{"text": "routine automatisée tous les samedis matin : réserver une table au restaurant pour le soir", "route": "scheduler"}
-{"text": "rappel dans 2 jours de rappeler sophie pour confirmer la availability pour le weekend", "route": "scheduler"}
-{"text": "tâche récurrente automatique tous les jeudi à 10h: payer les factures en ligne.", "route": "scheduler"}
-{"text": "notification différée pour l'expiration du permis de conduire dans 6 mois", "route": "scheduler"}
-{"text": "routine automatisée tous les mercredi à midi : commander des provisions pour la semaine", "route": "scheduler"}
-{"text": "rappel dans 4 semaines de rappeler le médecin pour prendre un rendez-vous", "route": "scheduler"}
-{"text": "tâche récurrente automatique tous le dimanche à 18h: faire une sauvegarde des fichiers importants.", "route": "scheduler"}
-{"text": "notification différée pour l'anniversaire de la création de l'entreprise dans un an", "route": "scheduler"}
-{"text": "routine automatisée tous les vendredi soir : envoyer un message au personnel pour le week-end", "route": "scheduler"}
-{"text": "rappel dans 2 heures de vérifier si les enfants ont fait leurs devoirs", "route": "scheduler"}
-{"text": "tâche récurrente automatique tous les mercredi à 9h: appeler le fournisseur pour suivre la livraison.", "route": "scheduler"}
-{"text": "notification différée pour le renouvellement de l'assurance auto dans 10 mois", "route": "scheduler"}
-{"text": "routine automatisée tous les lundi matin : envoyer un rapport d'activité à son supérieur.", "route": "scheduler"}
-{"text": "note que je suis.allergique aux fraises", "route": "note"}
-{"text": "retiens que mon outil préféré est visual studio code", "route": "note"}
-{"text": "memorise que j'habite à paris depuis cinq ans", "route": "note"}
-{"text": "souviens-toi que je travaille en tant que développeur web", "route": "note"}
-{"text": "garde en mémoire que je parle couramment français et anglais", "route": "note"}
-{"text": "enregistre que j'ai décidé de me mettre au yoga cette année", "route": "note"}
-{"text": "note que mon style de travail préféré est le remote pair programming", "route": "note"}
-{"text": "retiens que je suis végan depuis deux ans", "route": "note"}
-{"text": "memorise que je suis actuellement en train d'apprendre react", "route": "note"}
-{"text": "souviens-toi que j'ai l'intention de participer à un marathon prochainement", "route": "note"}
-{"text": "garde en mémoire que mon livre préféré est '1984' de george orwell", "route": "note"}
-{"text": "enregistre que j'ai pris la décision de changer de stack et d'utiliser maintenant python", "route": "note"}
-{"text": "note que je suis intéressé par les voyages interstellaires", "route": "note"}
-{"text": "retiens que je suis un fan de science-fiction depuis mon enfance", "route": "note"}
-{"text": "memorise que mon film préféré est 'inception'", "route": "note"}
-{"text": "souviens-toi que j'ai décidé de commencer à écrire un roman cette année", "route": "note"}
-{"text": "garde en mémoire que je parle également un peu d'espagnol", "route": "note"}
-{"text": "enregistre que je suis en train de suivre des cours de meditation en ligne", "route": "note"}
-{"text": "note que mon alimentation préférée est la cuisine japonaise", "route": "note"}
-{"text": "retiens que je suis un grand amateur de musique électronique", "route": "note"}
-{"text": "note que je dois appeler marc demain", "route": "note"}
-{"text": "rettiens que mon outil préféré est notion", "route": "note"}
-{"text": "memorise que je suis végétarien depuis 2 ans", "route": "note"}
-{"text": "souviens-toi que je vis à paris depuis 5 ans", "route": "note"}
-{"text": "garde en mémoire que j'ai choisi python pour ce projet", "route": "note"}
-{"text": "enregistre que je veux apprendre l'espagnol cette année", "route": "note"}
-{"text": "note que mon prochain objectif professionnel est le management", "route": "note"}
-{"text": "rettiens que je suis allergique aux fruits de mer", "route": "note"}
-{"text": "memorise que je lis actuellement '1984' de george orwell", "route": "note"}
-{"text": "souviens-toi que j'ai choisi ubuntu comme système d'exploitation", "route": "note"}
-{"text": "garde en mémoire que je vais participer à un marathon cette année", "route": "note"}
-{"text": "enregistre que je dois terminer mon rapport pour lundi", "route": "note"}
-{"text": "note que je veux apprendre la guitare électrique", "route": "note"}
-{"text": "rettiens que ma couleur préférée est le bleu", "route": "note"}
-{"text": "memorise que je suis supporter de l'équipe de france de football", "route": "note"}
-{"text": "souviens-toi que je vais suivre des cours de yoga cette année", "route": "note"}
-{"text": "garde en mémoire que je dois réserver mon billet d'avion pour l'été prochain", "route": "note"}
-{"text": "enregistre que j'ai décidé d'adopter un régime alimentaire végan", "route": "note"}
-{"text": "note que je suis en train d'apprendre le javascript", "route": "note"}
-{"text": "rettiens que mon livre préféré est 'catch-22' de joseph heller", "route": "note"}
-{"text": "note que j'ai un rendez-vous chez le dentiste la semaine prochaine", "route": "note"}
-{"text": "retenir maintenant : terminer mon rapport pour demain à midi", "route": "note"}
-{"text": "memorise s'il te plaît : mon vol pour paris décolle à 17h30", "route": "note"}
-{"text": "n'oublie pas de réserver une table pour notre anniversaire ce weekend", "route": "note"}
-{"text": "je veux que tu saches que je suis allergique aux fraises", "route": "note"}
-{"text": "souviens-toi de vérifier nos économies avant de réserver des vacances", "route": "note"}
-{"text": "garde en mémoire : j'ai choisi d'utiliser python pour mon prochain projet", "route": "note"}
-{"text": "enregistre cette idée : créer un blog sur mes voyages à l'étranger", "route": "note"}
-{"text": "note que ma ville préférée est bali, même si je n'y suis jamais allé", "route": "note"}
-{"text": "retenir maintenant : appeler le service technique au sujet de ma imprimante", "route": "note"}
-{"text": "je veux que tu saches que j'ai décidé de deviendra freelance", "route": "note"}
-{"text": "n'oublie pas d'envoyer les photos du week-end dernier à marie et marc", "route": "note"}
-{"text": "memorise ces préférences culinaires : je suis végan depuis trois ans", "route": "note"}
-{"text": "souviens-toi de chercher des informations sur le yoga en ligne", "route": "note"}
-{"text": "garde en mémoire que j'ai choisi un nouvel abonnement de streaming cette semaine", "route": "note"}
-{"text": "enregistre que mon travail actuel est une application mobile pour aider les enfants à étudier", "route": "note"}
-{"text": "note que je suis intéressé par l'apprentissage de la guitareelectric", "route": "note"}
-{"text": "retenir maintenant : prévoir un budget supplémentaire pour le déménagement", "route": "note"}
-{"text": "note que j'utilise préférentiellement python pour mes projets", "route": "note"}
-{"text": "retiens que je suis un développeur web freelance", "route": "note"}
-{"text": "memorise s'il te plaît, mon projet en cours est la refonte d'un site e-commerce", "route": "note"}
-{"text": "n'oublie pas que j'ai choisi react comme stack front-end", "route": "note"}
-{"text": "garde en mémoire ma ville préférée, tokyo", "route": "note"}
-{"text": "enregistre que je suis végétarien", "route": "note"}
-{"text": "souviens-toi de mon objectif professionnel à court terme : obtenir un contrat avec une entreprise locale", "route": "note"}
-{"text": "note que je travaille mieux en écoutant de la musique", "route": "note"}
-{"text": "retiens que j'utilise trello pour gérer mes tâches", "route": "note"}
-{"text": "memorise ma date d'anniversaire, le 15 avril", "route": "note"}
-{"text": "n'oublie pas que j'ai hâte de visiter l'italie prochainement", "route": "note"}
-{"text": "garde en mémoire mon intention d'apprendre l'espagnol cette année", "route": "note"}
-{"text": "enregistre que je suis un fan inconditionnel de football", "route": "note"}
-{"text": "souviens-toi s'il te plaît, de mon aversion pour le café", "route": "note"}
-{"text": "note que j'ai récemment découvert la méditation et que cela m'aide beaucoup dans mon travail", "route": "note"}
-{"text": "retiens que je suis intéressé par l'investissement en bourse", "route": "note"}
-{"text": "memorise que mon chiffre préféré est 7", "route": "note"}
-{"text": "n'oublie pas que je suis un grand lecteur de romanspolice", "route": "note"}
-{"text": "garde en mémoire ma résolution nouvelle année : faire plus d'exercice régulièrement", "route": "note"}
-{"text": "note que j'habite à paris", "route": "note"}
-{"text": "retiens que je suis développeur", "route": "note"}
-{"text": "memorise que mon outil préféré est visual studio code", "route": "note"}
-{"text": "garde en mémoire que je mange vegetarian", "route": "note"}
-{"text": "souviens-toi que je vais apprendre react cette année", "route": "note"}
-{"text": "enregistre que je viens de prendre la décision d'acheter un macbook pro pour mon travail", "route": "note"}
-{"text": "je veux que tu saches que je suis intéressé par l'investissement éthique", "route": "note"}
-{"text": "n oublie pas que je dois finir mon projet personnel avant fin octobre", "route": "note"}
-{"text": "retiens que j'ai décidé de me mettre à la course à pied tous les matins", "route": "note"}
-{"text": "memorise que je habla español fluidamente", "route": "note"}
-{"text": "garde en mémoire que mon objectif professionnel est de devenir cto dans une startup", "route": "note"}
-{"text": "souviens-toi que je suis allergique aux fruits de mer", "route": "note"}
-{"text": "enregistre que je veux apprendre le piano cette année", "route": "note"}
-{"text": "note que je suis en train de lire 'sapiens' de yuval noah harari", "route": "note"}
-{"text": "retiens que j'ai décidé d'adopter un régime alimentaire sans gluten", "route": "note"}
-{"text": "garde en mémoire que je vais bientôt déménager à berlin pour un échange professionnel", "route": "note"}
-{"text": "souviens-toi que mon style de travail préféré est la méthode pomodoro", "route": "note"}
-{"text": "je veux que tu saches que je suis intéressé par l'investissement en cryptomonnaies", "route": "note"}
-{"text": "n oublie pas que j'ai décidé d'apprendre le yoga pour gérer mon stress", "route": "note"}
-{"text": "note que je veux que tu retiennes maintenant que mon outil préféré pour écrire est google docs", "route": "note"}
-{"text": "retiens que j'aime travailler dans un environnement silencieux mais pas austère", "route": "note"}
-{"text": "memorise que je suis actuellement basé à paris", "route": "note"}
-{"text": "souviens-toi que je suis développeur web de métier mais que je travaille actuellement sur un projet en python", "route": "note"}
-{"text": "garde en mémoire que j'ai finalement décidé d'utiliser le stack mern pour mon prochain projet", "route": "note"}
-{"text": "enregistre que ma connaissance la plus importante currently, c'est l'importance de la documentation dans le développement de logiciels", "route": "note"}
-{"text": "note que tu devrais savoir que je suis végétarien depuis cinq ans", "route": "note"}
-{"text": "retiens que j'aime travailler en musique mais pas avec des parole", "route": "note"}
-{"text": "memorise que je viens d'acheter un nouveau laptop pour améliorer ma productivité", "route": "note"}
-{"text": "souviens-toi que j'ai pris la décision hier de me mettre à l'apprentissage automatique cette année", "route": "note"}
-{"text": "garde en mémoire que mon livre préféré est 'sapiens: a brief history of humankind'", "route": "note"}
-{"text": "enregistre que je suis intéressé par le voyage interplanétaire depuis mon enfance", "route": "note"}
-{"text": "note que tu devrais savoir que j'ai un chat noir nommé luna", "route": "note"}
-{"text": "retiens que j'ai appris hier que le japon est le pays avec le plus de robots par habitant", "route": "note"}
-{"text": "memorise que j'ai pris la décision il y a six mois de faire du sport régulièrement", "route": "note"}
-{"text": "souviens-toi que mon film préféré est 'the shawshank redemption'", "route": "note"}
-{"text": "garde en mémoire que je parle couramment français et anglais mais que je suis en train d'apprendre l'allemand", "route": "note"}
-{"text": "enregistre que je suis intéressé par la méditation depuis quelques mois", "route": "note"}
-{"text": "peux tu fouiller sur le net et me donner une explication clair et concise de l'algorithme a* ? j'en ai besoin pour faire un graphe de proximité dans un goap.", "route": "conversation"}
-{"text": "liste moi les fichiers dans data/docs", "route": "shell"}
-{"text": "salut, liste moi les fichiers dans le dossier docs", "route": "shell"}
-{"text": "décidément, lit moi les 100 premières lignes du fichier train_router.py", "route": "shell"}
-{"text": "pour vérifier que tout fonctionne, vaffiche moi les 100 premières lignes du fichier train_router.py", "route": "shell"}
-{"text": "trie par date d'écriture les fichiers du dossier sessions, ensuite, affiche moi le contenu du premier json de la liste", "route": "conversation"}
-{"text": "donne moi en une combinaison de commande shell le contenu du fichier json de session le plus récent en date de création", "route": "conversation"}
-{"text": "ok on va faire par étapes ce truc et on verra comment plus tard je pourrais me servir de cet exemple pour construire des commandes plus complexes....", "route": "conversation"}
-{"text": "liste moi par date de création les fichiers de sessions, uniquement les json", "route": "conversation"}
-{"text": "attend ! tu as pu lancer une commande shell sans demander d'autorisations ? ou bien il trainais dans ta mémoire ?", "route": "conversation"}
-{"text": "salut, j'ai commencé un nouveau projet cette semaine,", "route": "conversation"}
-{"text": "un jeu en unity avec de l'ia comportementale pour les pnjexit", "route": "conversation"}
-{"text": "toi > salut, j'ai commencé un nouveau projet cette semaine,", "route": "conversation"}
-{"text": "un jeu en unity avec de l'ia comportementale pour les pnj", "route": "conversation"}
-{"text": "j'ai commencé un jeu unity avec goap", "route": "conversation"}
-{"text": "trappel moi le programme de la semaine", "route": "conversation"}
-{"text": "donne moi la prochaine session de projets, j'ai une deadline pour cettte journée là à rendre.", "route": "conversation"}
-{"text": "je me suis trompé, la deadline n'est pas celle de cet après midi, mais bien la prochaine session projet.", "route": "conversation"}
-{"text": "nous sommes mercredi, ne prend pas en compte la session de projet d'aujourd'hui, mais défini la prochaine session de projet en tant que deadline", "route": "conversation"}
-{"text": "aujourd'hui j'ai une session de projets, mais j'ai mis en place une deadline pour la session qui suivra, peux tu me l'a marquer pour la signaler ?", "route": "conversation"}
-{"text": "quel est le programme de mardi ?", "route": "conversation"}
-{"text": "peux tu me donner le programme de mardi ?", "route": "conversation"}
-{"text": "donne-moi le programme de jeudi", "route": "conversation"}
-{"text": "quel est mon programme pour mercredi ?", "route": "conversation"}
-{"text": "c'est quoi le programme de demain ?", "route": "conversation"}
-{"text": "le programme de la semaine prochaine", "route": "conversation"}
-{"text": "quel est mon programme aujourd'hui ?", "route": "conversation"}
-{"text": "donne-moi le programme du week-end", "route": "conversation"}
-{"text": "c'est quoi mon programme pour vendredi ?", "route": "conversation"}
-{"text": "dis-moi le programme de lundi", "route": "conversation"}
-{"text": "donne-moi un résumé de ma semaine", "route": "conversation"}
-{"text": "donne-moi les infos sur mon projet en cours", "route": "conversation"}
-{"text": "peux-tu me donner le programme de demain ?", "route": "conversation"}
-{"text": "peux-tu me donner le programme de mercredi ?", "route": "conversation"}
-{"text": "peux-tu me donner le programme de vendredi ?", "route": "conversation"}
-{"text": "peux-tu me dire ce qu'il y a prévu jeudi ?", "route": "conversation"}
-{"text": "dis-moi ce qui est prévu mardi", "route": "conversation"}
-{"text": "qu'est-ce qui est prévu mercredi ?", "route": "conversation"}
-{"text": "qu'est-ce que j'ai prévu samedi ?", "route": "conversation"}
-{"text": "c'est quoi mon agenda de demain ?", "route": "conversation"}
-{"text": "donne-moi mon agenda de la semaine", "route": "conversation"}
-{"text": "qu'est-ce que j'ai comme activités vendredi ?", "route": "conversation"}
-{"text": "c'est quoi le planning de jeudi ?", "route": "conversation"}
-{"text": "quel est le planning de mardi ?", "route": "conversation"}
+{"text": "/data/report.txt", "route": "shell"}
+{"text": "-r 'pattern' /data", "route": "shell"}
+{"text": "hello > /data/greeting.txt", "route": "shell"}
+{"text": "/data/empty\\_dir/", "route": "shell"}
+{"text": "/data/source.txt /new\\_dir/destination.txt", "route": "shell"}
+{"text": "+x /data/script.py", "route": "shell"}
+{"text": "username /data/file.txt", "route": "shell"}
+{"text": "-s /data/source.txt /new\\_dir/link.txt", "route": "shell"}
+{"text": "cat /data/fichier.txt", "route": "shell"}
+{"text": "less /data/fichier.pdf", "route": "shell"}
+{"text": "find /data -name '*.pdf'", "route": "shell"}
+{"text": "touch /data/nouveau\\_fichier.txt", "route": "shell"}
+{"text": "mv /data/fichier.txt /data/dossier\\_deplacable/", "route": "shell"}
+{"text": "grep -r 'mot\\_cle' /data", "route": "shell"}
+{"text": "wc -l /data/fichier.txt", "route": "shell"}
+{"text": "less +F /data/fichier.log", "route": "shell"}
+{"text": "chmod +x /data/script.py", "route": "shell"}
+{"text": "chown utilisateur:groupe /data/fichier.txt", "route": "shell"}
+{"text": "tar -czvf /data/backup.tar.gz /data/fichier.txt", "route": "shell"}
+{"text": "ssh utilisateur@serveur 'cat /data/fichier.txt'", "route": "shell"}
+{"text": "scp /data/fichier.txt utilisateur@serveur:/data", "route": "shell"}
+{"text": "rsync -avz /data/ utilisateur@serveur:/data", "route": "shell"}
+{"text": "cat /data/docs.txt", "route": "shell"}
+{"text": "less /data/docs.pdf", "route": "shell"}
+{"text": "find /data -name *.txt", "route": "shell"}
+{"text": "find /data -iname *.PDF", "route": "shell"}
+{"text": "touch /data/newfile.txt", "route": "shell"}
+{"text": "rm /data/oldfile.txt", "route": "shell"}
+{"text": "mv /data/image.jpg /backup/images", "route": "shell"}
+{"text": "cp /data/docs.txt /backup/docs.txt", "route": "shell"}
+{"text": "echo 'Hello Mnemo!' > /data/hello.txt", "route": "shell"}
+{"text": "grep -r \"keyword\" /data", "route": "shell"}
+{"text": "cd /data/subfolder", "route": "shell"}
+{"text": "find /data -empty", "route": "shell"}
+{"text": "find /data -type f -mtime -1", "route": "shell"}
+{"text": "find /data -size +1M", "route": "shell"}
+{"text": "find /data -perm 755", "route": "shell"}
+{"text": "find /data -user username", "route": "shell"}
+{"text": "{'msg1': 'ls /data'}", "route": "shell"}
+{"text": "{'msg2': 'cat /data/file1.txt'}", "route": "shell"}
+{"text": "{'msg3': 'less /data/file1.pdf'}", "route": "shell"}
+{"text": "{'msg4': \"find /data -name '*.txt'\"}", "route": "shell"}
+{"text": "{'msg5': \"find /data -name '*.pdf'\"}", "route": "shell"}
+{"text": "{'msg6': \"find /data -name '*script*.py'\"}", "route": "shell"}
+{"text": "{'msg7': 'touch /data/newfile.txt'}", "route": "shell"}
+{"text": "{'msg8': 'rm /data/file1.txt'}", "route": "shell"}
+{"text": "{'msg9': 'mv /data/file2.txt /data/file2 backup.txt'}", "route": "shell"}
+{"text": "{'msg10': 'python /data/script1.py'}", "route": "shell"}
+{"text": "{'msg11': 'lst /data'}", "route": "shell"}
+{"text": "{'msg12': 'cat /data/file*.txt'}", "route": "shell"}
+{"text": "{'msg13': 'less /data/*.pdf'}", "route": "shell"}
+{"text": "{'msg14': \"find /data -iname '*script*'\"}", "route": "shell"}
+{"text": "{'msg15': \"find /data -iname '*data*'\"}", "route": "shell"}
+{"text": "{'msg16': 'touch /data/newdata.txt'}", "route": "shell"}
+{"text": "{'msg17': 'rmdir /data/emptydir'}", "route": "shell"}
+{"text": "{'msg18': 'mv /data/file3.txt /data/backup/file3.txt'}", "route": "shell"}
+{"text": "{'msg19': 'python /data/utils/script2.py'}", "route": "shell"}
+{"text": "{'msg20': 'montre-moi tous mes fichiers PDF dans le dossier /data'}", "route": "shell"}
+{"text": "Créer un événement pour le 15 mai prochain intitulé \\", "route": "calendar"}
+{"text": "de 10h à 12h.", "route": "calendar"}
+{"text": "Modifier l'heure de mon RDV chez le dentiste le 28 juin prochain à 16h.", "route": "calendar"}
+{"text": "Déplacer mon cours de yoga le 5 juillet prochain à 18h30.", "route": "calendar"}
+{"text": "Annuler mon déjeuner avec des amis le 10 août prochain.", "route": "calendar"}
+{"text": "Bloquer deux heures pour travailler sur mon rapport le 25 septembre prochain de 14h à 16h.", "route": "calendar"}
+{"text": "Créer un événement intitulé 'Réunion de projet' le 20 avril à 14h00.", "route": "calendar"}
+{"text": "Modifier l'heure de l'événement 'Dîner avec des amis' de 19h00 à 20h00", "route": "calendar"}
+{"text": "Déplacer l'événement 'Rendez-vous chez le dentiste' au 15 mai", "route": "calendar"}
+{"text": "Annuler l'événement 'Cours de yoga' du 25 avril", "route": "calendar"}
+{"text": "Créer un rappel pour 'Appeler le client XYZ' le 3 mai à 10h00", "route": "calendar"}
+{"text": "Modifier la durée de l'événement 'Conférence' de 1 heure à 1 heure et 30 minutes", "route": "calendar"}
+{"text": "Bloquer 2 heures pour du temps personnel le 18 avril", "route": "calendar"}
+{"text": "Supprimer l'événement 'Rendez-vous chez le médecin'", "route": "calendar"}
+{"text": "Créer un événement récurrent 'Séance de sport' tous les lundis à 7h00", "route": "calendar"}
+{"text": "Modifier la fréquence de l'événement 'Réunion de suivi' de toutes les semaines à toutes les deux semaines", "route": "calendar"}
+{"text": "Annuler tous les événements pour le 15 avril", "route": "calendar"}
+{"text": "Bloquer la journée complète du 20 avril pour un voyage d'affaires", "route": "calendar"}
+{"text": "Créer un événement multijour 'Congrès annuel' du 15 au 17 mai", "route": "calendar"}
+{"text": "Modifier la localisation de l'événement 'Visite chez le client ABC' de Paris à Londres", "route": "calendar"}
+{"text": "Supprimer tous les événements pour la journée du 1er mai", "route": "calendar"}
+{"text": "Créer un rappel pour 'Régler la facture' le 15 mai à 9h00", "route": "calendar"}
+{"text": "Modifier la description de l'événement 'Formation sur la gestion de projet' pour inclure des informations supplémentaires", "route": "calendar"}
+{"text": "Annuler tous les événements pour le week-end du 22-23 avril", "route": "calendar"}
+{"text": "Bloquer 30 minutes tous les vendredis pour des appels personnels", "route": "calendar"}
+{"text": "Créer un événement appelé 'Réunion avec le département marketing' le 25 mars à 14h.", "route": "calendar"}
+{"text": "Modifier l'événement 'RDV chez le médecin' au 15 avril à 10h.", "route": "calendar"}
+{"text": "Déplacer l'événement 'Conférence sur l'IA' au 18 mai à 15h.", "route": "calendar"}
+{"text": "Supprimer l'événement 'Dîner avec des amis' le 12 juin.", "route": "calendar"}
+{"text": "Annuler l'événement 'Séance de sport' le 20 juillet.", "route": "calendar"}
+{"text": "Créer un rappel pour la réunion hebdomadaire tous les mardis à 9h.", "route": "calendar"}
+{"text": "Modifier la réunion hebdomadaire au jeudi à 10h.", "route": "calendar"}
+{"text": "Déplacer l'événement 'Formation en ligne' au 10 septembre à 11h.", "route": "calendar"}
+{"text": "Supprimer l'événement 'RDV de contrôle chez le dentiste' le 5 octobre.", "route": "calendar"}
+{"text": "Bloquer du temps pour travailler sur le projet X du 2 novembre au 4 novembre.", "route": "calendar"}
+{"text": "Créer un événement récurrent 'Cours de yoga' tous les vendredis à 18h.", "route": "calendar"}
+{"text": "Modifier l'événement 'Cours de yoga' au lundi à 18h.", "route": "calendar"}
+{"text": "Déplacer l'événement 'Cours de yoga' au mercredi à 18h.", "route": "calendar"}
+{"text": "Supprimer l'événement 'Cours de yoga' le 3 décembre.", "route": "calendar"}
+{"text": "Bloquer du temps pour les vacances du 20 décembre au 3 janvier.", "route": "calendar"}
+{"text": "Créer un événement 'Anniversaire de mariage' le 14 février à 20h.", "route": "calendar"}
+{"text": "Modifier l'événement 'Anniversaire de mariage' au 15 février à 21h.", "route": "calendar"}
+{"text": "Déplacer l'événement 'Anniversaire de mariage' au 16 février à 20h.", "route": "calendar"}
+{"text": "Supprimer l'événement 'Anniversaire de mariage' le 17 février.", "route": "calendar"}
+{"text": "Créer un événement demain à 14h pour une réunion", "route": "calendar"}
+{"text": "Modifier l'heure de mon RDV chez le dentiste à 10h tomorrow", "route": "calendar"}
+{"text": "Déplacer mon cours de yoga de jeudi à vendredi", "route": "calendar"}
+{"text": "Annuler mon déjeuner avec John pour aujourd'hui", "route": "calendar"}
+{"text": "Bloquer deux heures pour travailler sur mon rapport demain après-midi", "route": "calendar"}
+{"text": "Créer un événement pour la conférence de demain à 9h", "route": "calendar"}
+{"text": "Modifier l'emplacement de mon RDV avec la banque à l'agence principale", "route": "calendar"}
+{"text": "Annuler l'événement de ce soir chez mes amis", "route": "calendar"}
+{"text": "Bloquer une heure pour mes appels téléphoniques demain matin", "route": "calendar"}
+{"text": "Créer un événement pour ma réunion hebdomadaire de projet vendredi à 10h", "route": "calendar"}
+{"text": "Modifier l'heure de mon déjeuner avec Sarah à 12h30 tomorrow", "route": "calendar"}
+{"text": "Déplacer mon cours de fitness de samedi à dimanche", "route": "calendar"}
+{"text": "Annuler mon rendez-vous chez le coiffeur pour jeudi", "route": "calendar"}
+{"text": "Bloquer une journée complète le 20 novembre pour mon voyage d'affaires", "route": "calendar"}
+{"text": "Créer un événement pour l'anniversaire de mon frère le 15 janvier à 18h", "route": "calendar"}
+{"text": "Modifier l'heure de ma consultation de suivi avec mon médecin à 15h30 tomorrow", "route": "calendar"}
+{"text": "Annuler mon cours de cuisine pour jeudi soir", "route": "calendar"}
+{"text": "Bloquer 30 minutes pour vérifier mes emails demain matin", "route": "calendar"}
+{"text": "Créer un événement pour la fête d'anniversaire de mon neveu le 28 février à 15h", "route": "calendar"}
+{"text": "Modifier l'heure de ma conférence téléphonique de mercredi à 11h", "route": "calendar"}
+{"text": "Créer un nouvel événement le 15/03 à 14h avec 'Réunion de projet'", "route": "calendar"}
+{"text": "Modifier l'événement 'Dîner avec amis' au 18/03 à 20h", "route": "calendar"}
+{"text": "Déplacer l'événement 'Rendez-vous chez le médecin' au 22/03 à 10h", "route": "calendar"}
+{"text": "Annuler l'événement 'Cinéma avec coloc' prévu le 25/03", "route": "calendar"}
+{"text": "Bloquer du temps pour 'Travail sur rapport' le 30/03 de 9h à 12h", "route": "calendar"}
+{"text": "Créer un nouveau RDV le 05/04 avec 'Client potentiel' à 11h", "route": "calendar"}
+{"text": "Modifier l'heure de l'événement ' Yoga' au 07/04 à 19h30", "route": "calendar"}
+{"text": "Déplacer l'événement 'Rencontre avec famille' au 12/04 à 15h", "route": "calendar"}
+{"text": "Annuler l'événement 'Séminaire' prévu le 19/04", "route": "calendar"}
+{"text": "Bloquer du temps pour 'Préparation examens' le 24/04 de 14h à 18h", "route": "calendar"}
+{"text": "Créer un nouvel événement le 02/05 à 10h avec 'Small Council'", "route": "calendar"}
+{"text": "Modifier l'événement 'Dîner de soutien' au 06/05 à 19h30", "route": "calendar"}
+{"text": "Déplacer l'événement 'Formation' au 16/05 à 9h", "route": "calendar"}
+{"text": "Annuler l'événement 'Concert' prévu le 23/05", "route": "calendar"}
+{"text": "Bloquer du temps pour 'Projet spécial' le 28/05 de 10h à 13h", "route": "calendar"}
+{"text": "Créer un nouveau RDV le 09/06 avec 'Partenaires commerciaux' à 14h", "route": "calendar"}
+{"text": "Modifier l'heure de l'événement 'Cours de cuisine' au 11/06 à 18h", "route": "calendar"}
+{"text": "Déplacer l'événement 'Rencontre avec investisseurs' au 18/06 à 11h", "route": "calendar"}
+{"text": "Annuler l'événement 'Conférence' prévu le 25/06", "route": "calendar"}
+{"text": "Bloquer du temps pour 'Vacances' du 03/07 au 10/07", "route": "calendar"}
+{"text": "Créer un événement appelé 'Réunion avec l'équipe' le 2023-03-15 à 14h00.", "route": "calendar"}
+{"text": "Modifier l'événement 'Déjeuner avec clients' au 2023-03-10 à 12h30.", "route": "calendar"}
+{"text": "Déplacer l'événement 'Conférence' du 2023-03-20 au 2023-04-05.", "route": "calendar"}
+{"text": "Annuler l'événement 'Formation' prévu le 2023-03-25.", "route": "calendar"}
+{"text": "Bloquer du temps pour 'Travail sur le projet X' le 2023-03-17 de 9h00 à 12h00.", "route": "calendar"}
+{"text": "Ajouter un nouvel événement appelé 'rdv chez le dentiste' le 2023-03-28 à 10h00.", "route": "calendar"}
+{"text": "Modifier l'événement 'rdv chez l'ophtalmo' au 2023-04-12 à 15h00.", "route": "calendar"}
+{"text": "Déplacer l'événement 'Formation en ligne' du 2023-03-30 au 2023-04-20.", "route": "calendar"}
+{"text": "Annuler l'événement 'Cocktail networking' prévu le 2023-03-22.", "route": "calendar"}
+{"text": "Bloquer du temps pour 'Préparation de la présentation' le 2023-03-29 de 13h00 à 16h00.", "route": "calendar"}
+{"text": "Créer un nouvel événement appelé 'Rendez-vous médical' le 2023-04-04 à 09h00.", "route": "calendar"}
+{"text": "Modifier l'événement 'Déjeuner avec la famille' au 2023-04-15 à 12h30.", "route": "calendar"}
+{"text": "Déplacer l'événement 'Randonnée' du 2023-04-10 au 2023-05-05.", "route": "calendar"}
+{"text": "Annuler l'événement 'Atelier de yoga' prévu le 2023-04-18.", "route": "calendar"}
+{"text": "Bloquer du temps pour 'Travail sur le rapport' le 2023-04-24 de 08h30 à 12h30.", "route": "calendar"}
+{"text": "Créer un nouvel événement appelé 'Congrès professionnels' le 2023-05-01 à 09h00.", "route": "calendar"}
+{"text": "Modifier l'événement 'Voyage d Affairs' au 2023-05-12 à 14h00.", "route": "calendar"}
+{"text": "Déplacer l'événement 'Formation sur les réseaux sociaux' du 2023-05-20 au 2023-06-05.", "route": "calendar"}
+{"text": "Annuler l'événement 'Séminaire sur la gestion du temps' prévu le 2023-05-25.", "route": "calendar"}
+{"text": "Bloquer du temps pour 'Préparation de l'examen' le 2023-06-09 de 10h00 à 13h00.", "route": "calendar"}
+{"text": "Rappeler de prendre ma pilule dans 12 heures", "route": "scheduler"}
+{"text": "Tâche récurrente : rappeller tous les jours à 7h de boire de l'eau", "route": "scheduler"}
+{"text": "Notification différée : rappeler de payer mes factures dans 3 jours", "route": "scheduler"}
+{"text": "Routine automatisée : envoyer un e-mail à mon patron tous les vendredis à 17h", "route": "scheduler"}
+{"text": "Rappeler de téléphoner à ma mère dans 1 heure", "route": "scheduler"}
+{"text": "Tâche récurrente : rappeler toutes les semaines de faire des exercices de yoga", "route": "scheduler"}
+{"text": "Notification différée : rappeler de faire les courses dans 2 jours", "route": "scheduler"}
+{"text": "Routine automatisée : mettre mon réveil tous les matins à 6h30", "route": "scheduler"}
+{"text": "Rappeler de travailler sur mon projet dans 30 minutes", "route": "scheduler"}
+{"text": "Tâche récurrente : rappeler tous les mois de faire un bilan de mes finances", "route": "scheduler"}
+{"text": "Notification différée : rappeler de rappeler à mon collègue de son rendez-vous dans une semaine", "route": "scheduler"}
+{"text": "Routine automatisée : envoyer un message à mon groupe de travail tous les lundis à 9h", "route": "scheduler"}
+{"text": "Rappeler de réserver mes billets d'avion dans 48 heures", "route": "scheduler"}
+{"text": "Tâche récurrente : rappeler tous les ans de faire un bilan de santé", "route": "scheduler"}
+{"text": "Notification différée : rappeler de féliciter mon ami pour son anniversaire dans 5 jours", "route": "scheduler"}
+{"text": "Routine automatisée : mettre à jour mon calendrier tous les samedis à midi", "route": "scheduler"}
+{"text": "Rappeler de finir mon rapport dans 2 heures", "route": "scheduler"}
+{"text": "Tâche récurrente : rappeler toutes les semaines de faire une promenade en forêt", "route": "scheduler"}
+{"text": "Notification différée : rappeler de préparer le dîner de Thanksgiving dans 1 mois", "route": "scheduler"}
+{"text": "Routine automatisée : envoyer un message à ma famille tous les dimanches à 20h", "route": "scheduler"}
+{"text": "{'type': 'reminder', 'content': 'Appeler John dans 30 minutes'}", "route": "scheduler"}
+{"text": "{'type': 'recurring-task', 'content': 'Faire des exercices de yoga tous les matins'}", "route": "scheduler"}
+{"text": "{'type': 'notification', 'content': \"Rappel pour l'anniversaire de Marie dans 5 jours\"}", "route": "scheduler"}
+{"text": "{'type': 'automated-routine', 'content': 'Envoyer un rapport hebdomadaire chaque lundi à 9h'}", "route": "scheduler"}
+{"text": "{'type': 'reminder', 'content': 'Préparer le diner pour ce soir à 18h'}", "route": "scheduler"}
+{"text": "{'type': 'recurring-task', 'content': 'Faire les courses une fois par semaine'}", "route": "scheduler"}
+{"text": "{'type': 'notification', 'content': 'Rappel pour le rendez-vous chez le dentiste dans 2 semaines'}", "route": "scheduler"}
+{"text": "{'type': 'automated-routine', 'content': 'Payer les factures le 15 de chaque mois'}", "route": "scheduler"}
+{"text": "{'type': 'reminder', 'content': 'Terminer le rapport pour demain à 10h'}", "route": "scheduler"}
+{"text": "{'type': 'recurring-task', 'content': 'Faire la méditation quotidienne'}", "route": "scheduler"}
+{"text": "{'type': 'notification', 'content': 'Rappel pour le voyage à Paris dans 3 mois'}", "route": "scheduler"}
+{"text": "{'type': 'automated-routine', 'content': 'Envoyer des vœux de anniversaire chaque année'}", "route": "scheduler"}
+{"text": "{'type': 'reminder', 'content': 'Préparer la présentation pour demain midi'}", "route": "scheduler"}
+{"text": "{'type': 'recurring-task', 'content': 'Faire du bénévolat une fois par mois'}", "route": "scheduler"}
+{"text": "{'type': 'notification', 'content': 'Rappel pour la réunion de projet dans 1 semaine'}", "route": "scheduler"}
+{"text": "{'type': 'automated-routine', 'content': 'Sauvegarder les fichiers importants chaque soir'}", "route": "scheduler"}
+{"text": "{'type': 'reminder', 'content': \"Acheter des fleurs pour l'anniversaire de Sophie demain\"}", "route": "scheduler"}
+{"text": "{'type': 'recurring-task', 'content': 'Faire du sport 3 fois par semaine'}", "route": "scheduler"}
+{"text": "{'type': 'notification', 'content': 'Rappel pour la conférence dans 2 mois'}", "route": "scheduler"}
+{"text": "{'type': 'automated-routine', 'content': 'Mettre à jour le budget familial chaque mois'}", "route": "scheduler"}
+{"text": "Rappel dans 30 min pour appeler John", "route": "scheduler"}
+{"text": "T√Ęche r√©currente automatique : Payer les factures le 1er de chaque mois", "route": "scheduler"}
+{"text": "Notification diff√©r√©e pour le rendez-vous chez le m√©decin dans 1 semaine", "route": "scheduler"}
+{"text": "Routine automatis√©e : Rappel pour l'√©oque de la lessive tous les dimanches √† 14h", "route": "scheduler"}
+{"text": "Rappel dans 2 heures pour envoyer le rapport √† votre patron", "route": "scheduler"}
+{"text": "T√Ęche r√©currente automatique : Prenez vos m√©dicaments √† 20h tous les soirs", "route": "scheduler"}
+{"text": "Notification diff√©r√©e pour votre anniversaire dans 1 mois", "route": "scheduler"}
+{"text": "Routine automatis√©e : Rappel pour l'arrosage des plantes tous les matins √† 8h", "route": "scheduler"}
+{"text": "Rappel dans 1 heure pour r√©server votre ticket de cin√©ma", "route": "scheduler"}
+{"text": "T√Ęche r√©currente automatique : Rappel pour la gym tous les lundis √† 19h", "route": "scheduler"}
+{"text": "Notification diff√©r√©e pour le d√©but des s√©ances de yoga dans 2 semaines", "route": "scheduler"}
+{"text": "Routine automatis√©e : Rappel pour nourrir vos animaux de compagnie tous les soirs √† 22h", "route": "scheduler"}
+{"text": "Rappel dans 30 minutes pour r√©viser pour votre examen", "route": "scheduler"}
+{"text": "T√Ęche r√©currente automatique : Rappel pour les courses alimentaires tous les vendredis √† 18h", "route": "scheduler"}
+{"text": "Notification diff√©r√©e pour votre voyage dans 3 mois", "route": "scheduler"}
+{"text": "Routine automatis√©e : Rappel pour √©teindre les lumi√¨res √† la maison tous les soirs √† 23h", "route": "scheduler"}
+{"text": "Rappel dans 45 minutes pour appeler votre m√®re", "route": "scheduler"}
+{"text": "T√Ęche r√©currente automatique : Rappel pour la prise du petit-d√©jeuner tous les matins √† 7h", "route": "scheduler"}
+{"text": "Notification diff√©r√©e pour votre prochain anniversaires de mariage dans 6 mois", "route": "scheduler"}
+{"text": "Routine automatis√©e : Rappel pour les m√©ditations tous les samedis √† 10h", "route": "scheduler"}
+{"text": "Rappeler de prendre mon m├ędicament dans 2 heures", "route": "scheduler"}
+{"text": "Envoyer un email quotidien aux clients", "route": "scheduler"}
+{"text": "Rappeler de r├ęserver une table pour 20h", "route": "scheduler"}
+{"text": "Notifier le projet X dans 5 minutes", "route": "scheduler"}
+{"text": "Envoyer une notification weekly pour les rapports de projet", "route": "scheduler"}
+{"text": "Rappeler de payer la facture de l'├ęg└lement dans 1 jour", "route": "scheduler"}
+{"text": "Ajouter une tache r├ęgulire pour la pr├ęsentation mensuelle", "route": "scheduler"}
+{"text": "Envoyer une notification pour la r├ęgunion hebdomadaire dans 10 minutes", "route": "scheduler"}
+{"text": "Rappeler de faire les courses dans 2 heures", "route": "scheduler"}
+{"text": "Cr├ęer une routine pour le nettoyage de la maison", "route": "scheduler"}
+{"text": "Rappeler de r├ęserver un taxi pour 12h", "route": "scheduler"}
+{"text": "Envoyer une notification pour le d├ęgagement de la maison dans 1 jour", "route": "scheduler"}
+{"text": "Cr├ęer une routine pour le suivi des factures mensuelles", "route": "scheduler"}
+{"text": "Rappeler de r├ęserver un appel avec le client dans 1 heure", "route": "scheduler"}
+{"text": "Envoyer une notification pour la r├ęgunion du projet X dans 30 minutes", "route": "scheduler"}
+{"text": "Cr├ęer une routine pour la planification hebdomadaire", "route": "scheduler"}
+{"text": "Rappeler de r├ęserver un hotel pour la semaine prochaine", "route": "scheduler"}
+{"text": "Envoyer une notification pour l'anniversaire de mon chef", "route": "scheduler"}
+{"text": "Cr├ęer une routine pour la gestion des emails quotidienne", "route": "scheduler"}
+{"text": "Rappelez-moi de prendre mes médicaments dans 2 heures", "route": "scheduler"}
+{"text": "Déclenchez une tâche récurrente pour arroser les plantes toutes les semaines", "route": "scheduler"}
+{"text": "Envoyez-moi une notification pour payer mes factures dans 3 jours", "route": "scheduler"}
+{"text": "Configurez une routine automatique pour éteindre les lumières à 22h tous les soirs", "route": "scheduler"}
+{"text": "Rappelez-moi de nourrir mon animal de compagnie dans 1 heure", "route": "scheduler"}
+{"text": "Déclenchez une tâche récurrente pour sauvegarder mes fichiers importants toutes les nuits", "route": "scheduler"}
+{"text": "Envoyez-moi une notification pour appeler ma mère dans 2 jours", "route": "scheduler"}
+{"text": "Configurez une routine automatique pour mettre mon réveil à 6h tous les matins", "route": "scheduler"}
+{"text": "Rappelez-moi de faire mes étirements dans 15 minutes", "route": "scheduler"}
+{"text": "Déclenchez une tâche récurrente pour publier mes reports sur les réseaux sociaux toutes les semaines", "route": "scheduler"}
+{"text": "Envoyez-moi une notification pour commander mes courses dans 1 mois", "route": "scheduler"}
+{"text": "Configurez une routine automatique pour envoyer des vœux d'anniversaire à mes amis chaque année", "route": "scheduler"}
+{"text": "Rappelez-moi de préparer le dîner dans 30 minutes", "route": "scheduler"}
+{"text": "Déclenchez une tâche récurrente pour archiver mes e-mails importants toutes les semaines", "route": "scheduler"}
+{"text": "Envoyez-moi une notification pour renouveler mon abonnement dans 6 mois", "route": "scheduler"}
+{"text": "Configurez une routine automatique pour faire une sauvegarde de mes donnéesCloud toutes les nuits", "route": "scheduler"}
+{"text": "Rappelez-moi de travailler sur mon projet dans 2 heures", "route": "scheduler"}
+{"text": "Déclenchez une tâche récurrente pour réviser mes notes toutes les semaines", "route": "scheduler"}
+{"text": "Envoyez-moi une notification pour réserver mes billets d'avion dans 4 mois", "route": "scheduler"}
+{"text": "Configurez une routine automatique pour envoyer des rappels de réunion à mon équipe tous les lundis", "route": "scheduler"}
+{"text": "Rappelle-moi dans 30 minutes de rappeler John", "route": "scheduler"}
+{"text": "Tâche récurrente : prendre rendez-vous chez le dentiste tous les 6 mois", "route": "scheduler"}
+{"text": "Notification différée : envoyer un message à Marie dans 1 heure pour son anniversaire", "route": "scheduler"}
+{"text": "Routine automatisée : commande de nourriture pour le dîner tous les soirs à 19h", "route": "scheduler"}
+{"text": "Rappelle-moi dans 2 jours de payer mes factures", "route": "scheduler"}
+{"text": "Tâche récurrente : faire du sport tous les lundis et jeudis", "route": "scheduler"}
+{"text": "Notification différée : rappeler à Anne de rendre un livre à la bibliothèque dans 3 semaines", "route": "scheduler"}
+{"text": "Routine automatisée : envoyer un message à toute l'équipe pour le rendez-vous hebdomadaire tous les vendredis à 10h", "route": "scheduler"}
+{"text": "Rappelle-moi demain de téléphoner à mon banquier", "route": "scheduler"}
+{"text": "Tâche récurrente : arroser les plantes tous les vendredis", "route": "scheduler"}
+{"text": "Notification différée : envoyer un e-mail à mon professeur pour demander une prolongation de la date de remise de travail dans 4 jours", "route": "scheduler"}
+{"text": "Routine automatisée : commander des fournitures de bureau toutes les deux semaines le lundi", "route": "scheduler"}
+{"text": "Rappelle-moi dans 1 heure de nourrir mon chat", "route": "scheduler"}
+{"text": "Tâche récurrente : faire les courses tous les samedis", "route": "scheduler"}
+{"text": "Notification différée : rappeler à Tom de récupérer son linge chez la teinturerie dans 2 semaines", "route": "scheduler"}
+{"text": "Routine automatisée : envoyer un message à ma famille pour notre appel hebdomadaire tous les dimanches à 18h", "route": "scheduler"}
+{"text": "Rappelle-moi demain deposter mon courrier", "route": "scheduler"}
+{"text": "Tâche récurrente : payer mes impôts tous les trimestres", "route": "scheduler"}
+{"text": "Notification différée : envoyer un e-mail à mon patron pour demander des congés dans 2 mois", "route": "scheduler"}
+{"text": "Routine automatisée : commander des fleurs pour ma mère tous les anniversaires", "route": "scheduler"}
+{"text": "note que j'ai besoin d'un stylo", "route": "note"}
+{"text": "retiens que ma prochaine reunion est a 14h", "route": "note"}
+{"text": "souviens-toi que je prefere travailler avec Google Docs", "route": "note"}
+{"text": "memorise que mon projet en cours s'appelle 'Projet X'", "route": "note"}
+{"text": "garde en memoire que je suis allergique aux fraises", "route": "note"}
+{"text": "enregistre que j'ai decide d'utiliser Python pour mon prochain projet", "route": "note"}
+{"text": "note que je suis interesse par l'apprentissage automatique", "route": "note"}
+{"text": "souviens-toi que mon objectif de course est de faire un marathon", "route": "note"}
+{"text": "memorise que je vis a Paris", "route": "note"}
+{"text": "garde en memoire que je suis en train d'apprendre le japonais", "route": "note"}
+{"text": "enregistre que mon metier est developpeur web", "route": "note"}
+{"text": "note que je prefere les reunions par visioconference", "route": "note"}
+{"text": "retiens que j'ai besoin de cafeine pour me concentrer", "route": "note"}
+{"text": "souviens-toi que mon prochain voyage est en Espagne", "route": "note"}
+{"text": "memorise que je suis un fan de science-fiction", "route": "note"}
+{"text": "garde en memoire que je suis ambidextre", "route": "note"}
+{"text": "enregistre que mon stack prefere est MERN", "route": "note"}
+{"text": "note que je suis en train d'apprendre a jouer de la guitare", "route": "note"}
+{"text": "retiens que mon objectif a long terme est de devenir freelance", "route": "note"}
+{"text": "note que Mnemo, je suis un développeur web", "route": "note"}
+{"text": "retiens que mon outil préféré est Visual Studio Code", "route": "note"}
+{"text": "je veux que tu saches que je suis un fan de la méthode Pomodoro pour travailler", "route": "note"}
+{"text": "souvenir de mon style de travail : je suis un travailleur en solo", "route": "note"}
+{"text": "garde en mémoire que je suis végétarien", "route": "note"}
+{"text": "memorise que j'habite à Paris", "route": "note"}
+{"text": "enregistre que mon projet en cours est une application mobile de commerce équitable", "route": "note"}
+{"text": "n'oublie pas que j'ai pris la décision d'utiliser React Native pour ce projet", "route": "note"}
+{"text": "souviens-toi que je suis un passionné de développement personnel et de lecture", "route": "note"}
+{"text": "note que mon livre préféré est \\", "route": "note"}
+{"text": "de Yuval Noah Harari", "route": "note"}
+{"text": "retiens que j'ai choisi de faire du freelance il y a deux ans", "route": "note"}
+{"text": "je veux que tu saches que mon but à long terme est de devenir un conférencier motivateur", "route": "note"}
+{"text": "souvenir de mon score de IQ : 145", "route": "note"}
+{"text": "garde en mémoire que je suis un joueur de tennis passionné", "route": "note"}
+{"text": "memorise que je suis un fervent supporter de l'OM", "route": "note"}
+{"text": "enregistre que je suis un utilisateur de Linux depuis 10 ans", "route": "note"}
+{"text": "n'oublie pas que mon film préféré est \\", "route": "note"}
+{"text": "souviens-toi que je suis un fan de science-fiction depuis l'âge de 10 ans", "route": "note"}
+{"text": "Note que j'ai un appel avec M. Dupond demain à 10h", "route": "note"}
+{"text": "Retiens que ma ville préférée est Paris", "route": "note"}
+{"text": "J'ai décidé d'utiliser Python pour mon prochain projet", "route": "note"}
+{"text": "Souviens-toi que je suis allergique aux fraises", "route": "note"}
+{"text": "Garde en mémoire que mon outil préféré est Trello", "route": "note"}
+{"text": "Je veux que tu saches que je suis en train de lire '1984'", "route": "note"}
+{"text": "Memorise que ma taille est 1m80", "route": "note"}
+{"text": "Retiens que je suis intéressé par l'apprentissage automatique", "route": "note"}
+{"text": "Enregistre que mon alimentation préférée est italienne", "route": "note"}
+{"text": "N'oublie pas que je suis en train de perdre du poids", "route": "note"}
+{"text": "Souviens-toi que je suis un fan de la série 'Breaking Bad'", "route": "note"}
+{"text": "Retiens que je suis en train d'apprendre le japonais", "route": "note"}
+{"text": "Je veux que tu saches que j'ai choisi de travailler en freelance", "route": "note"}
+{"text": "Memorise que mon objectif à court terme est d'économiser 5000€", "route": "note"}
+{"text": "N'oublie pas que je suis en train de suivre un cours en ligne sur l'histoire de l'art", "route": "note"}
+{"text": "Souviens-toi que mon métier est ingénieur logiciel", "route": "note"}
+{"text": "Retiens que j'ai décidé de participer à un marathon cette année", "route": "note"}
+{"text": "Enregistre que mon style de travail préféré est le coworking", "route": "note"}
+{"text": "Je veux que tu saches que mon projet en cours est une application mobile pour l'apprentissage des langues", "route": "note"}
+{"text": "note que je suis actuellement en train de travailler sur un projet en Python", "route": "note"}
+{"text": "souviens-toi que je préfère utiliser Visual Studio Code comme éditeur de texte", "route": "note"}
+{"text": "garde en mémoire que je suis un développeur web et que je vis à Paris", "route": "note"}
+{"text": "enregistre que j'ai décidé d'utiliser Django comme framework pour ce projet", "route": "note"}
+{"text": "mémorise que les connaissances en HTML et CSS sont importantes pour moi pour mon travail actuel.", "route": "note"}
+{"text": "note que je suis végétarien", "route": "note"}
+{"text": "retiens que je suis un fan de séries télévisées", "route": "note"}
+{"text": "memorise que je veux apprendre à jouer de la guitare", "route": "note"}
+{"text": "n'oublie pas que je suis en train de lire un livre sur l'IA", "route": "note"}
+{"text": "souviens-toi que je suis allergique aux chats", "route": "note"}
+{"text": "garde en mémoire que je vais courir tous les matins", "route": "note"}
+{"text": "note que je suis en train de planifier un voyage à Tokyo", "route": "note"}
+{"text": "retiens que je suis intéressé par la photographie", "route": "note"}
+{"text": "memorise que je vais essayer d'apprendre l'espagnol cette année", "route": "note"}
+{"text": "enregistre que j'ai pris la décision de me mettre à la méditation", "route": "note"}
+{"text": "souviens-toi que je suis un grand fan de jazz", "route": "note"}
+{"text": "garde en mémoire que je vais essayer d'assister à plus de concerts cette année", "route": "note"}
+{"text": "note que je suis en train d'étudier les réseaux de neurones", "route": "note"}
+{"text": "n'oublie pas que je vais travailler sur mon application mobile cette semaine", "route": "note"}
+{"text": "souviens-toi que je suis un grand fan de science-fiction", "route": "note"}
+{"text": "note que je suis un développeur web", "route": "note"}
+{"text": "memorise que je suis végétarien", "route": "note"}
+{"text": "n'oublie pas que je vis à Paris", "route": "note"}
+{"text": "souviens-toi que je travaille actuellement sur un projet de site e-commerce", "route": "note"}
+{"text": "garde en mémoire que j'ai décidé d'apprendre React cette année", "route": "note"}
+{"text": "enregistre que je dors généralement 7 heures par nuit", "route": "note"}
+{"text": "note que je suis un passionné de lecture", "route": "note"}
+{"text": "retiens que je pratique la méditation tous les matins", "route": "note"}
+{"text": "memorise que mon objectif professionnel est d'être freelance d'ici un an", "route": "note"}
+{"text": "n'oublie pas que je suis allergic aux fraises", "route": "note"}
+{"text": "souviens-toi que je parle couramment anglais et espagnol", "route": "note"}
+{"text": "garde en mémoire que j'ai commencé à jouer de la guitare il y a trois mois", "route": "note"}
+{"text": "enregistre que je suis un supporter de l'équipe de football du PSG", "route": "note"}
+{"text": "note que je suis intéressé par les voyages en solo", "route": "note"}
+{"text": "retiens que ma couleur préférée est le bleu", "route": "note"}
+{"text": "memorise que je suis contre le réchauffement climatique", "route": "note"}
+{"text": "n'oublie pas que je suis ambidextre", "route": "note"}
+{"text": "souviens-toi que je suis un ancien scout", "route": "note"}
+{"text": "garde en mémoire que j'ai décidé d'apprendre à jouer aux échecs cette année", "route": "note"}
+{"text": "note que j'ai une réunion importante demain à 9h", "route": "note"}
+{"text": "préfère utiliser l'outil Trello pour mes projets", "route": "note"}
+{"text": "ma ville natale est Paris", "route": "note"}
+{"text": "mon travail actuel est un projet de développement web", "route": "note"}
+{"text": "je dois décider si utiliser React ou Angular pour ce projet", "route": "note"}
+{"text": "retiens que je veux apprendre l'espagnol dans les 6 mois prochains", "route": "note"}
+{"text": "souviens-toi que je suis végétarien", "route": "note"}
+{"text": "garde en mémoire que mon objectif de carrière est de devenir Directeur Technique", "route": "note"}
+{"text": "enregistre que je dois appeler Jean demain pour discuter de notre projet commun", "route": "note"}
+{"text": "note que je devrais lire le livre 'Sapiens' que j'ai mis de côté depuis un moment", "route": "note"}
+{"text": "memorise que j'ai choisi d'utiliser le langage de programmation Python pour mon prochain projet", "route": "note"}
+{"text": "souviens-toi que je dois partir en vacances la semaine prochaine", "route": "note"}
+{"text": "retiens que je veux explorer la méditation pour réduire le stress", "route": "note"}
+{"text": "garde en mémoire que mon objectif financier à court terme est d'économiser 5000€", "route": "note"}
+{"text": "note que je dois rencontrer un ami pour un café cette semaine", "route": "note"}
+{"text": "memorise que je devrais explorer l'utilisation de l'IA dans mon travail", "route": "note"}
+{"text": "enregistre que je dois envoyer un email à mon patron pour discuter de mon contrat", "route": "note"}
+{"text": "souviens-toi que je veux m'inscrire à un cours de cuisine italienne", "route": "note"}
+{"text": "Planifier le projet de développement de l'application mobile en étapes distinctes", "route": "plan"}
+{"text": "Décomposer la tâche complexe de refactoring du code en étapes détaillées", "route": "plan"}
+{"text": "Organiser le développement logiciel en utilisant un plan de travail Agile", "route": "plan"}
+{"text": "Préparer un projet de marketing numérique en créant une documentation détaillée et une landing page attrayante", "route": "plan"}
+{"text": "Définir les étapes du processus de planification de projet pour un nouveau produit", "route": "plan"}
+{"text": "Établir un plan de travail pour la refonte du site web de l'entreprise", "route": "plan"}
+{"text": "Organiser un projet de recherche en utilisant un plan en plusieurs étapes", "route": "plan"}
+{"text": "Créer un plan de travail pour la mise en place d'un système de gestion de la qualité", "route": "plan"}
+{"text": "Décomposer la tâche complexe de migration de données en étapes claires", "route": "plan"}
+{"text": "Établir un plan pour la préparation d'un événement de collecte de fonds en plusieurs étapes", "route": "plan"}
+{"text": "Organiser un projet de développement d'application web en utilisant un plan de travail Scrum", "route": "plan"}
+{"text": "Préparer un projet de lancement de produit en créant une documentation complète et une stratégie de marketing", "route": "plan"}
+{"text": "Définir les étapes du processus de planification de projet pour un nouveau service", "route": "plan"}
+{"text": "Établir un plan de travail pour la refonte du système de gestion de base de données", "route": "plan"}
+{"text": "Organiser un projet de recherche en utilisant un plan de travail en plusieurs étapes", "route": "plan"}
+{"text": "Créer un plan pour la préparation d'un projet d'installation de systèmes en plusieurs étapes", "route": "plan"}
+{"text": "Décomposer la tâche complexe de mise en place d'un nouveau système de CRM en étapes détaillées", "route": "plan"}
+{"text": "Établir un plan de travail pour la refonte du système de gestion de stocks", "route": "plan"}
+{"text": "Organiser un projet de développement d'application mobile en utilisant un plan de travail Kanban", "route": "plan"}
+{"text": "Je souhaite planifier les étapes de notre projet.", "route": "plan"}
+{"text": "Comment pouvez-vous nous aider à décomposer cette tâche complexe?", "route": "plan"}
+{"text": "Pourquoi ne pas envisager un plan de travail pour notre développement logiciel?", "route": "plan"}
+{"text": "Je pense que nous devrions organiser le projet en étapes claires.", "route": "plan"}
+{"text": "Comment puis-je préparer un projet de manière efficace?", "route": "plan"}
+{"text": "Je souhaite établir un plan de travail pour notre équipe.", "route": "plan"}
+{"text": "Pour pouvoir avancer, j'ai besoin que vous m'aidiez à organiser ce projet.", "route": "plan"}
+{"text": "Notre développement logiciel nécessite un plan d'action détaillé.", "route": "plan"}
+{"text": "Je cherche à documenter notre projet de manière efficace.", "route": "plan"}
+{"text": "Un plan pour notre projet serait fort utile.", "route": "plan"}
+{"text": "Je souhaite qu'on me guide dans la préparation de notre projet.", "route": "plan"}
+{"text": "Comment pouvons-nous décomposer cette tâche complexe en sous-tâches?", "route": "plan"}
+{"text": "Je souhaite que vous nous aidiez à établir un plan de travail.", "route": "plan"}
+{"text": "Notre projet nécessite une organisation stricte en étapes.", "route": "plan"}
+{"text": "Je cherche un moyen efficace de planifier notre projet.", "route": "plan"}
+{"text": "Comment puis-je établir un plan de travail pour notre développement logiciel?", "route": "plan"}
+{"text": "Je souhaite qu'on m'aide à préparer notre projet de manière adéquate.", "route": "plan"}
+{"text": "Comment pouvons-nous organiser notre projet en étapes claires?", "route": "plan"}
+{"text": "Je suis à la recherche d'un moyen efficace de planifier notre projet.", "route": "plan"}
+{"text": "Planification de projet: Étape 1 - Définir les objectifs, Étape 2 - Établir un calendrier, Étape 3 - Allouer des ressources", "route": "plan"}
+{"text": "Décomposition de tâche complexe: Étape 1 - Analyse de la tâche, Étape 2 - Décomposition en sous-tâches, Étape 3 - Planification de chaque sous-tâche", "route": "plan"}
+{"text": "Organisation de développement logiciel: Étape 1 - Planification du projet, Étape 2 - Conception de l'architecture, Étape 3 - Développement en sprints", "route": "plan"}
+{"text": "Préparation de projet: Étape 1 - Documentation des exigences, Étape 2 - Création de la landing page, Étape 3 - Refactoring du code existant", "route": "plan"}
+{"text": "Plan de travail: Étape 1 - Rédaction d'un plan détaillé, Étape 2 - Attribution de rôles et responsabilités, Étape 3 - Suivi regular du progrès", "route": "plan"}
+{"text": "Organiser le projet: Étape 1 - Identifiez les différentes phases, Étape 2 - Établissez un chronogramme réaliste, Étape 3 - Assurez une communication régulière entre les membres de l'équipe", "route": "plan"}
+{"text": "Planification de la feature: Étape 1 - Analyse des besoins, Étape 2 - Conception de la fonctionnalité, Étape 3 - Développement et test", "route": "plan"}
+{"text": "Décomposition de tâche en sous-tâches: Étape 1 -identifier les tâches principales, Étape 2 - Décomposer chaque tâche en sous-tâches, Étape 3 - Planifier chaque sous-tâche", "route": "plan"}
+{"text": "Organisation de projet de marketing: Étape 1 - Définir les objectifs, Étape 2 - Élaborer une stratégie, Étape 3 - Planifier les actions et suivre le progrès", "route": "plan"}
+{"text": "Préparation de projet de recherche: Étape 1 - Recherche documentaire, Étape 2 - Élaboration d'un plan de recherche, Étape 3 - Planification des collectes de données", "route": "plan"}
+{"text": "Planification de projet créatif: Étape 1 - Brainstorming, Étape 2 - Sélection des idées, Étape 3 - Planification des étapes de création", "route": "plan"}
+{"text": "Décomposition de projet en phases: Étape 1 - Définir les phases, Étape 2 - Déterminer les livrables, Étape 3 - Planifier chaque phase", "route": "plan"}
+{"text": "Organisation de projet de construction: Étape 1 - Planification des travaux, Étape 2 - Établissement du budget, Étape 3 - Suivi des progrès", "route": "plan"}
+{"text": "Préparation de projet d'événement: Étape 1 - Planification des détails, Étape 2 - Recherche des fournisseurs, Étape 3 - Promotion et suivi", "route": "plan"}
+{"text": "Planification de projet de gestion des incidents: Étape 1 - Identification des situations potentiellement dangereuses, Étape 2 - Planification des mesures d'urgence, Étape 3 -Simulation de scénarios d'urgence", "route": "plan"}
+{"text": "Organisation de projet de changement: Étape 1 - Evaluation des besoins, Étape 2 - Planification des changements, Étape 3 - Communication régulière avec les parties prenantes", "route": "plan"}
+{"text": "planification de projet d'amélioration continue: Étape 1 - mesure des performances actuelles, Étape 2 - Définition des objectifs d'amélioration, Étape 3 - Planification et mise en œuvre de l'amélioration continue", "route": "plan"}
+{"text": "Préparation de projet de développement personnel: Étape 1 - Identification des objectifs, Étape 2 - Élaboration d'un plan d'action, Étape 3 - Suivi régulier de la progression", "route": "plan"}
+{"text": "Planifier les étapes de notre nouveau projet de développement logiciel", "route": "plan"}
+{"text": "Décomposer la tâche complexe de refactorisation du code en étapes gérées", "route": "plan"}
+{"text": "Organiser le développement de notre prochain produit en étapes logiques", "route": "plan"}
+{"text": "Préparer la documentation de notre projet en étapes claires", "route": "plan"}
+{"text": "Créer un plan de travail pour l'amélioration de notre landing page", "route": "plan"}
+{"text": "Étapes à suivre pour la planification de notre prochain projet de recherche", "route": "plan"}
+{"text": "Organiser les différentes phases de notre projet de marketing en étapes bien définies", "route": "plan"}
+{"text": "Décomposer la tâche de refactoring de notre application en étapes gérables", "route": "plan"}
+{"text": "Planifier les étapes de notre prochain projet de développement web", "route": "plan"}
+{"text": "Préparer un plan de travail pour l'équipe de projet pour la semaine prochaine", "route": "plan"}
+{"text": "Organiser les différentes étapes de notre projet de construction en étapes logiques", "route": "plan"}
+{"text": "Créer un plan de travail pour la planification de notre prochain événement", "route": "plan"}
+{"text": "Décomposer la tâche complexe de refonte de notre site web en étapes gérables", "route": "plan"}
+{"text": "Planifier les étapes de notre prochain projet de recherche scientifiques", "route": "plan"}
+{"text": "Préparer un plan de travail pour l'équipe de projet pour le mois prochain", "route": "plan"}
+{"text": "Organiser les différentes étapes de notre projet de marketing en étapes logiques", "route": "plan"}
+{"text": "Décomposer la tâche complexe de refonte de notre application mobile en étapes gérables", "route": "plan"}
+{"text": "Créer un plan de travail pour la planification de notre prochain projet de développement logiciel", "route": "plan"}
+{"text": "Planifier les étapes de notre prochain projet de construction de maison", "route": "plan"}

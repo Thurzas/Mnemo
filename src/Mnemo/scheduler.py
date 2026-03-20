@@ -101,7 +101,29 @@ def _get_last_session_summary() -> str:
     return "Aucune session récente disponible."
 
 
-def _get_memory_highlights() -> str:
+def _get_memory_highlights(session_id: str = "", context_query: str = "") -> str:
+    """
+    Récupère les highlights mémoire pour le briefing.
+    Phase 5.5 : utilise retrieve_all(profile="briefing") + _compress_chunks()
+    pour un retrieval traçable dans chunk_usage (données pour l'Axe A).
+    Fallback sur lecture directe de memory.md si le pipeline échoue.
+    """
+    try:
+        from Mnemo.tools.memory_tools import (
+            retrieve_all, _compress_chunks, _record_retrieved_chunks,
+        )
+        query  = context_query or "projets décisions préférences identité"
+        chunks = retrieve_all(query, top_k_final=4, profile="briefing")
+        if session_id and chunks:
+            _record_retrieved_chunks(
+                session_id, [c["id"] for c in chunks], profile="briefing"
+            )
+        result = _compress_chunks(chunks, max_tokens=600)
+        return result if result else "Mémoire vide ou non structurée."
+    except Exception as e:
+        log.warning(f"retrieve_all briefing : {e} — fallback lecture directe")
+
+    # Fallback : lecture directe des sections clés (comportement pré-5.5)
     if not MARKDOWN_PATH.exists():
         return "Mémoire non initialisée."
     content = MARKDOWN_PATH.read_text(encoding="utf-8", errors="ignore")
@@ -136,6 +158,151 @@ def _write_fallback(path: Path, kind: str, error: str) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
+# GOAP — WorldState + orchestration
+# ══════════════════════════════════════════════════════════════════
+
+def _build_scheduler_world_state() -> dict:
+    """
+    Construit le WorldState courant pour le scheduler.
+
+    Sources :
+    - world_state.json (persisté par CuriosityCrew, AssessMemoryGaps, etc.)
+    - Vérifications légères en Python (fichiers présents, DB accessible)
+
+    user_online est toujours False dans le contexte scheduler —
+    les actions qui le requièrent (FillBlockingGaps) ne seront jamais planifiées.
+    """
+    from Mnemo.tools.memory_tools import load_world_state
+
+    ws_persisted = load_world_state()
+    now          = datetime.now()
+    today        = now.date()
+
+    # briefing_fresh : briefing.md existe et date d'aujourd'hui
+    briefing_fresh = False
+    if BRIEFING_OUT.exists():
+        mtime = datetime.fromtimestamp(BRIEFING_OUT.stat().st_mtime).date()
+        briefing_fresh = (mtime == today)
+
+    # weekly_generated : weekly.md existe et date de cette semaine
+    weekly_generated = False
+    if WEEKLY_OUT.exists():
+        mtime = datetime.fromtimestamp(WEEKLY_OUT.stat().st_mtime).date()
+        # Même semaine ISO
+        weekly_generated = (mtime.isocalendar()[:2] == today.isocalendar()[:2])
+
+    # memory_synced : memory.db accessible
+    memory_synced = (DATA_PATH / "memory.db").exists()
+
+    # calendar_fetched : calendrier configuré
+    calendar_fetched = False
+    try:
+        from Mnemo.tools.calendar_tools import calendar_is_configured
+        calendar_fetched = calendar_is_configured()
+    except Exception:
+        pass
+
+    return {
+        "calendar_fetched":      calendar_fetched,
+        "memory_synced":         memory_synced,
+        "memory_gaps_known":     ws_persisted.get("memory_gaps_known", False),
+        "memory_blocking_gaps":  ws_persisted.get("memory_blocking_gaps", False),
+        "user_online":           False,   # scheduler = pas d'utilisateur présent
+        "briefing_fresh":        briefing_fresh,
+        "weekly_generated":      weekly_generated,
+        "deadline_alerts_sent":  ws_persisted.get("deadline_alerts_sent", False),
+        "knows_module":          ws_persisted.get("knows_module", False),
+    }
+
+
+def _update_world_state(updates: dict) -> None:
+    """Applique des mises à jour partielles sur world_state.json (avec timestamps TTL)."""
+    from Mnemo.tools.memory_tools import load_world_state, WORLD_STATE_TTL
+    ws = load_world_state()
+    now_ts = time.time()
+    for key, value in updates.items():
+        ws[key] = value
+        if key in WORLD_STATE_TTL:
+            ws[f"_ts_{key}"] = now_ts
+    path = DATA_PATH / "world_state.json"
+    path.write_text(
+        json.dumps(ws, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _scheduler_fetch_calendar() -> None:
+    """Précondition légère : vérifie que le calendrier est accessible."""
+    from Mnemo.tools.calendar_tools import get_upcoming_events
+    get_upcoming_events(days=7)  # lève une exception si indisponible
+    _update_world_state({"calendar_fetched": True})
+
+
+def _scheduler_sync_memory() -> None:
+    """Précondition légère : vérifie que memory.db est accessible."""
+    from Mnemo.tools.memory_tools import get_db
+    db = get_db()
+    db.close()
+    _update_world_state({"memory_synced": True})
+
+
+def _scheduler_assess_gaps() -> None:
+    """
+    AssessMemoryGaps dans le contexte scheduler (sans utilisateur).
+    Lit le world_state.json existant — ne relance pas de LLM si déjà frais.
+    """
+    from Mnemo.tools.memory_tools import load_world_state
+    ws = load_world_state()
+    if not ws.get("memory_gaps_known"):
+        log.info("memory_gaps_known=False — rapport de gaps absent ou obsolète")
+    _update_world_state({"memory_gaps_known": True})
+
+
+# Registre d'exécuteurs GOAP pour le scheduler
+# Chaque entrée : Action.name → callable sans argument
+_SCHEDULER_EXECUTORS: dict = {}  # initialisé après la définition des actions
+
+
+def goap_dispatch(goal: dict) -> None:
+    """
+    Orchestre l'exécution d'un goal via le planner GOAP.
+
+    1. Construit le WorldState courant
+    2. Demande au planner la séquence minimale d'actions
+    3. Exécute chaque action dans l'ordre
+
+    Les actions dont l'exécuteur est absent sont loggées et ignorées.
+    """
+    from Mnemo.goap.planner import plan as goap_plan, PlanningError
+
+    ws = _build_scheduler_world_state()
+    log.debug(f"WorldState : {ws}")
+
+    try:
+        actions = goap_plan(goal, ws)
+    except PlanningError as e:
+        log.warning(f"GOAP inatteignable pour {goal} : {e}")
+        return
+
+    if not actions:
+        log.info(f"Goal {goal} déjà atteint — aucune action nécessaire")
+        return
+
+    log.info(f"Plan GOAP : {[a.name for a in actions]}")
+    for action in actions:
+        executor = _SCHEDULER_EXECUTORS.get(action.name)
+        if executor is None:
+            log.warning(f"Pas d'exécuteur pour l'action GOAP : {action.name!r}")
+            continue
+        try:
+            log.info(f"→ {action.name}")
+            executor()
+        except Exception as e:
+            log.error(f"Action GOAP {action.name!r} échouée : {e}", exc_info=True)
+            raise  # arrêt — les actions suivantes dépendent de celle-ci
+
+
+# ══════════════════════════════════════════════════════════════════
 # Actions
 # ══════════════════════════════════════════════════════════════════
 
@@ -158,13 +325,18 @@ def action_briefing() -> None:
         log.warning(f"Calendrier : {e}")
         calendar_today = "Calendrier non disponible."
 
-    now = datetime.now()
+    now        = datetime.now()
+    session_id = f"briefing_{now.strftime('%Y%m%d_%H%M%S')}"
+    last_sess  = _get_last_session_summary()
     try:
         result  = BriefingCrew().crew().kickoff(inputs={
             "temporal_context":     get_temporal_context(),
             "calendar_today":       calendar_today,
-            "last_session_summary": _get_last_session_summary(),
-            "memory_highlights":    _get_memory_highlights(),
+            "last_session_summary": last_sess,
+            "memory_highlights":    _get_memory_highlights(
+                session_id=session_id,
+                context_query=f"{calendar_today[:200]} {last_sess[:200]}",
+            ),
             "date_str":             _date_fr(now),
             "datetime_str":         now.strftime("%Y-%m-%d %H:%M"),
         })
@@ -177,6 +349,7 @@ def action_briefing() -> None:
     DATA_PATH.mkdir(parents=True, exist_ok=True)
     BRIEFING_OUT.write_text(content, encoding="utf-8")
     log.info(f"Briefing → {BRIEFING_OUT} ({len(content)} car.)")
+    _update_world_state({"briefing_fresh": True})
 
 
 def action_weekly() -> None:
@@ -219,13 +392,17 @@ def action_weekly() -> None:
                     pass
     sessions_summary = "\n".join(session_lines) if session_lines else "Aucune session cette semaine."
 
-    date_str = f"semaine du {_date_fr(week_start)} au {_date_fr(week_end)}"
+    date_str   = f"semaine du {_date_fr(week_start)} au {_date_fr(week_end)}"
+    session_id = f"weekly_{now.strftime('%Y%m%d_%H%M%S')}"
     try:
         result  = BriefingCrew().crew().kickoff(inputs={
             "temporal_context":     f"Date actuelle : {now.strftime('%Y-%m-%d %H:%M')}",
             "calendar_today":       calendar_week,
             "last_session_summary": sessions_summary,
-            "memory_highlights":    _get_memory_highlights(),
+            "memory_highlights":    _get_memory_highlights(
+                session_id=session_id,
+                context_query=f"{sessions_summary[:200]} {calendar_week[:200]}",
+            ),
             "date_str":             date_str,
             "datetime_str":         now.strftime("%Y-%m-%d %H:%M"),
         })
@@ -238,6 +415,7 @@ def action_weekly() -> None:
     DATA_PATH.mkdir(parents=True, exist_ok=True)
     WEEKLY_OUT.write_text(content, encoding="utf-8")
     log.info(f"Weekly → {WEEKLY_OUT} ({len(content)} car.)")
+    _update_world_state({"weekly_generated": True})
 
 
 def action_deadline_alert() -> None:
@@ -272,6 +450,7 @@ def action_deadline_alert() -> None:
         if "## ⚠️ Alertes deadlines" not in current:
             BRIEFING_OUT.write_text(current + alert_block, encoding="utf-8")
             log.info(f"{len(alerts)} alerte(s) injectée(s) dans briefing.md")
+            _update_world_state({"deadline_alerts_sent": True})
         return
 
     now = datetime.now()
@@ -282,6 +461,7 @@ def action_deadline_alert() -> None:
         encoding="utf-8"
     )
     log.info(f"Alertes → {BRIEFING_OUT}")
+    _update_world_state({"deadline_alerts_sent": True})
 
 
 def action_reminder(payload: dict) -> None:
@@ -302,24 +482,243 @@ def action_reminder(payload: dict) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
+# Phase 7.4 — Boucle d'autonomie GOAP (sandbox projects)
+# ══════════════════════════════════════════════════════════════════
+
+# Actions considérées comme risquées → confirmation utilisateur requise
+_RISKY_KEYWORDS = ("shell", "npm", "pip", "node", "python", "docker", "install", "build", "run")
+
+
+def _is_risky(action_label: str) -> bool:
+    label = action_label.lower()
+    return any(k in label for k in _RISKY_KEYWORDS)
+
+
+def _check_command_available(cmd: str) -> bool:
+    import subprocess
+    try:
+        subprocess.run(cmd.split(), capture_output=True, timeout=3)
+        return True
+    except Exception:
+        return False
+
+
+def _build_project_world_state(project_dir: Path) -> dict:
+    """WorldState minimal pour évaluer les préconditions d'un projet sandbox."""
+    return {
+        "sandbox_open":      True,
+        "sandbox_readonly":  False,
+        "web_available":     True,
+        "node_available":    _check_command_available("node --version"),
+        "python_available":  _check_command_available("python3 --version"),
+    }
+
+
+def _push_pending_confirmation(
+    username: str, slug: str, step_label: str, action_label: str
+) -> None:
+    """
+    Ajoute une action risquée dans pending_confirmations du world_state utilisateur.
+    Évite les doublons (même action + même projet).
+    """
+    import uuid
+    ws_path = DATA_PATH / "users" / username / "world_state.json"
+    ws: dict = {}
+    if ws_path.exists():
+        try:
+            ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    confirmations: list = ws.get("pending_confirmations", [])
+    # Dédoublonnage
+    if any(c.get("action") == action_label and c.get("project_slug") == slug
+           for c in confirmations):
+        return
+
+    confirmations.append({
+        "id":           uuid.uuid4().hex[:12],
+        "project_slug": slug,
+        "username":     username,
+        "step_label":   step_label,
+        "action":       action_label,
+        "description":  (f"Exécuter '{action_label}' "
+                         f"pour l'étape '{step_label}' (projet {slug})"),
+        "ts":           datetime.now().isoformat(timespec="seconds"),
+    })
+    ws["pending_confirmations"] = confirmations
+    ws_path.write_text(
+        json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    log.info(f"[autonomy] Confirmation en attente : {action_label!r} → {slug} ({username})")
+
+
+def _advance_project(
+    username: str, db_path: Path, manifest: dict, project_dir: Path
+) -> None:
+    """
+    Tente d'avancer d'une étape sur un projet sandbox actif.
+
+    Logique :
+      1. Lit plan.md, trouve la première étape non cochée
+      2. Interroge le KG pour les actions disponibles pour cette étape
+      3. Pour chaque action : vérifie les préconditions vs world_state projet
+      4a. Préconditions OK + non risquée → exécute (sandbox_write, sandbox_read)
+      4b. Préconditions OK + risquée    → pending_confirmations
+      4c. Préconditions KO              → log et passe à la suivante
+      5. Toutes les étapes cochées → marque le projet "done"
+    """
+    from Mnemo.tools.kg_tools import kg_actions_for_step
+    from Mnemo.goap.planner import build_action_from_kg
+
+    slug      = manifest["slug"]
+    plan_path = project_dir / "plan.md"
+    if not plan_path.exists():
+        return
+
+    plan_text = plan_path.read_text(encoding="utf-8", errors="replace")
+    steps = [
+        (bool(re.match(r'- \[x\]', line, re.IGNORECASE)), re.sub(r'^- \[[ xX]\]\s*', '', line).strip())
+        for line in plan_text.splitlines()
+        if re.match(r'\s*- \[[ xX]\]', line)
+    ]
+
+    if not steps:
+        return
+
+    # Projet terminé si toutes les étapes sont cochées
+    if all(done for done, _ in steps):
+        manifest["status"] = "done"
+        (project_dir / "project.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        log.info(f"[autonomy] Projet {slug!r} terminé pour {username!r}")
+        return
+
+    # Première étape non cochée
+    step_label = next((label for done, label in steps if not done), None)
+    if not step_label:
+        return
+
+    actions_rows = kg_actions_for_step(db_path, step_label)
+    if not actions_rows:
+        log.debug(f"[autonomy] Aucune action KG pour '{step_label}' — {slug}")
+        return
+
+    world_state = _build_project_world_state(project_dir)
+
+    for row in actions_rows:
+        action_label = row["dst_label"]
+        action       = build_action_from_kg(db_path, action_label)
+
+        # Préconditions satisfaites ?
+        preconds_ok = all(
+            world_state.get(k) == v
+            for k, v in action.preconditions.items()
+        )
+        if not preconds_ok:
+            log.debug(f"[autonomy] Préconditions KO pour {action_label!r} — {slug}")
+            continue
+
+        if _is_risky(action_label):
+            _push_pending_confirmation(username, slug, step_label, action_label)
+        else:
+            # Action non risquée : log uniquement pour l'instant
+            # (l'exécution effective viendra avec les outils SandboxCrew)
+            log.info(
+                f"[autonomy] Action non risquée disponible : {action_label!r} "
+                f"→ étape '{step_label}' ({slug}/{username})"
+            )
+        break  # une action par tick par projet
+
+
+def _goap_autonomy_tick() -> None:
+    """
+    Tick de la boucle d'autonomie Phase 7.4.
+    Scanne tous les projets sandbox actifs de tous les utilisateurs.
+    Appelé toutes les 60s depuis run_scheduler().
+    """
+    users_dir = DATA_PATH / "users"
+    if not users_dir.exists():
+        return
+
+    for user_dir in sorted(users_dir.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        username = user_dir.name
+        db_path  = user_dir / "memory.db"
+        if not db_path.exists():
+            continue
+
+        projects_dir = user_dir / "projects"
+        if not projects_dir.exists():
+            continue
+
+        for project_dir in sorted(projects_dir.iterdir()):
+            manifest_file = project_dir / "project.json"
+            if not manifest_file.exists():
+                continue
+            try:
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+                if manifest.get("status") != "in_progress":
+                    continue
+                _advance_project(username, db_path, manifest, project_dir)
+            except Exception as e:
+                log.warning(
+                    f"[autonomy] Erreur sur {username}/{project_dir.name} : {e}",
+                    exc_info=True,
+                )
+
+
+# ══════════════════════════════════════════════════════════════════
 # Dispatch
 # ══════════════════════════════════════════════════════════════════
 
+# Initialisation du registre GOAP après les définitions d'actions
+_SCHEDULER_EXECUTORS.update({
+    "FetchCalendar":    _scheduler_fetch_calendar,
+    "SyncMemory":       _scheduler_sync_memory,
+    "AssessMemoryGaps": _scheduler_assess_gaps,
+    "GenerateBriefing": action_briefing,
+    "GenerateWeekly":   action_weekly,
+    "SendDeadlineAlert": action_deadline_alert,
+})
+
+# Goals GOAP par type de tâche système
+_SYSTEM_GOALS = {
+    "briefing":       {"briefing_fresh": True},
+    "weekly":         {"weekly_generated": True},
+    "deadline_alert": {"deadline_alerts_sent": True},
+}
+
+# _ACTION_MAP conservé pour les tâches utilisateur simples (reminder)
 _ACTION_MAP = {
-    "briefing":       lambda p: action_briefing(),
-    "weekly":         lambda p: action_weekly(),
-    "deadline_alert": lambda p: action_deadline_alert(),
-    "reminder":       lambda p: action_reminder(p),
+    "reminder": lambda p: action_reminder(p),
 }
 
 
 def dispatch(task: dict) -> None:
+    """
+    Dispatche une tâche vers le bon exécuteur.
+
+    Tâches système (briefing, weekly, deadline_alert) :
+      → GOAP planner résout le plan, exécute dans l'ordre
+    Tâches utilisateur (reminder) :
+      → _ACTION_MAP direct (pas de GOAP nécessaire)
+    """
     action  = task.get("action", "")
     payload = {}
     try:
         payload = json.loads(task.get("payload") or "{}")
     except Exception:
         pass
+
+    # Tâches système → GOAP
+    if action in _SYSTEM_GOALS:
+        goap_dispatch(_SYSTEM_GOALS[action])
+        return
+
+    # Tâches utilisateur → direct
     fn = _ACTION_MAP.get(action)
     if fn:
         fn(payload)
@@ -369,6 +768,12 @@ def run_scheduler() -> None:
                     mark_error(tid, str(e))
         except Exception as e:
             log.error(f"Erreur boucle : {e}", exc_info=True)
+
+        # Phase 7.4 — Boucle d'autonomie GOAP
+        try:
+            _goap_autonomy_tick()
+        except Exception as e:
+            log.error(f"[autonomy] Erreur tick : {e}", exc_info=True)
 
         time.sleep(60)
 

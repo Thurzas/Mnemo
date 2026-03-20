@@ -106,27 +106,48 @@ Turn Mnemo into a headless brain callable from any interface.
   - [x] Voice → Mnemo → Voice pipeline
 ---
 
-## 🚀 Phase 5 — Proactivity *(advanced vision)*
+## 🔧 Phase 5 — Proactivity *(in progress)*
 
 The agent takes initiative without waiting to be prompted.
 
-- [ ] Refactoring contextual weighting
-- [ ] Evoluting contextual weighting in use case
-- [ ] Contextual suggestions based on time and memory
+- [x] Routing CoR refactored (KeywordHandler → MLHandler → LLMHandler)
+- [x] Contextual weighting per profile (`learned_weights_{profile}.json`)
+- [x] Active learning: weight regression + audit trail
+- [x] `MemoryGapReport` + `WorldState` — CuriosityCrew as a GOAP sensing action
+- [x] `PlannerCrew` + `ReconnaissanceCrew` — plan route operational
 - [ ] Pattern detection ("you work on X every Monday")
 - [ ] Alerts for approaching deadlines
 - [ ] Automatic compaction of `memory.md` when it becomes too large
 - [ ] Multi-profiles (separate identities for personal vs professional use)
-- [ ] **GOAP planner for scheduler actions**
-  - [ ] Replace the current flat `_ACTION_MAP` dispatch with a Goal-Oriented Action Planning layer
-  - [ ] Actions declared with preconditions and effects (e.g. `deadline_alert` requires `briefing_fresh`)
-  - [ ] LLM expresses a *goal state*, the planner finds the optimal action sequence
-  - [ ] Enables conflict detection, dependency ordering, and extensibility without prompt changes
-  - [ ] Migration path: preconditions/effects already expressible as metadata on `_ACTION_MAP` entries
 
 ---
 
-## Phase 6 — mise en application et développement sur d'autre supports *(Plannification dans un context industriel)*
+## ✅ Phase 6 — GOAP Planner & Persistent Planning *(completed)*
+
+Goal-Oriented Action Planning layer — the scheduler and planning crews reason
+about *goals* rather than executing actions directly.
+
+- [x] **GOAP planner** (`goap/planner.py`)
+  - [x] `Action` dataclass: preconditions, effects, cost, resource_lock
+  - [x] `ACTION_REGISTRY` — 9 actions (FetchCalendar, SyncMemory, AssessMemoryGaps, FillBlockingGaps, ReconModule, CreatePlan, GenerateBriefing, GenerateWeekly, SendDeadlineAlert)
+  - [x] Backward chaining + topological sort
+  - [x] Handles both True and False effects
+- [x] **PlanStore** (`tools/plan_tools.py`)
+  - [x] Markdown plan file I/O with `[ ]`/`[x]` checkboxes
+  - [x] Sections: Étapes / Bloquants / Journal / Statut
+  - [x] `create()`, `mark_done()`, `add_blocker()`, `append_log()`
+- [x] **PlanRunner** — executes steps via `_STEP_EXECUTOR`, stops at first blocker
+- [x] **Route "plan"** in CoR routing — keyword detection + LLM arbitration
+- [x] **PlannerCrew** — loads WorldState gaps, LLM generates plan, `PlanStore.create()`
+- [x] **ReconnaissanceCrew** — reads source files in Python (no LLM hallucinations), single LLM synthesis → `recon_context`
+- [x] **Scheduler migrated to GOAP** — `goap_dispatch(goal)` replaces flat `_ACTION_MAP` for system tasks
+- [x] `check_active_plans()` called at session startup for inter-session plan continuity
+- [x] 190+ tests covering all 7 étapes
+
+---
+
+## Phase 7 — Deployment on external platforms *(industrial planning)*
+
 - [ ] **Raspberry Pi integration**
   - [ ] Lightweight Python client consuming the REST API
   - [ ] Latency optimization for embedded hardware responses

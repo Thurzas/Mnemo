@@ -235,9 +235,53 @@ def _handle_message_web(
         if web_confirmed is None:
             return {"__web_confirm__": True, "web_query": meta["web_query"]}
         elif web_confirmed:
-            from Mnemo.tools.web_tools import web_search, format_results_for_prompt
-            results = web_search(confirmed_web_query or meta["web_query"])
+            from Mnemo.tools.web_tools import (
+                web_search, format_results_for_prompt,
+                fetch_page_content, extract_relevant_links, save_web_page,
+            )
+            import Mnemo.status as _status_mod_web
+            query = confirmed_web_query or meta["web_query"]
+
+            _status_mod_web.emit(session_id, f"Recherche : {query}…")
+            results = web_search(query)
             web_context = format_results_for_prompt(results) if results else ""
+
+            # Deep fetch — récupère le contenu complet des résultats + liens
+            suggestions: list[dict] = []
+            for r in results[:2]:   # max 2 pages fetchées pour limiter le temps
+                page_url = r.get("url", "")
+                if not page_url:
+                    continue
+                _status_mod_web.emit(session_id, f"Lecture de la page : {r.get('title', page_url)[:50]}…")
+                page = fetch_page_content(page_url)
+                if page.get("error") or not page.get("text"):
+                    continue
+                saved = save_web_page(page["text"], page["title"] or r["title"], page_url, query)
+                if saved:
+                    _status_mod_web.emit(session_id, f"Sauvegardé : {saved.name}")
+                # Liens pertinents
+                links = page.get("links", [])
+                page_suggestions = extract_relevant_links(links, query, threshold=0.25, max_n=3)
+                suggestions.extend(page_suggestions)
+
+            # Déduplique + trie les suggestions globales
+            seen: set[str] = set()
+            deduped: list[dict] = []
+            for s in sorted(suggestions, key=lambda x: x["score"], reverse=True):
+                if s["url"] not in seen:
+                    seen.add(s["url"])
+                    deduped.append(s)
+            suggestions = deduped[:4]
+
+            # Stocke les suggestions dans world_state pour le WS handler
+            if suggestions:
+                from Mnemo.tools.memory_tools import load_world_state
+                from Mnemo.context import get_data_dir as _gdd
+                ws = load_world_state()
+                ws["pending_web_suggestions"] = suggestions
+                (_gdd() / "world_state.json").write_text(
+                    json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
         else:
             meta["needs_web"] = False
             meta["web_query"] = None
@@ -245,10 +289,68 @@ def _handle_message_web(
     meta["needs_clarification"] = False
     meta["_web_mode"] = True   # CalendarWriteCrew : auto-confirme sans stdin
 
+    import Mnemo.status as _status_mod
+
+    _status_mod.emit(session_id, "Analyse de la demande...")
+
     print(f"[EVAL] ({result.handler}) {json.dumps({'route': result.route, 'conf': round(result.confidence, 2), **meta}, ensure_ascii=False)}")
+
+    conf_pct = round(result.confidence * 100)
+    _status_mod.emit(session_id, f"Route : {result.route} · {result.handler} ({conf_pct}%)")
+
     response = dispatch(result, user_message=user_message, session_id=session_id,
                         temporal_ctx=temporal_ctx, web_context=web_context)
     update_session_memory(session_id, user_message, response)
+
+    # Persiste le log pipeline en session pour enrichir la consolidation
+    logs = _status_mod.flush_session_log(session_id)
+    if logs:
+        from Mnemo.tools.memory_tools import append_session_message
+        append_session_message(session_id, {
+            "role": "system",
+            "content": "[pipeline] " + " · ".join(logs),
+        })
+
+    # Déclenchement immédiat du plan — PlannerCrew a écrit pending_plan_step (et
+    # éventuellement pending_web_search) dans world_state.
+    if result.route == "plan":
+        try:
+            from Mnemo.tools.memory_tools import load_world_state
+            from Mnemo.context import get_data_dir
+            ws = load_world_state()
+            pending     = ws.pop("pending_plan_step", None)
+            pending_web = ws.pop("pending_web_search", None)
+            if pending or pending_web:
+                path = get_data_dir() / "world_state.json"
+                path.write_text(
+                    json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                if pending_web:
+                    # Phase 6.5 — étape 1 est une recherche web : demande confirmation
+                    return {
+                        "__web_confirm__": True,
+                        "web_query":       pending_web["query"],
+                        "_plan_web":       pending_web,
+                        "response":        response,   # texte du plan (affiché avant le modal)
+                    }
+                return {"__plan_created__": True, "response": response, "plan_step": pending}
+        except Exception:
+            pass
+
+    # Suggestions de liens (deep fetch après search confirmée)
+    try:
+        from Mnemo.tools.memory_tools import load_world_state
+        from Mnemo.context import get_data_dir
+        ws = load_world_state()
+        suggestions = ws.pop("pending_web_suggestions", None)
+        if suggestions:
+            (get_data_dir() / "world_state.json").write_text(
+                json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            return {"__web_suggestions__": True, "response": response, "suggestions": suggestions}
+    except Exception:
+        pass
+
     return response
 
 
@@ -1051,25 +1153,145 @@ async def ws_message(websocket: WebSocket):
         web_confirmed: bool | None = None,
         web_query: str | None = None,
     ) -> None:
+        import Mnemo.status as _status_mod
+
+        # Enregistre la queue avant de lancer le thread
+        status_queue: asyncio.Queue = asyncio.Queue()
+        _status_mod.set_session(sid, status_queue, loop)
+
         await websocket.send_json({"type": "thinking"})
+
+        # Lance handle_message dans le thread pool (non-bloquant)
+        fut = loop.run_in_executor(
+            None,
+            lambda: user_context.run(
+                _handle_message_web, text, sid, web_confirmed, web_query
+            ),
+        )
+
+        # Draine la queue de statut en parallèle du thread
+        while not fut.done():
+            try:
+                event = status_queue.get_nowait()
+                await websocket.send_json(event)
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.03)
+
+        # Draine les événements émis juste avant que fut.done() devienne True
+        while not status_queue.empty():
+            await websocket.send_json(status_queue.get_nowait())
+
+        _status_mod.clear_session(sid)
+
         try:
-            result = await loop.run_in_executor(
-                None,
-                lambda: user_context.run(
-                    _handle_message_web, text, sid, web_confirmed, web_query
-                ),
-            )
+            result = fut.result()
         except Exception as e:
             await websocket.send_json({"type": "error", "detail": str(e)})
             return
 
         if isinstance(result, dict) and result.get("__web_confirm__"):
+            # Si un texte de plan est présent (Phase 6.5), on le stream d'abord
+            plan_text = result.get("response", "")
+            plan_web  = result.get("_plan_web")
+            if plan_text:
+                words = plan_text.split(" ")
+                for i, word in enumerate(words):
+                    chunk = word if i == len(words) - 1 else word + " "
+                    await websocket.send_json({"type": "token", "text": chunk})
+                    await asyncio.sleep(0.012)
+                await websocket.send_json({"type": "done", "session_id": sid})
             await websocket.send_json({
-                "type": "web_confirm",
-                "web_query": result["web_query"],
-                "session_id": sid,
+                "type":             "web_confirm",
+                "web_query":        result["web_query"],
+                "session_id":       sid,
                 "original_message": text,
+                **({"plan_web": plan_web} if plan_web else {}),
             })
+            return
+
+        # Déclenchement immédiat du plan — extrait avant streaming
+        plan_step    = None
+        web_suggests = None
+        if isinstance(result, dict) and result.get("__plan_created__"):
+            plan_step = result.get("plan_step")
+            result    = result["response"]
+        elif isinstance(result, dict) and result.get("__web_suggestions__"):
+            web_suggests = result.get("suggestions")
+            result       = result["response"]
+
+        words = (result or "").split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == len(words) - 1 else word + " "
+            await websocket.send_json({"type": "token", "text": chunk})
+            await asyncio.sleep(0.012)
+
+        await websocket.send_json({"type": "done", "session_id": sid})
+
+        # Émis après done — le frontend peut ouvrir le modal sans interrompre le streaming
+        if plan_step:
+            await websocket.send_json({"type": "plan_step_ready", **plan_step})
+        if web_suggests:
+            await websocket.send_json({
+                "type":        "web_suggest",
+                "session_id":  sid,
+                "suggestions": web_suggests,
+            })
+
+    async def _execute_plan_web_search(
+        sid: str,
+        plan_web: dict,
+        confirmed: bool,
+        web_query: str | None,
+    ) -> None:
+        """
+        Phase 6.5 — Exécute la recherche web pour l'étape 1 d'un plan (après confirmation).
+        Marque l'étape done, émet les résultats, et émet plan_step_ready pour l'étape 2.
+        """
+        await websocket.send_json({"type": "thinking"})
+
+        if not confirmed:
+            await websocket.send_json({"type": "done", "session_id": sid})
+            # Étape 1 non exécutée — plan_step_ready reste disponible (déjà en world_state)
+            return
+
+        import Mnemo.status as _status_mod
+        status_queue: asyncio.Queue = asyncio.Queue()
+        _status_mod.set_session(sid, status_queue, loop)
+
+        def _do_plan_web() -> str:
+            from Mnemo.tools.web_tools import web_search, format_results_for_prompt
+            from Mnemo.tools.plan_tools import PlanStore
+            from pathlib import Path
+            _status_mod.emit(sid, f"Recherche web : {web_query}...")
+            results     = web_search(web_query or plan_web.get("query", ""))
+            web_context = format_results_for_prompt(results) if results else "(aucun résultat)"
+            plan_path   = Path(plan_web["plan_path"])
+            step_label  = plan_web["step_label"]
+            try:
+                PlanStore.mark_done(plan_path, step_label)
+                PlanStore.append_log(plan_path, f"Web search : {web_query} — {len(results)} résultats")
+            except Exception:
+                pass
+            reply = f"**Résultats — Étape 1 : {step_label}**\n\n{web_context}"
+            if plan_web.get("step2_data"):
+                reply += "\n\n→ **Étape 2 prête.** Confirme pour continuer."
+            return reply
+
+        fut = loop.run_in_executor(None, lambda: user_context.run(_do_plan_web))
+        while not fut.done():
+            try:
+                event = status_queue.get_nowait()
+                await websocket.send_json(event)
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.03)
+        while not status_queue.empty():
+            await websocket.send_json(status_queue.get_nowait())
+        _status_mod.clear_session(sid)
+
+        try:
+            result = fut.result()
+        except Exception as e:
+            await websocket.send_json({"type": "error", "detail": str(e)})
             return
 
         words = (result or "").split(" ")
@@ -1079,6 +1301,10 @@ async def ws_message(websocket: WebSocket):
             await asyncio.sleep(0.012)
 
         await websocket.send_json({"type": "done", "session_id": sid})
+
+        step2 = plan_web.get("step2_data")
+        if step2:
+            await websocket.send_json({"type": "plan_step_ready", **step2})
 
     try:
         while True:
@@ -1095,7 +1321,73 @@ async def ws_message(websocket: WebSocket):
                 sid       = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
                 confirmed = bool(msg.get("confirmed", False))
                 wq        = msg.get("web_query") if confirmed else None
-                await _run_and_stream(original, sid, confirmed, wq)
+                plan_web  = msg.get("plan_web")
+                if plan_web:
+                    await _execute_plan_web_search(sid, plan_web, confirmed, wq)
+                else:
+                    await _run_and_stream(original, sid, confirmed, wq)
+
+            elif msg_type == "web_link_explore":
+                # Exploration d'un lien suggéré (Phase 6.5 deep fetch)
+                link_url   = msg.get("url", "")
+                link_title = msg.get("title", link_url)
+                link_query = msg.get("original_query", link_title)
+                sid        = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
+
+                await websocket.send_json({"type": "thinking"})
+
+                import Mnemo.status as _status_mod_lnk
+                sq: asyncio.Queue = asyncio.Queue()
+                _status_mod_lnk.set_session(sid, sq, loop)
+
+                def _do_link_explore() -> str:
+                    from Mnemo.tools.web_tools import (
+                        fetch_page_content, extract_relevant_links,
+                        save_web_page, format_results_for_prompt,
+                    )
+                    _status_mod_lnk.emit(sid, f"Lecture : {link_title[:60]}…")
+                    page = fetch_page_content(link_url)
+                    if page.get("error") or not page.get("text"):
+                        return f"Impossible de lire la page : {page.get('error', 'contenu vide')}"
+                    saved = save_web_page(page["text"], page["title"] or link_title, link_url, link_query)
+                    if saved:
+                        _status_mod_lnk.emit(sid, f"Sauvegardé : {saved.name}")
+                    # Extrait un résumé (premiers 2000 caractères + compte des liens)
+                    excerpt = page["text"][:2000].strip()
+                    n_links = len(page.get("links", []))
+                    reply = (
+                        f"**{page['title'] or link_title}**\n"
+                        f"Source : {link_url}\n\n"
+                        f"{excerpt}{'…' if len(page['text']) > 2000 else ''}\n\n"
+                        f"_{n_links} liens trouvés sur la page._"
+                    )
+                    if saved:
+                        reply += f"\n\n📄 Contenu sauvegardé dans `{saved.name}`."
+                    return reply
+
+                fut2 = loop.run_in_executor(None, lambda: user_context.run(_do_link_explore))
+                while not fut2.done():
+                    try:
+                        ev = sq.get_nowait()
+                        await websocket.send_json(ev)
+                    except asyncio.QueueEmpty:
+                        await asyncio.sleep(0.03)
+                while not sq.empty():
+                    await websocket.send_json(sq.get_nowait())
+                _status_mod_lnk.clear_session(sid)
+
+                try:
+                    link_result = fut2.result()
+                except Exception as e:
+                    await websocket.send_json({"type": "error", "detail": str(e)})
+                    continue
+
+                words = (link_result or "").split(" ")
+                for i, word in enumerate(words):
+                    chunk = word if i == len(words) - 1 else word + " "
+                    await websocket.send_json({"type": "token", "text": chunk})
+                    await asyncio.sleep(0.012)
+                await websocket.send_json({"type": "done", "session_id": sid})
 
     except WebSocketDisconnect:
         pass
@@ -1190,6 +1482,83 @@ def document_delete(doc_id: str, _: Auth):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Projets sandbox (Phase 7) ──────────────────────────────────────
+
+
+@app.get("/api/projects")
+def projects_list(_: Auth):
+    from Mnemo.tools.sandbox_tools import list_projects
+    return {"projects": list_projects()}
+
+
+class ProjectCreate(BaseModel):
+    name: str
+    goal: str
+    slug: str = ""
+
+
+@app.post("/api/projects", status_code=201)
+def project_create(body: ProjectCreate, _: Auth):
+    from Mnemo.tools.sandbox_tools import create_project
+    manifest = create_project(body.slug or body.name, body.name, body.goal)
+    return manifest
+
+
+@app.get("/api/projects/{slug}")
+def project_get(slug: str, _: Auth):
+    from Mnemo.tools.sandbox_tools import get_project, list_files
+    manifest = get_project(slug)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Projet introuvable.")
+    return {**manifest, "files": list_files(slug)}
+
+
+@app.get("/api/projects/{slug}/file")
+def project_file_read(slug: str, path: str, _: Auth):
+    from Mnemo.tools.sandbox_tools import read_file
+    res = read_file(slug, path)
+    if res["error"]:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return {"content": res["content"], "path": path}
+
+
+class FileWriteRequest(BaseModel):
+    path: str
+    content: str
+    commit_msg: str = ""
+
+
+@app.post("/api/projects/{slug}/file")
+def project_file_write(slug: str, body: FileWriteRequest, _: Auth):
+    from Mnemo.tools.sandbox_tools import write_file
+    res = write_file(slug, body.path, body.content,
+                     commit_msg=body.commit_msg or None)
+    if res["conflict"]:
+        raise HTTPException(status_code=409,
+                            detail="Conflit git — résolution manuelle requise.")
+    if res["error"]:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return res
+
+
+@app.delete("/api/projects/{slug}", status_code=200)
+def project_delete(slug: str, _: Auth):
+    from Mnemo.tools.sandbox_tools import delete_project
+    if not delete_project(slug):
+        raise HTTPException(status_code=404, detail="Projet introuvable.")
+    return {"ok": True}
+
+
+@app.get("/api/projects/{slug}/git")
+def project_git_log(slug: str, _: Auth):
+    from Mnemo.tools.sandbox_tools import _project_path, _git
+    root = _project_path(slug)
+    if not root.exists():
+        raise HTTPException(status_code=404, detail="Projet introuvable.")
+    _, out = _git(root, "log", "--oneline", "-20")
+    return {"log": out}
 
 
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──

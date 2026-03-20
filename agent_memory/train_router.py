@@ -18,7 +18,7 @@ except ImportError:
 _DATA          = Path(os.getenv("DATA_PATH", ".")).resolve()
 DEFAULT_DATA   = _DATA / "training_data.jsonl"
 DEFAULT_OUTPUT = _DATA / "router_model.joblib"
-ROUTES = ["conversation", "shell", "calendar", "scheduler", "note"]
+ROUTES = ["conversation", "shell", "calendar", "scheduler", "note", "plan", "sandbox"]
 
 
 def load_data(path):
@@ -30,6 +30,31 @@ def load_data(path):
             item = json.loads(line)
             texts.append(item["text"])
             labels.append(item["route"])
+    return texts, labels
+
+
+def load_uncertain(data_dir: Path) -> tuple[list, list]:
+    """
+    Charge uncertain_cases.jsonl (active learning) si présent.
+    Filtre les routes inconnues et les doublons de texte déjà présents.
+    """
+    uncertain_path = data_dir / "uncertain_cases.jsonl"
+    if not uncertain_path.exists():
+        return [], []
+    texts, labels = [], []
+    with open(uncertain_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            try:
+                item = json.loads(line)
+                route = item.get("route", "")
+                if route not in ROUTES:
+                    continue
+                texts.append(item["text"])
+                labels.append(route)
+            except Exception:
+                pass
     return texts, labels
 
 
@@ -62,6 +87,16 @@ TESTS = [
     ("memorise que mon projet principal c est Mnemo", "note"),
     ("souviens-toi que je suis allergique aux arachides", "note"),
     ("garde en memoire que j ai decide d utiliser FastAPI", "note"),
+    ("prepare un plan pour creer la landing page React", "plan"),
+    ("on va planifier ce projet en etapes", "plan"),
+    ("fais-moi un plan pour implementer le scheduler", "plan"),
+    ("organise les etapes du developpement du dashboard", "plan"),
+    ("decompose la tache refactoring en sous-etapes", "plan"),
+    ("ouvre le projet landing-page", "sandbox"),
+    ("continue le projet react-doc", "sandbox"),
+    ("reprends le projet documentation", "sandbox"),
+    ("travaille sur le projet notifications et lance les tests", "sandbox"),
+    ("retourne sur le projet mnemo-frontend et avance sur l etape suivante", "sandbox"),
 ]
 
 
@@ -77,7 +112,17 @@ def main():
         sys.exit(1)
 
     texts, labels = load_data(args.data)
-    print(f"{len(texts)} exemples")
+
+    # Fusion active learning (uncertain_cases.jsonl)
+    u_texts, u_labels = load_uncertain(args.data.parent)
+    if u_texts:
+        seen = set(texts)
+        added = [(t, l) for t, l in zip(u_texts, u_labels) if t not in seen]
+        texts  += [t for t, _ in added]
+        labels += [l for _, l in added]
+        print(f"  + {len(added)} cas active learning fusionnés (uncertain_cases.jsonl)")
+
+    print(f"{len(texts)} exemples total")
     for r in ROUTES:
         print(f"  {r:15s}: {labels.count(r):4d}")
 
