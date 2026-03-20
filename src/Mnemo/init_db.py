@@ -139,6 +139,46 @@ def init_db(db_path: Path = None):
             skipped_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
+        -- ── Phase 7 — HP-KG : Graphe de connaissances procédurales ──────
+        -- Deux couches : seed (read-only, livré avec l'appli) + user (per-user, writable)
+        -- Relations alignées ConceptNet : contains, requires, precondition, effect, causes, enables, blocks
+        CREATE TABLE IF NOT EXISTS kg_nodes (
+            id       TEXT PRIMARY KEY,        -- SHA1(type || "/" || label)
+            type     TEXT NOT NULL,           -- task | step | action | state | concept
+            label    TEXT NOT NULL,
+            lang     TEXT DEFAULT 'fr',       -- fr | en (import ConceptNet futur)
+            source   TEXT DEFAULT 'user',     -- user | seed | conceptnet
+            metadata TEXT DEFAULT '{}'        -- JSON libre (coût GOAP, domaine, notes)
+        );
+
+        CREATE TABLE IF NOT EXISTS kg_edges (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            src     TEXT NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+            rel     TEXT NOT NULL,            -- contains | requires | precondition | effect | causes | enables | blocks
+            dst     TEXT NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+            weight  REAL DEFAULT 1.0,         -- renforcé à chaque succès
+            source  TEXT DEFAULT 'user',      -- user | seed | conceptnet
+            UNIQUE(src, rel, dst)
+        );
+
+        -- Historique de renforcement pour weight learning
+        CREATE TABLE IF NOT EXISTS kg_edge_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            edge_src   TEXT NOT NULL,
+            edge_rel   TEXT NOT NULL,
+            edge_dst   TEXT NOT NULL,
+            session_id TEXT,
+            outcome    TEXT NOT NULL,         -- success | failure | skipped
+            delta      REAL DEFAULT 0.0,      -- variation de weight appliquée
+            ts         DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS kg_nodes_type  ON kg_nodes(type);
+        CREATE INDEX IF NOT EXISTS kg_nodes_label ON kg_nodes(label);
+        CREATE INDEX IF NOT EXISTS kg_edges_src   ON kg_edges(src);
+        CREATE INDEX IF NOT EXISTS kg_edges_dst   ON kg_edges(dst);
+        CREATE INDEX IF NOT EXISTS kg_edges_rel   ON kg_edges(rel);
+
         -- ── Scheduler — tâches planifiées ────────────────────────────
         -- one_shot   : exécution unique à trigger_at
         -- recurring  : exécution répétée selon cron_expr
@@ -231,6 +271,39 @@ def migrate_db(db_path: Path = None):
         )""",
         # Phase 5.5 — profil par retrieval
         "ALTER TABLE chunk_usage ADD COLUMN profile TEXT DEFAULT 'conversation'",
+        # Phase 7 — HP-KG
+        """CREATE TABLE IF NOT EXISTS kg_nodes (
+            id       TEXT PRIMARY KEY,
+            type     TEXT NOT NULL,
+            label    TEXT NOT NULL,
+            lang     TEXT DEFAULT 'fr',
+            source   TEXT DEFAULT 'user',
+            metadata TEXT DEFAULT '{}'
+        )""",
+        """CREATE TABLE IF NOT EXISTS kg_edges (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            src     TEXT NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+            rel     TEXT NOT NULL,
+            dst     TEXT NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+            weight  REAL DEFAULT 1.0,
+            source  TEXT DEFAULT 'user',
+            UNIQUE(src, rel, dst)
+        )""",
+        """CREATE TABLE IF NOT EXISTS kg_edge_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            edge_src   TEXT NOT NULL,
+            edge_rel   TEXT NOT NULL,
+            edge_dst   TEXT NOT NULL,
+            session_id TEXT,
+            outcome    TEXT NOT NULL,
+            delta      REAL DEFAULT 0.0,
+            ts         DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS kg_nodes_type  ON kg_nodes(type)",
+        "CREATE INDEX IF NOT EXISTS kg_nodes_label ON kg_nodes(label)",
+        "CREATE INDEX IF NOT EXISTS kg_edges_src   ON kg_edges(src)",
+        "CREATE INDEX IF NOT EXISTS kg_edges_dst   ON kg_edges(dst)",
+        "CREATE INDEX IF NOT EXISTS kg_edges_rel   ON kg_edges(rel)",
         # Scheduler
         """CREATE TABLE IF NOT EXISTS scheduled_tasks (
             id          TEXT PRIMARY KEY,
@@ -254,6 +327,53 @@ def migrate_db(db_path: Path = None):
     db.commit()
     db.close()
     print("✅ Migration terminée.")
+
+
+def init_kg_db(db_path: Path) -> None:
+    """
+    Initialise une DB minimale contenant uniquement les tables HP-KG.
+    Utilisé pour kg_seed.db — pas besoin du schéma complet (chunks, sessions...).
+    """
+    db = sqlite3.connect(db_path)
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS kg_nodes (
+            id       TEXT PRIMARY KEY,
+            type     TEXT NOT NULL,
+            label    TEXT NOT NULL,
+            lang     TEXT DEFAULT 'fr',
+            source   TEXT DEFAULT 'user',
+            metadata TEXT DEFAULT '{}'
+        );
+
+        CREATE TABLE IF NOT EXISTS kg_edges (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            src     TEXT NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+            rel     TEXT NOT NULL,
+            dst     TEXT NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+            weight  REAL DEFAULT 1.0,
+            source  TEXT DEFAULT 'user',
+            UNIQUE(src, rel, dst)
+        );
+
+        CREATE TABLE IF NOT EXISTS kg_edge_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            edge_src   TEXT NOT NULL,
+            edge_rel   TEXT NOT NULL,
+            edge_dst   TEXT NOT NULL,
+            session_id TEXT,
+            outcome    TEXT NOT NULL,
+            delta      REAL DEFAULT 0.0,
+            ts         DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS kg_nodes_type  ON kg_nodes(type);
+        CREATE INDEX IF NOT EXISTS kg_nodes_label ON kg_nodes(label);
+        CREATE INDEX IF NOT EXISTS kg_edges_src   ON kg_edges(src);
+        CREATE INDEX IF NOT EXISTS kg_edges_dst   ON kg_edges(dst);
+        CREATE INDEX IF NOT EXISTS kg_edges_rel   ON kg_edges(rel);
+    """)
+    db.commit()
+    db.close()
 
 
 if __name__ == "__main__":

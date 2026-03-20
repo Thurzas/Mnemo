@@ -195,6 +195,29 @@ def _detect_plan_intent(msg: str) -> tuple[bool, bool]:
     return strong, weak
 
 
+# ── Sandbox ───────────────────────────────────────────────────────────────────
+
+_SANDBOX_KEYWORDS_STRONG = [
+    "ouvre le projet", "ouvre ce projet",
+    "travaille sur le projet", "continue le projet",
+    "reprends le projet", "reprend le projet",
+    "retourne sur le projet", "retourne dans le projet",
+]
+
+_SANDBOX_KEYWORDS_WEAK = [
+    "dans le sandbox", "dans le projet sandbox",
+    "crée le projet", "cree le projet",
+    "nouveau projet sandbox",
+]
+
+
+def _detect_sandbox_intent(msg: str) -> tuple[bool, bool]:
+    m      = msg.lower()
+    strong = any(kw in m for kw in _SANDBOX_KEYWORDS_STRONG)
+    weak   = any(kw in m for kw in _SANDBOX_KEYWORDS_WEAK)
+    return strong, weak
+
+
 # ── Note ──────────────────────────────────────────────────────────────────────
 
 _NOTE_KEYWORDS = [
@@ -243,6 +266,11 @@ class KeywordHandler(RouterHandler):
             return RouterResult("note", 1.0, "keyword")
 
         if _short:
+            # ── Sandbox fort ──────────────────────────────────────────────
+            sandbox_strong, sandbox_weak = _detect_sandbox_intent(msg)
+            if sandbox_strong:
+                return RouterResult("sandbox", 1.0, "keyword")
+
             # ── Plan fort ─────────────────────────────────────────────────
             plan_strong, plan_weak = _detect_plan_intent(msg)
             if plan_strong:
@@ -258,12 +286,14 @@ class KeywordHandler(RouterHandler):
                 return RouterResult("scheduler", 1.0, "keyword")
         else:
             # Message long → pas de bypass, mais on calcule quand même les hints
-            _, plan_weak   = _detect_plan_intent(msg)
-            _, weak        = _detect_scheduler_intent(msg)
+            _, sandbox_weak = _detect_sandbox_intent(msg)
+            _, plan_weak    = _detect_plan_intent(msg)
+            _, weak         = _detect_scheduler_intent(msg)
 
         # ── Dépôt des hints pour les handlers aval ────────────────────────
-        ctx._hints["kw_shell"]      = _detect_shell_intent(msg)
-        ctx._hints["kw_sched_weak"] = weak
-        ctx._hints["kw_plan_weak"]  = plan_weak
+        ctx._hints["kw_shell"]        = _detect_shell_intent(msg)
+        ctx._hints["kw_sched_weak"]   = weak
+        ctx._hints["kw_plan_weak"]    = plan_weak
+        ctx._hints["kw_sandbox_weak"] = sandbox_weak
 
         return self._pass(ctx)

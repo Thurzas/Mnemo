@@ -18,7 +18,7 @@ except ImportError:
 _DATA          = Path(os.getenv("DATA_PATH", ".")).resolve()
 DEFAULT_DATA   = _DATA / "training_data.jsonl"
 DEFAULT_OUTPUT = _DATA / "router_model.joblib"
-ROUTES = ["conversation", "shell", "calendar", "scheduler", "note", "plan"]
+ROUTES = ["conversation", "shell", "calendar", "scheduler", "note", "plan", "sandbox"]
 
 
 def load_data(path):
@@ -92,6 +92,11 @@ TESTS = [
     ("fais-moi un plan pour implementer le scheduler", "plan"),
     ("organise les etapes du developpement du dashboard", "plan"),
     ("decompose la tache refactoring en sous-etapes", "plan"),
+    ("ouvre le projet landing-page", "sandbox"),
+    ("continue le projet react-doc", "sandbox"),
+    ("reprends le projet documentation", "sandbox"),
+    ("travaille sur le projet notifications et lance les tests", "sandbox"),
+    ("retourne sur le projet mnemo-frontend et avance sur l etape suivante", "sandbox"),
 ]
 
 

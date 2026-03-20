@@ -8,13 +8,14 @@ import { SessionsPage } from '@/pages/SessionsPage'
 import { CalendarPage } from '@/pages/CalendarPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
 import { VoicePage } from '@/pages/VoicePage'
+import { ProjectsPage } from '@/pages/ProjectsPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { OnboardingModal } from '@/pages/OnboardingModal'
 import { api, auth } from '@/api'
 import type { OnboardingQuestion } from '@/api'
 import styles from './App.module.css'
 
-export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar' | 'knowledge' | 'voice'
+export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar' | 'knowledge' | 'voice' | 'projects'
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('chat')
@@ -40,7 +41,7 @@ export default function App() {
     }
     api.whoami()
       .then(({ username: u }) => { setUsername(u); checkOnboarding() })
-      .catch(() => auth.clear())
+      .catch(() => { /* 401 already handled (+ auth.clear) inside request() — don't clear on network errors */ })
       .finally(() => setAuthChecked(true))
   }, [])
 
@@ -124,6 +125,9 @@ export default function App() {
         </div>
         <div className={tab === 'voice' ? styles.visible : styles.hidden}>
           <VoicePage active={tab === 'voice'} />
+        </div>
+        <div className={tab === 'projects' ? styles.visible : styles.hidden}>
+          <ProjectsPage active={tab === 'projects'} />
         </div>
       </main>
       {onboardingQuestions?.length ? (

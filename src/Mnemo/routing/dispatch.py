@@ -44,7 +44,7 @@ def _get_crew_registry() -> dict:
     """Retourne le registre — imports différés pour éviter les circulaires."""
     from Mnemo.crew import (
         ConversationCrew, ShellCrew, CalendarWriteCrew,
-        SchedulerCrew, NoteWriterCrew, BriefingCrew,
+        SchedulerCrew, NoteWriterCrew, BriefingCrew, SandboxCrew,
     )
     return {
         "conversation": ConversationCrew,
@@ -53,6 +53,7 @@ def _get_crew_registry() -> dict:
         "scheduler":    SchedulerCrew,
         "note":         NoteWriterCrew,
         "briefing":     BriefingCrew,
+        "sandbox":      SandboxCrew,
     }
 
 
@@ -167,6 +168,7 @@ def dispatch(
             "calendar":  "Mise à jour du calendrier...",
             "scheduler": "Création de la tâche planifiée...",
             "briefing":  "Génération du briefing...",
+            "sandbox":   "Travail dans le sandbox projet...",
         }
         _emit(session_id, _STATUS_LABELS.get(route, f"Crew {route}..."))
         return crew_cls().run({**base_inputs})

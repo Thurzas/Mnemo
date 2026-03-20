@@ -1484,6 +1484,83 @@ def document_delete(doc_id: str, _: Auth):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Projets sandbox (Phase 7) ──────────────────────────────────────
+
+
+@app.get("/api/projects")
+def projects_list(_: Auth):
+    from Mnemo.tools.sandbox_tools import list_projects
+    return {"projects": list_projects()}
+
+
+class ProjectCreate(BaseModel):
+    name: str
+    goal: str
+    slug: str = ""
+
+
+@app.post("/api/projects", status_code=201)
+def project_create(body: ProjectCreate, _: Auth):
+    from Mnemo.tools.sandbox_tools import create_project
+    manifest = create_project(body.slug or body.name, body.name, body.goal)
+    return manifest
+
+
+@app.get("/api/projects/{slug}")
+def project_get(slug: str, _: Auth):
+    from Mnemo.tools.sandbox_tools import get_project, list_files
+    manifest = get_project(slug)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="Projet introuvable.")
+    return {**manifest, "files": list_files(slug)}
+
+
+@app.get("/api/projects/{slug}/file")
+def project_file_read(slug: str, path: str, _: Auth):
+    from Mnemo.tools.sandbox_tools import read_file
+    res = read_file(slug, path)
+    if res["error"]:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return {"content": res["content"], "path": path}
+
+
+class FileWriteRequest(BaseModel):
+    path: str
+    content: str
+    commit_msg: str = ""
+
+
+@app.post("/api/projects/{slug}/file")
+def project_file_write(slug: str, body: FileWriteRequest, _: Auth):
+    from Mnemo.tools.sandbox_tools import write_file
+    res = write_file(slug, body.path, body.content,
+                     commit_msg=body.commit_msg or None)
+    if res["conflict"]:
+        raise HTTPException(status_code=409,
+                            detail="Conflit git — résolution manuelle requise.")
+    if res["error"]:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return res
+
+
+@app.delete("/api/projects/{slug}", status_code=200)
+def project_delete(slug: str, _: Auth):
+    from Mnemo.tools.sandbox_tools import delete_project
+    if not delete_project(slug):
+        raise HTTPException(status_code=404, detail="Projet introuvable.")
+    return {"ok": True}
+
+
+@app.get("/api/projects/{slug}/git")
+def project_git_log(slug: str, _: Auth):
+    from Mnemo.tools.sandbox_tools import _project_path, _git
+    root = _project_path(slug)
+    if not root.exists():
+        raise HTTPException(status_code=404, detail="Projet introuvable.")
+    _, out = _git(root, "log", "--oneline", "-20")
+    return {"log": out}
+
+
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──
 # FastAPI matche les routes dans l'ordre de définition.
 # Ce catch-all doit être après toutes les routes /api/*.

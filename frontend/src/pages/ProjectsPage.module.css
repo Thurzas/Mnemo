@@ -1,0 +1,317 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 48px); /* 48px = hauteur NavBar */
+  background: #1e1e2e;
+  color: #cdd6f4;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+  gap: 1rem;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.projectSelect {
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.projectGoal {
+  color: #6c7086;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btnPrimary {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.8rem;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btnPrimary:hover { background: #74c7ec; }
+
+.btnDanger {
+  background: transparent;
+  color: #f38ba8;
+  border: 1px solid #f38ba8;
+  border-radius: 4px;
+  padding: 0.3rem 0.8rem;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btnDanger:hover { background: #f38ba822; }
+
+.btnSave {
+  background: #a6e3a1;
+  color: #1e1e2e;
+  border: none;
+  border-radius: 4px;
+  padding: 0.2rem 0.7rem;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btnSave:hover  { background: #94e2d5; }
+.btnSave:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Formulaire nouveau projet ── */
+
+.createForm {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+}
+
+.input {
+  flex: 1;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  font-size: 13px;
+}
+
+.input::placeholder { color: #6c7086; }
+.input:focus { outline: 1px solid #89b4fa; border-color: #89b4fa; }
+
+/* ── Error bar ── */
+
+.errorBar {
+  background: #f38ba822;
+  color: #f38ba8;
+  border-bottom: 1px solid #f38ba844;
+  padding: 0.3rem 1rem;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* ── Corps 3 colonnes ── */
+
+.body {
+  display: grid;
+  grid-template-columns: 200px 1fr 240px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── FileTree ── */
+
+.tree {
+  background: #181825;
+  border-right: 1px solid #313244;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.treeTitle {
+  padding: 0.4rem 0.75rem;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c7086;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+}
+
+.treeEmpty {
+  padding: 0.5rem 0.75rem;
+  color: #45475a;
+  font-size: 12px;
+}
+
+.treeItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.3rem 0.75rem;
+  color: #cdd6f4;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: inherit;
+}
+
+.treeItem:hover       { background: #313244; }
+.treeItemActive       { background: #45475a !important; color: #89b4fa; }
+
+/* ── Editor panel ── */
+
+.editorPanel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #1e1e2e;
+}
+
+.editorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3rem 0.75rem;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+}
+
+.openFileName {
+  color: #89b4fa;
+  font-size: 12px;
+}
+
+.monacoWrapper {
+  flex: 1;
+  overflow: hidden;
+}
+
+.editorEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #45475a;
+  font-size: 13px;
+}
+
+/* ── Plan panel ── */
+
+.planPanel {
+  background: #181825;
+  border-left: 1px solid #313244;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.planTitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c7086;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.2rem 0.25rem 0.5rem;
+}
+
+.planEmpty {
+  color: #45475a;
+  font-size: 12px;
+  padding: 0.25rem;
+}
+
+.planList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.planStep {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #cdd6f4;
+}
+
+.planStepDone { color: #6c7086; text-decoration: line-through; }
+
+.planCheck {
+  flex-shrink: 0;
+  color: #a6e3a1;
+  font-size: 11px;
+  margin-top: 1px;
+}
+
+.planStepDone .planCheck { color: #45475a; }
+
+.gitLog {
+  font-size: 11px;
+  color: #6c7086;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  padding: 0.25rem;
+}
+
+/* ── Terminal ── */
+
+.terminal {
+  height: 180px;
+  background: #11111b;
+  border-top: 1px solid #313244;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.terminalTitle {
+  padding: 0.3rem 0.75rem;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c7086;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+  border-bottom: 1px solid #313244;
+}
+
+.terminalContent {
+  flex: 1;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  overflow-y: auto;
+  font-size: 12px;
+  color: #a6e3a1;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

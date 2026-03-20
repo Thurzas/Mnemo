@@ -19,7 +19,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from Mnemo import main as mn
-from Mnemo.crew import ShellCrew, CalendarWriteCrew, SchedulerCrew, NoteWriterCrew
+from Mnemo.crew import ShellCrew, CalendarWriteCrew, SchedulerCrew, NoteWriterCrew, SandboxCrew
 from Mnemo.routing.handlers.llm import _parse_eval_json
 from Mnemo.routing.dispatch import dispatch
 from Mnemo.routing.context import RouterResult
@@ -540,3 +540,76 @@ class TestPlanWeakKeywords:
     def test_rappel_scheduler_pas_plan_weak(self):
         """Rappel scheduler → pas de plan_weak."""
         assert not self._weak("rappelle-moi demain de prendre mes médicaments")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 7. Route "sandbox" — keyword + dispatch
+# ══════════════════════════════════════════════════════════════════
+
+class TestSandboxRoute:
+
+    def test_sandbox_keyword_strong_court(self):
+        """Keyword sandbox fort sur message court → bypass sandbox."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="ouvre le projet landing-page", session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        assert result is not None
+        assert result.route == "sandbox"
+
+    def test_sandbox_keyword_strong_continue(self):
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="continue le projet react-doc", session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        assert result is not None
+        assert result.route == "sandbox"
+
+    def test_sandbox_keyword_no_match(self):
+        """Message sans keyword sandbox → pas de bypass sandbox."""
+        from Mnemo.routing.handlers.keyword import _detect_sandbox_intent
+        strong, weak = _detect_sandbox_intent("planifie un rappel demain")
+        assert not strong
+        assert not weak
+
+    def test_sandbox_keyword_weak_hint_depose(self):
+        """Keyword sandbox faible → hint kw_sandbox_weak déposé."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        ctx = RouterContext(message="je veux travailler dans le sandbox", session_id="s1")
+        KeywordHandler().handle(ctx)
+        assert ctx._hints.get("kw_sandbox_weak") is True
+
+    def test_sandbox_long_message_no_bypass(self):
+        """Message long avec keyword sandbox fort → pas de bypass (gate longueur)."""
+        from Mnemo.routing.handlers.keyword import KeywordHandler
+        from Mnemo.routing.context import RouterContext
+        msg = ("alors aujourd hui on va vraiment ouvrir le projet landing-page "
+               "et avancer sur toutes les étapes du plan qu on avait préparé")
+        ctx = RouterContext(message=msg, session_id="s1")
+        result = KeywordHandler().handle(ctx)
+        assert result is None or result.route != "sandbox"
+
+    def test_dispatch_sandbox_appelle_sandbox_crew(self, tmp_path, monkeypatch):
+        """Route sandbox → SandboxCrew.run() est appelé."""
+        import Mnemo.tools.sandbox_tools as st
+        monkeypatch.setattr(st, "get_data_dir", lambda: tmp_path)
+        result = _router_result(route="sandbox")
+        with patch("Mnemo.crew.SandboxCrew") as MockSandbox:
+            MockSandbox.return_value.run.return_value = "Étape 1 terminée."
+            res = dispatch(result, user_message="ouvre le projet react-doc",
+                           session_id="s1", temporal_ctx="", web_context="")
+        assert MockSandbox.called
+        assert res == "Étape 1 terminée."
+
+    def test_dispatch_sandbox_pas_conversation(self, tmp_path, monkeypatch):
+        """Route sandbox → ConversationCrew NON appelé."""
+        import Mnemo.tools.sandbox_tools as st
+        monkeypatch.setattr(st, "get_data_dir", lambda: tmp_path)
+        result = _router_result(route="sandbox")
+        with patch("Mnemo.crew.SandboxCrew") as MockSandbox, \
+             patch("Mnemo.crew.ConversationCrew") as MockConv:
+            MockSandbox.return_value.run.return_value = "ok"
+            dispatch(result, user_message="ouvre le projet",
+                     session_id="s1", temporal_ctx="", web_context="")
+        assert not MockConv.called

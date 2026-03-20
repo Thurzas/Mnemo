@@ -13,7 +13,7 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 MODEL = os.getenv("MODEL", "ollama/mistral").replace("ollama/", "")
 _DATA  = Path(os.getenv("DATA_PATH", ".")).resolve()
 OUTPUT = _DATA / "training_data.jsonl"
-ROUTES      = ["conversation", "shell", "calendar", "scheduler", "note", "plan"]
+ROUTES      = ["conversation", "shell", "calendar", "scheduler", "note", "plan", "sandbox"]
 BATCH_SIZE  = 20
 
 ROUTE_PROMPTS = {
@@ -60,6 +60,19 @@ ROUTE_PROMPTS = {
         "- Notifications differees\n"
         "- Routines automatisees\n"
         "Reponds UNIQUEMENT avec JSON : {{\"messages\": [\"msg1\", \"msg2\", ...]}}\n"
+        "Genere exactement {n} messages varies."
+    ),
+    "sandbox": (
+        "Tu es un utilisateur parlant a Mnemo, un assistant IA personnel.\n"
+        "Genere {n} messages DIFFERENTS de type sandbox (travail actif dans un projet existant) :\n"
+        "- Reprendre/continuer un projet en cours (landing page, app, module...)\n"
+        "- Ouvrir ou retourner sur un projet specifique\n"
+        "- Travailler sur une feature dans un projet existant\n"
+        "- Continuer le developpement d une feature commencee\n"
+        "- Executer du code, des tests dans un projet\n"
+        "IMPORTANT : sandbox = travailler DANS un projet existant, pas planifier.\n"
+        "Exemples : ouvre le projet X, continue le projet Y, reprends le projet Z.\n"
+        "Reponds UNIQUEMENT avec JSON : {\"messages\": [\"msg1\", ...]}\n"
         "Genere exactement {n} messages varies."
     ),
     "plan": (
@@ -163,6 +176,22 @@ SEED_DATA = [
     {"text": "alerte dans 45 min fin de reunion", "route": "scheduler"},
     {"text": "tous les 1er du mois rappel backup", "route": "scheduler"},
     {"text": "notifie dans 2h d aller chercher les enfants", "route": "scheduler"},
+    # ── sandbox ───────────────────────────────────────────────────────
+    {"text": "ouvre le projet landing-page", "route": "sandbox"},
+    {"text": "continue le projet react-doc", "route": "sandbox"},
+    {"text": "reprends le projet de landing page", "route": "sandbox"},
+    {"text": "travaille sur le projet notifications", "route": "sandbox"},
+    {"text": "retourne sur le projet mnemo-frontend", "route": "sandbox"},
+    {"text": "ouvre ce projet et continue l etape en cours", "route": "sandbox"},
+    {"text": "reprend le projet documentation react js", "route": "sandbox"},
+    {"text": "continue le developpement du projet landing page", "route": "sandbox"},
+    {"text": "travaille sur le projet auth et avance sur l etape 2", "route": "sandbox"},
+    {"text": "ouvre le projet scheduler et execute les tests", "route": "sandbox"},
+    {"text": "retourne dans le projet et ecris le composant Header", "route": "sandbox"},
+    {"text": "reprends le projet et installe les dependances npm", "route": "sandbox"},
+    {"text": "continue le projet et lance pytest", "route": "sandbox"},
+    {"text": "ouvre le projet web-scraper et corrige le bug", "route": "sandbox"},
+    {"text": "travaille sur le projet api-rest et ecris les tests", "route": "sandbox"},
     # ── plan ─────────────────────────────────────────────────────────
     {"text": "construis-moi un plan pour developper la feature auth", "route": "plan"},
     {"text": "prepare un plan pour refactoriser le module memoire", "route": "plan"},

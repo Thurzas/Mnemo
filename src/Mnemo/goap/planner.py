@@ -1,16 +1,24 @@
 """
 Phase 6 — GOAP Planner : backward chaining + tri topologique.
+Phase 7.3 — Enrichissement dynamique depuis le HP-KG.
 
 Le planner prend un goal (dict de clés WorldState désirées),
 un WorldState courant, et un registre d'actions, puis retourne
 la séquence minimale ordonnée d'actions à exécuter.
 
-Pas de A* pour l'instant — l'espace d'actions est petit (~15 actions).
-Le backward chaining suffit et est O(actions²) au pire.
+Depuis la Phase 7.3, plan() accepte un db_path optionnel.
+Si fourni, les actions sont chargées depuis le KG (préconditions/effets
+appris de l'expérience) et fusionnées avec ACTION_REGISTRY.
+Les actions système (FetchCalendar, GenerateBriefing…) restent statiques.
+Les actions procédurales (web_search, sandbox_write…) viennent du KG.
+
+Pas de A* — l'espace d'actions est petit (~30 actions max).
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 class PlanningError(Exception):
@@ -112,6 +120,88 @@ ACTION_REGISTRY: list[Action] = [
 ]
 
 
+# ── Intégration KG (Phase 7.3) ────────────────────────────────
+
+def _cost_hint(action_label: str) -> int:
+    """Heuristique de coût depuis le nom de l'action (fallback si KG muet)."""
+    label = action_label.lower()
+    if any(k in label for k in ("llm", "crew", "generate", "briefing", "weekly")):
+        return 5
+    if any(k in label for k in ("shell", "write", "fetch", "commit")):
+        return 3
+    if any(k in label for k in ("search", "read", "extract")):
+        return 2
+    return 1
+
+
+def build_action_from_kg(db_path: Path, action_label: str) -> Action:
+    """
+    Construit un objet Action depuis le KG.
+
+    Préconditions :
+      - (action)-[precondition]->(state) → {state: True}  (requis)
+      - (state)-[blocks]->(action)       → {state: False} (doit être absent)
+    Effets :
+      - (action)-[effect]->(state)       → {state: True}
+    Coût : metadata["cost"] dans kg_nodes, ou heuristique.
+    """
+    from Mnemo.tools.kg_tools import (
+        kg_preconditions_for_action,
+        kg_effects_for_action,
+        kg_blocking_states,
+        kg_get_node,
+    )
+    preconditions: dict[str, bool] = {}
+    for state in kg_preconditions_for_action(db_path, action_label):
+        preconditions[state] = True
+    for state in kg_blocking_states(db_path, action_label):
+        preconditions[state] = False
+
+    effects: dict[str, bool] = {}
+    for state in kg_effects_for_action(db_path, action_label):
+        effects[state] = True
+
+    cost = _cost_hint(action_label)
+    node = kg_get_node(db_path, "action", action_label)
+    if node:
+        try:
+            meta = json.loads(node.get("metadata") or "{}")
+            cost = int(meta.get("cost", cost))
+        except Exception:
+            pass
+
+    return Action(name=action_label, preconditions=preconditions,
+                  effects=effects, cost=cost)
+
+
+def load_kg_actions(db_path: Path) -> list[Action]:
+    """
+    Charge depuis le KG (user + seed) toutes les actions connues.
+    Retourne une liste d'Action avec préconditions/effets réels.
+    """
+    from Mnemo.tools.kg_tools import kg_search_nodes
+    nodes = kg_search_nodes(db_path, type_="action")
+    actions = []
+    for n in nodes:
+        try:
+            actions.append(build_action_from_kg(db_path, n["label"]))
+        except Exception:
+            pass
+    return actions
+
+
+def merge_with_registry(kg_actions: list[Action]) -> list[Action]:
+    """
+    Fusionne les actions KG avec ACTION_REGISTRY.
+    Les actions KG remplacent celles du registre de même nom
+    (préconditions/effets plus riches). Les actions système sans
+    équivalent KG (FetchCalendar…) sont conservées.
+    """
+    kg_names = {a.name for a in kg_actions}
+    system_only = [a for a in ACTION_REGISTRY if a.name not in kg_names]
+    return kg_actions + system_only
+
+
 # ── Planner ───────────────────────────────────────────────────
 
 def _actions_that_produce(key: str, value: bool, actions: list[Action]) -> list[Action]:
@@ -131,6 +221,7 @@ def plan(
     goal: dict,
     world_state: dict,
     actions: list[Action] | None = None,
+    db_path: Path | None = None,
 ) -> list[Action]:
     """
     Backward chaining : remonte depuis le goal pour construire
@@ -139,7 +230,9 @@ def plan(
     Args:
         goal        : dict des clés WorldState désirées, ex: {"briefing_fresh": True}
         world_state : état courant du système (world_state.json)
-        actions     : registre d'actions (défaut : ACTION_REGISTRY)
+        actions     : registre d'actions (défaut : ACTION_REGISTRY + KG si db_path fourni)
+        db_path     : chemin vers memory.db de l'utilisateur.
+                      Si fourni, enrichit le registre avec les actions KG apprises.
 
     Returns:
         Liste ordonnée d'actions à exécuter (sans doublons).
@@ -148,7 +241,14 @@ def plan(
         PlanningError : si une clé du goal est inatteignable.
     """
     if actions is None:
-        actions = ACTION_REGISTRY
+        if db_path is not None:
+            try:
+                kg_acts = load_kg_actions(db_path)
+                actions = merge_with_registry(kg_acts)
+            except Exception:
+                actions = ACTION_REGISTRY
+        else:
+            actions = ACTION_REGISTRY
 
     # Clés du goal déjà satisfaites dans le WorldState courant
     unsatisfied = {

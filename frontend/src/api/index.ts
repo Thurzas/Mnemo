@@ -129,6 +129,27 @@ export interface IngestResult {
   chunks: number
 }
 
+export interface ProjectManifest {
+  slug:       string
+  name:       string
+  goal:       string
+  status:     string
+  created_at: string
+  files?:     string[]
+}
+
+export interface ProjectFile {
+  content: string
+  path:    string
+}
+
+export interface FileWriteResult {
+  path:      string
+  committed: boolean
+  conflict:  boolean
+  error:     string | null
+}
+
 export interface OnboardingAnswerItem {
   id: string
   answer: string
@@ -361,6 +382,35 @@ export const api = {
     request<{ ok: boolean; active_model: string }>(`/api/voice/model/${encodeURIComponent(name)}/activate`, {
       method: 'POST',
     }),
+
+  listProjects: () =>
+    request<{ projects: ProjectManifest[] }>('/api/projects'),
+
+  createProject: (body: { name: string; goal: string; slug?: string }) =>
+    request<ProjectManifest>('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getProject: (slug: string) =>
+    request<ProjectManifest & { files: string[] }>(`/api/projects/${encodeURIComponent(slug)}`),
+
+  readProjectFile: (slug: string, path: string) =>
+    request<ProjectFile>(`/api/projects/${encodeURIComponent(slug)}/file?path=${encodeURIComponent(path)}`),
+
+  writeProjectFile: (slug: string, body: { path: string; content: string; commit_msg?: string }) =>
+    request<FileWriteResult>(`/api/projects/${encodeURIComponent(slug)}/file`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  deleteProject: (slug: string) =>
+    request<{ ok: boolean }>(`/api/projects/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+    }),
+
+  getProjectGitLog: (slug: string) =>
+    request<{ log: string }>(`/api/projects/${encodeURIComponent(slug)}/git`),
 
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
     const token = auth.getToken()

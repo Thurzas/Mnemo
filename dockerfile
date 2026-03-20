@@ -45,6 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ffmpeg \
         espeak-ng \
+        git \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Utilisateur non-root ─────────────────────────────────────────

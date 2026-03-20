@@ -1056,3 +1056,91 @@ class PlannerCrew:
 
         except Exception as e:
             return f"Erreur lors de la planification : {e}"
+
+
+# ══════════════════════════════════════════════════════════════
+# SandboxCrew — Phase 7 : environnement de travail isolé
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class SandboxCrew:
+    """
+    Crew qui travaille dans un projet sandbox isolé (dépôt git).
+    Reçoit : project_slug, project_goal, current_step, user_message.
+    Dispose des outils SandboxRead/Write/Shell/List.
+    Chaque écriture est automatiquement commitée en git.
+    """
+    agents_config = "config/sandbox_agents.yaml"
+    tasks_config  = "config/sandbox_tasks.yaml"
+
+    @agent
+    def sandbox_agent(self) -> Agent:
+        return Agent(
+            config=self.agents_config["sandbox_agent"],
+            verbose=False,
+            allow_delegation=False,
+            tools=[
+                SandboxReadTool(),
+                SandboxWriteTool(),
+                SandboxShellTool(),
+                SandboxListTool(),
+            ],
+            max_iter=12,
+            llm=_llm(0.2),
+        )
+
+    @task
+    def sandbox_task(self) -> Task:
+        return Task(config=self.tasks_config["sandbox_task"])
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, inputs: dict) -> str:
+        """
+        Point d'entrée depuis dispatch().
+        Prépare le project_context (liste fichiers + état git) et kickoff.
+        """
+        from Mnemo.tools.sandbox_tools import (
+            get_project, create_project, list_files, _project_path, _git
+        )
+
+        slug        = inputs.get("project_slug", "")
+        goal        = inputs.get("project_goal", inputs.get("user_message", ""))
+        user_msg    = inputs.get("user_message", "")
+        current_step = inputs.get("current_step", "(voir plan.md)")
+
+        # Création automatique si le projet n'existe pas encore
+        if not slug:
+            import re as _re
+            slug = _re.sub(r"[^\w\s-]", "", goal.lower())[:30].strip()
+            slug = _re.sub(r"[\s_]+", "-", slug).strip("-") or "projet"
+        project = get_project(slug)
+        if project is None:
+            name = inputs.get("project_name", goal[:60])
+            project = create_project(slug, name, goal)
+
+        # Context projet : fichiers + dernier commit
+        root  = _project_path(slug)
+        files = list_files(slug)
+        _, log_out = _git(root, "log", "--oneline", "-5")
+        project_context = (
+            f"Fichiers : {', '.join(files[:20]) or '(vide)'}\n"
+            f"Derniers commits :\n{log_out or '(aucun)'}"
+        )
+
+        result = self.crew().kickoff(inputs={
+            **inputs,
+            "project_slug":    slug,
+            "project_goal":    project.get("goal", goal),
+            "current_step":    current_step,
+            "project_context": project_context,
+            "user_message":    user_msg,
+        })
+        return result.raw.strip()
