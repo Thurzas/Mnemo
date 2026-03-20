@@ -129,6 +129,27 @@ export interface IngestResult {
   chunks: number
 }
 
+export interface PendingConfirmation {
+  id:           string
+  action:       string
+  project_slug: string
+  step_label:   string
+  description:  string
+  ts:           string
+}
+
+export interface ConfirmationsResponse {
+  confirmations: PendingConfirmation[]
+}
+
+export interface ConfirmActionResult {
+  ok:         boolean
+  executed:   boolean
+  stdout:     string
+  stderr:     string
+  returncode: number | null
+}
+
 export interface ProjectManifest {
   slug:       string
   name:       string
@@ -411,6 +432,15 @@ export const api = {
 
   getProjectGitLog: (slug: string) =>
     request<{ log: string }>(`/api/projects/${encodeURIComponent(slug)}/git`),
+
+  getConfirmations: () =>
+    request<ConfirmationsResponse>('/api/confirmations'),
+
+  confirmAction: (id: string, approved: boolean) =>
+    request<ConfirmActionResult>(`/api/confirmations/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      body: JSON.stringify({ approved }),
+    }),
 
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
     const token = auth.getToken()

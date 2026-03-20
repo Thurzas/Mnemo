@@ -1484,6 +1484,76 @@ def document_delete(doc_id: str, _: Auth):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Confirmations GOAP (Phase 7.6) ────────────────────────────────
+
+
+@app.get("/api/confirmations")
+async def confirmations_list(_: Auth):
+    """Retourne les actions en attente de confirmation (world_state.json)."""
+    from Mnemo.context import get_data_dir
+    ws_path = get_data_dir() / "world_state.json"
+    if not ws_path.exists():
+        return {"confirmations": []}
+    try:
+        ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        return {"confirmations": ws.get("pending_confirmations", [])}
+    except Exception:
+        return {"confirmations": []}
+
+
+class ConfirmActionRequest(BaseModel):
+    approved: bool
+
+
+@app.post("/api/confirmations/{confirmation_id}")
+def confirm_action(confirmation_id: str, body: ConfirmActionRequest, _: Auth):
+    """
+    Approuve ou rejette une action en attente.
+    Si approved=True et action=sandbox_shell:..., exécute la commande.
+    Dans les deux cas, retire la confirmation de la liste.
+    """
+    from Mnemo.context import get_data_dir
+    ws_path = get_data_dir() / "world_state.json"
+    if not ws_path.exists():
+        raise HTTPException(status_code=404, detail="Aucune confirmation en attente.")
+
+    try:
+        ws = json.loads(ws_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    confirmations: list = ws.get("pending_confirmations", [])
+    target = next((c for c in confirmations if c.get("id") == confirmation_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Confirmation introuvable.")
+
+    # Retirer de la liste (approuvée ou rejetée)
+    ws["pending_confirmations"] = [c for c in confirmations if c.get("id") != confirmation_id]
+    ws_path.write_text(json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if not body.approved:
+        return {"ok": True, "executed": False, "stdout": "", "stderr": "", "returncode": None}
+
+    action = target.get("action", "")
+    slug   = target.get("project_slug", "")
+
+    if action.startswith("sandbox_shell:"):
+        command = action[len("sandbox_shell:"):].strip()
+        from Mnemo.tools.sandbox_tools import run_command
+        result = run_command(slug, command)
+        return {
+            "ok":         result["returncode"] == 0,
+            "executed":   True,
+            "stdout":     result.get("stdout", ""),
+            "stderr":     result.get("stderr", ""),
+            "returncode": result["returncode"],
+        }
+
+    # Action non-shell (sandbox_write, etc.) — pas d'exécution automatisée ici
+    return {"ok": True, "executed": False, "stdout": "",
+            "stderr": f"Action non exécutable depuis l'API : {action}", "returncode": None}
+
+
 # ── Projets sandbox (Phase 7) ──────────────────────────────────────
 
 

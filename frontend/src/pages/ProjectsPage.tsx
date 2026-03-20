@@ -3,7 +3,7 @@ import Editor from '@monaco-editor/react'
 import type { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import { api } from '@/api'
-import type { ProjectManifest } from '@/api'
+import type { ProjectManifest, PendingConfirmation } from '@/api'
 import styles from './ProjectsPage.module.css'
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -48,13 +48,16 @@ export function ProjectsPage({ active }: Props) {
   const [planSteps,    setPlanSteps]    = useState<PlanStep[]>([])
   const [terminalLog,  setTerminalLog]  = useState('')
   const [gitLog,       setGitLog]       = useState('')
-  const [saving,       setSaving]       = useState(false)
-  const [creating,     setCreating]     = useState(false)
-  const [newName,      setNewName]      = useState('')
-  const [newGoal,      setNewGoal]      = useState('')
-  const [error,        setError]        = useState<string | null>(null)
+  const [saving,         setSaving]         = useState(false)
+  const [creating,       setCreating]       = useState(false)
+  const [newName,        setNewName]        = useState('')
+  const [newGoal,        setNewGoal]        = useState('')
+  const [error,          setError]          = useState<string | null>(null)
+  const [confirmations,  setConfirmations]  = useState<PendingConfirmation[]>([])
+  const [confirmLoading, setConfirmLoading] = useState<Set<string>>(new Set())
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const logPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const confPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ── Charger la liste des projets ────────────────────────────────
   const loadProjects = useCallback(async () => {
@@ -85,6 +88,42 @@ export function ProjectsPage({ active }: Props) {
   useEffect(() => {
     if (slug) loadProject(slug)
   }, [slug, loadProject])
+
+  // ── Polling pending_confirmations toutes les 30s ────────────────
+  const loadConfirmations = useCallback(async () => {
+    try {
+      const { confirmations: c } = await api.getConfirmations()
+      setConfirmations(c)
+    } catch { /* silence */ }
+  }, [])
+
+  useEffect(() => {
+    if (!active) return
+    loadConfirmations()
+    confPollRef.current = setInterval(loadConfirmations, 30_000)
+    return () => { if (confPollRef.current) clearInterval(confPollRef.current) }
+  }, [active, loadConfirmations])
+
+  // ── Approuver / Rejeter une confirmation ─────────────────────────
+  const handleConfirm = async (id: string, approved: boolean) => {
+    setConfirmLoading(prev => new Set(prev).add(id))
+    try {
+      const result = await api.confirmAction(id, approved)
+      setConfirmations(prev => prev.filter(c => c.id !== id))
+      if (result.executed) {
+        const out = [
+          approved ? `✓ Commande exécutée (rc=${result.returncode})` : '✗ Rejeté',
+          result.stdout,
+          result.stderr,
+        ].filter(Boolean).join('\n')
+        setTerminalLog(prev => prev + '\n' + out)
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur confirmation')
+    } finally {
+      setConfirmLoading(prev => { const s = new Set(prev); s.delete(id); return s })
+    }
+  }
 
   // ── Polling logs/commands.log toutes les 3s ─────────────────────
   useEffect(() => {
@@ -244,6 +283,40 @@ export function ProjectsPage({ active }: Props) {
       )}
 
       {error && <div className={styles.errorBar}>{error}</div>}
+
+      {/* ── Confirmations en attente (GOAP) ── */}
+      {confirmations.length > 0 && (
+        <div className={styles.confirmPanel}>
+          <div className={styles.confirmTitle}>
+            ⚡ Actions en attente de confirmation ({confirmations.length})
+          </div>
+          {confirmations.map(c => (
+            <div key={c.id} className={styles.confirmCard}>
+              <div className={styles.confirmDesc}>{c.description}</div>
+              <div className={styles.confirmMeta}>
+                <span className={styles.confirmBadge}>{c.action}</span>
+                <span className={styles.confirmTs}>{c.ts}</span>
+              </div>
+              <div className={styles.confirmActions}>
+                <button
+                  className={styles.btnApprove}
+                  disabled={confirmLoading.has(c.id)}
+                  onClick={() => handleConfirm(c.id, true)}
+                >
+                  {confirmLoading.has(c.id) ? '…' : 'Approuver'}
+                </button>
+                <button
+                  className={styles.btnReject}
+                  disabled={confirmLoading.has(c.id)}
+                  onClick={() => handleConfirm(c.id, false)}
+                >
+                  Rejeter
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── Corps — 3 colonnes ── */}
       <div className={styles.body}>
