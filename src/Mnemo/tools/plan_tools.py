@@ -306,6 +306,7 @@ def _build_step_executor() -> dict:
         "scheduler":      "create_structured_content",
         "reconnaissance": "reconnaissance",
         "curiosity":      "assess_memory_gaps",
+        "planner":        "spawn_sub_plan",
     }
 
     def _kg_actions(inputs: dict, step_text: str) -> list[dict]:
@@ -460,6 +461,7 @@ def _build_step_executor() -> dict:
             "session_id":        session_id or "plan",
             "memory_context":    memory_ctx,
             "temporal_context":  inputs.get("temporal_context") or _temporal(),
+            "calendar_context":  inputs.get("calendar_context", ""),
             "evaluation_result": inputs.get("evaluation_result", (
                 '{"route":"conversation","needs_memory":false,'
                 '"needs_web":false,"needs_clarification":false}'
@@ -558,6 +560,95 @@ def _build_step_executor() -> dict:
             "Lance une session pour combler ces lacunes avant de continuer."
         )
 
+    def _run_planner(step: str, session_id: str, inputs: dict) -> str:
+        """
+        crew : planner dans un plan = décompose l'étape en sous-plan et l'exécute.
+
+        Mécanisme HTN (Hierarchical Task Networks) :
+          - Appelle ConversationCrew pour décomposer le label d'étape en sous-étapes JSON
+          - Crée un sous-plan dans projects/<slug>/sub_plans/<step_slug>/plan.md
+          - Lance PlanRunner récursivement sur ce sous-plan
+          - Guard : _plan_depth dans inputs (décrément à chaque niveau, stop à 0)
+        """
+        import json as _json
+        from pathlib import Path as _Path
+
+        depth = inputs.get("_plan_depth", 2)
+        clean = _RE_CREW_TARGET.sub("", step).strip(" —")
+        slug  = inputs.get("slug")
+
+        # Profondeur max atteinte → traitement plat sans récursion
+        if depth <= 0:
+            return _run_conversation(step, session_id, inputs)
+
+        # Demander à ConversationCrew de décomposer en sous-étapes JSON
+        decompose_msg = (
+            "Décompose la tâche suivante en 3 à 6 sous-étapes concrètes et ordonnées. "
+            "Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ni après. "
+            'Format : {"steps": ["étape 1", "étape 2"], '
+            '"crew_targets": {"étape 1": "shell", "étape 2": "note"}}\n\n'
+            "Tâche : " + clean
+        )
+        sub_data: dict = {}
+        try:
+            from Mnemo.crew import ConversationCrew as _CC
+            res = _CC().crew().kickoff(
+                inputs=_conversation_inputs(decompose_msg, session_id, inputs)
+            )
+            raw   = res.raw or ""
+            start = raw.find("{")
+            end   = raw.rfind("}") + 1
+            if start != -1 and end > start:
+                sub_data = _json.loads(raw[start:end])
+        except Exception:
+            pass
+
+        sub_steps   = sub_data.get("steps", [])
+        sub_targets = sub_data.get("crew_targets", {})
+
+        # Décomposition impossible → traitement plat
+        if not sub_steps:
+            return _run_conversation(step, session_id, inputs)
+
+        # Nom du dossier sous-plan
+        sub_slug = re.sub(r"[^\w\-]", "_", clean[:30]).strip("_").lower()
+
+        # Créer le sous-plan dans projects/<slug>/sub_plans/<step_slug>/
+        if slug:
+            from Mnemo.context import get_data_dir as _gdd
+            sub_plan_dir  = _gdd() / "projects" / slug / "sub_plans" / sub_slug
+            sub_plan_dir.mkdir(parents=True, exist_ok=True)
+            sub_plan_path = PlanStore.create(
+                goal         = clean,
+                steps        = sub_steps,
+                crew_targets = sub_targets,
+                path         = sub_plan_dir / "plan.md",
+            )
+            sub_project_dir = str(sub_plan_dir)
+        else:
+            sub_plan_path   = PlanStore.create(
+                goal         = clean,
+                steps        = sub_steps,
+                crew_targets = sub_targets,
+            )
+            sub_project_dir = inputs.get("project_dir", "")
+
+        sub_inputs = {
+            **inputs,
+            "project_dir":  sub_project_dir,
+            "goal":         clean,
+            "_plan_depth":  depth - 1,
+        }
+
+        sub_runner = PlanRunner()
+        summary    = sub_runner.run(
+            sub_plan_path,
+            session_id  = session_id,
+            base_inputs = sub_inputs,
+        )
+        _save_output(inputs, step, summary)
+        return summary
+
     return {
         "conversation":      _run_conversation,
         "shell":             _run_shell,
@@ -565,6 +656,7 @@ def _build_step_executor() -> dict:
         "scheduler":         _run_scheduler,
         "reconnaissance":    _run_recon,
         "curiosity":         _run_curiosity,
+        "planner":           _run_planner,
         # Callable utilitaire exposé pour PlanRunner (pas un crew_target)
         "__update_memory__": _update_project_memory,
     }
@@ -647,7 +739,10 @@ class PlanRunner:
         Returns:
             Résumé de l'exécution (étapes faites, bloquant éventuel).
         """
-        inputs   = base_inputs or {}
+        inputs = dict(base_inputs or {})
+        # Injecter _plan_depth par défaut (max 2 niveaux de récursion)
+        if "_plan_depth" not in inputs:
+            inputs["_plan_depth"] = 2
         executed = 0
         skipped  = 0
 

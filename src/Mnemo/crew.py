@@ -967,6 +967,7 @@ class PlannerCrew:
                 "conversation":   "generate_response",
                 "scheduler":      "create_structured_content",
                 "reconnaissance": "reconnaissance",
+                "planner":        "spawn_sub_plan",
             }
             try:
                 from Mnemo.tools.kg_tools import kg_add_triplet

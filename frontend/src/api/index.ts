@@ -438,6 +438,23 @@ export const api = {
       method: 'DELETE',
     }),
 
+  mkdir: (slug: string, path: string) =>
+    request<{ path: string }>(`/api/projects/${encodeURIComponent(slug)}/mkdir`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+
+  deleteFile: (slug: string, path: string) =>
+    request<{ deleted: string }>(`/api/projects/${encodeURIComponent(slug)}/file?path=${encodeURIComponent(path)}`, {
+      method: 'DELETE',
+    }),
+
+  runProjectCommand: (slug: string, command: string) =>
+    request<{ stdout: string; stderr: string; returncode: number }>(`/api/projects/${encodeURIComponent(slug)}/command`, {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    }),
+
   getProjectGitLog: (slug: string) =>
     request<{ log: string }>(`/api/projects/${encodeURIComponent(slug)}/git`),
 

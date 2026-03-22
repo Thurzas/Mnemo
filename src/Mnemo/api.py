@@ -1624,8 +1624,8 @@ def project_advance(slug: str, _: Auth):
     if next_step is None:
         return {"done": True, "message": "Toutes les étapes sont terminées."}
 
-    from Mnemo.tools.sandbox_tools import get_manifest
-    manifest = get_manifest(slug) or {}
+    from Mnemo.tools.sandbox_tools import get_project
+    manifest = get_project(slug) or {}
     runner  = PlanRunner()
     summary = runner.run(plan_path, max_steps=1, base_inputs={
         "project_dir": str(project_dir),
@@ -1671,6 +1671,63 @@ def project_file_write(slug: str, body: FileWriteRequest, _: Auth):
     if res["error"]:
         raise HTTPException(status_code=400, detail=res["error"])
     return res
+
+
+class MkdirRequest(BaseModel):
+    path: str  # relative path, e.g. "src/chapter_03"
+
+
+@app.post("/api/projects/{slug}/mkdir", status_code=201)
+def project_mkdir(slug: str, body: MkdirRequest, _: Auth):
+    """Crée un dossier dans le sandbox (avec .gitkeep)."""
+    from Mnemo.tools.sandbox_tools import _project_path, _resolve_safe, _git_commit
+    root   = _project_path(slug)
+    target = _resolve_safe(root, body.path)
+    if target is None:
+        raise HTTPException(status_code=400, detail="Chemin interdit")
+    target.mkdir(parents=True, exist_ok=True)
+    keepfile = target / ".gitkeep"
+    keepfile.touch()
+    try:
+        _git_commit(root, f"user: mkdir {body.path}", [str(keepfile.relative_to(root))])
+    except Exception:
+        pass
+    return {"path": body.path}
+
+
+@app.delete("/api/projects/{slug}/file")
+def project_file_delete(slug: str, path: str, _: Auth):
+    """Supprime un fichier du sandbox."""
+    from Mnemo.tools.sandbox_tools import _project_path, _resolve_safe, _git
+    root   = _project_path(slug)
+    target = _resolve_safe(root, path)
+    if target is None:
+        raise HTTPException(status_code=400, detail="Chemin interdit")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail="Pas un fichier")
+    target.unlink()
+    try:
+        _git(root, "rm", "--cached", "--ignore-unmatch", path)
+        _git(root, "commit", "-m", f"user: delete {path}")
+    except Exception:
+        pass
+    return {"deleted": path}
+
+
+class CommandRequest(BaseModel):
+    command: str
+
+
+@app.post("/api/projects/{slug}/command")
+def project_run_command(slug: str, body: CommandRequest, _: Auth):
+    """Exécute une commande shell dans le sandbox du projet."""
+    from Mnemo.tools.sandbox_tools import run_command
+    res = run_command(slug, body.command)
+    if res.get("error") and res.get("returncode") != 0:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return {"stdout": res.get("output", ""), "stderr": res.get("error", ""), "returncode": res.get("returncode", 0)}
 
 
 @app.delete("/api/projects/{slug}", status_code=200)
