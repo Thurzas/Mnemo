@@ -139,13 +139,16 @@ class PlanStore:
 
     @staticmethod
     def get_next_step(plan: Path) -> str | None:
-        """Retourne le texte de la première étape [ ] non faite, ou None."""
+        """Retourne le texte de la première étape [ ] non faite (ni [x] ni [!]), ou None."""
         lines = plan.read_text(encoding="utf-8").splitlines()
         start, end = _section_bounds(lines, "Étapes")
         if start == -1:
             return None
         for line in lines[start:end]:
-            m = _RE_STEP_TODO.match(line.strip())
+            stripped = line.strip()
+            if re.match(r"^- \[!\]", stripped):
+                continue  # étape échouée, on passe
+            m = _RE_STEP_TODO.match(stripped)
             if m:
                 return m.group(1)
         return None
@@ -290,52 +293,115 @@ def _build_step_executor() -> dict:
         except Exception:
             return ""
 
+    def _step_filename(step: str) -> str:
+        """Nom de fichier sûr dérivé du label d'étape."""
+        clean = _RE_CREW_TARGET.sub("", step).strip(" —")
+        return re.sub(r"[^\w\-]", "_", clean[:50]).strip("_")
+
+    def _save_output(inputs: dict, step: str, content: str) -> None:
+        """Écrit le résultat d'une étape dans projects/<slug>/outputs/<step>.md."""
+        project_dir = inputs.get("project_dir")
+        if not project_dir or not content:
+            return
+        from pathlib import Path as _Path
+        out_dir = _Path(project_dir) / "outputs"
+        out_dir.mkdir(exist_ok=True)
+        (_Path(project_dir) / "outputs" / f"{_step_filename(step)}.md").write_text(
+            content, encoding="utf-8"
+        )
+
+    def _load_previous_outputs(inputs: dict) -> str:
+        """Charge les outputs des étapes précédentes comme contexte pipeline."""
+        project_dir = inputs.get("project_dir")
+        if not project_dir:
+            return ""
+        from pathlib import Path as _Path
+        out_dir = _Path(project_dir) / "outputs"
+        if not out_dir.exists():
+            return ""
+        parts = []
+        for f in sorted(out_dir.iterdir()):
+            if f.suffix == ".md" and f.is_file():
+                try:
+                    content = f.read_text(encoding="utf-8")[:2000]
+                    parts.append(f"### {f.stem.replace('_', ' ')}\n{content}")
+                except Exception:
+                    pass
+        if not parts:
+            return ""
+        return "## Résultats des étapes précédentes\n\n" + "\n\n".join(parts)
+
+    def _conversation_inputs(step: str, session_id: str, inputs: dict) -> dict:
+        """Inputs minimaux requis par conversation_tasks.yaml, avec contexte pipeline."""
+        prev      = _load_previous_outputs(inputs)
+        base_mem  = inputs.get("memory_context", "")
+        memory_ctx = "\n\n".join(filter(None, [base_mem, prev]))
+        return {
+            **inputs,
+            "user_message":      step,
+            "session_id":        session_id or "plan",
+            "memory_context":    memory_ctx,
+            "temporal_context":  inputs.get("temporal_context") or _temporal(),
+            "evaluation_result": inputs.get("evaluation_result", (
+                '{"route":"conversation","needs_memory":false,'
+                '"needs_web":false,"needs_clarification":false}'
+            )),
+        }
+
     def _run_conversation(step: str, session_id: str, inputs: dict) -> str:
         from Mnemo.crew import ConversationCrew
-        result = ConversationCrew().crew().kickoff(inputs={
-            **inputs,
-            "user_message":   step,
-            "session_id":     session_id,
-            "memory_context": "",
-            "temporal_context": inputs.get("temporal_context") or _temporal(),
-        })
-        return result.raw or ""
+        result = ConversationCrew().crew().kickoff(inputs=_conversation_inputs(step, session_id, inputs))
+        response = result.raw or ""
+        _save_output(inputs, step, response)
+        return response
 
     def _run_shell(step: str, session_id: str, inputs: dict) -> str:
-        from Mnemo.crew import ShellCrew
-        return ShellCrew().run({
-            **inputs,
-            "user_message": step,
-            "shell_command": step,
-            "temporal_context": inputs.get("temporal_context") or _temporal(),
-        })
+        # Dans un plan, "crew : shell" = générer du contenu écrit (chapitres, fichiers)
+        # pas exécuter une commande système (le label n'est pas une commande valide).
+        from Mnemo.crew import ConversationCrew
+        msg = f"Réalise cette tâche et produis le contenu demandé : {step}"
+        result = ConversationCrew().crew().kickoff(inputs=_conversation_inputs(msg, session_id, inputs))
+        response = result.raw or ""
+        _save_output(inputs, step, response)
+        return response
 
     def _run_note(step: str, session_id: str, inputs: dict) -> str:
-        from Mnemo.crew import NoteWriterCrew
-        return NoteWriterCrew().run({
-            "user_message": step,
-            "temporal_context": inputs.get("temporal_context") or _temporal(),
-        })
+        # Dans un plan, "crew : note" = produire du contenu structuré pour le projet,
+        # pas écrire en mémoire globale. On utilise ConversationCrew avec les outputs
+        # précédents comme contexte pour un résultat exploitable.
+        from Mnemo.crew import ConversationCrew
+        clean = _RE_CREW_TARGET.sub("", step).strip(" —")
+        msg   = f"Rédige une analyse détaillée et structurée en markdown pour : {clean}"
+        result = ConversationCrew().crew().kickoff(
+            inputs=_conversation_inputs(msg, session_id, inputs)
+        )
+        response = result.raw or ""
+        _save_output(inputs, step, response)
+        return response
 
     def _run_scheduler(step: str, session_id: str, inputs: dict) -> str:
-        # Dans un plan, "crew : scheduler" signifie souvent "planifier/noter une tâche"
-        # → on délègue à NoteWriterCrew plutôt que SchedulerCrew (qui attend une requête agenda)
-        from Mnemo.crew import NoteWriterCrew
-        return NoteWriterCrew().run({
-            "user_message": step,
-            "temporal_context": inputs.get("temporal_context") or _temporal(),
-        })
+        # Dans un plan, "crew : scheduler" = structurer/planifier du contenu,
+        # pas créer une tâche récurrente. On produit du contenu avec ConversationCrew.
+        from Mnemo.crew import ConversationCrew
+        clean = _RE_CREW_TARGET.sub("", step).strip(" —")
+        msg   = f"Crée et structure un plan détaillé en markdown pour : {clean}"
+        result = ConversationCrew().crew().kickoff(
+            inputs=_conversation_inputs(msg, session_id, inputs)
+        )
+        response = result.raw or ""
+        _save_output(inputs, step, response)
+        return response
 
     def _run_recon(step: str, session_id: str, inputs: dict) -> str:
         from Mnemo.crew import ReconnaissanceCrew
-        goal  = inputs.get("goal", step)
-        hints = inputs.get("hints", [])
+        goal   = inputs.get("goal", step)
+        hints  = inputs.get("hints", [])
         result = ReconnaissanceCrew().run({"goal": goal, "hints": hints})
-        return result.get("summary", "Reconnaissance terminée.")
+        summary = result.get("summary", "Reconnaissance terminée.")
+        _save_output(inputs, step, summary)
+        return summary
 
     def _run_curiosity(step: str, session_id: str, inputs: dict) -> str:
-        # Curiosity en mode PlanRunner : pas d'interaction utilisateur directe
-        # Retourne une invitation à lancer la session manuelle
         return (
             f"Étape de remplissage mémoire : '{step}'. "
             "Lance une session pour combler ces lacunes avant de continuer."
@@ -403,10 +469,10 @@ class PlanRunner:
         """
         inputs   = base_inputs or {}
         executed = 0
-        blocked  = False
+        skipped  = 0
 
         while True:
-            if max_steps and executed >= max_steps:
+            if max_steps and (executed + skipped) >= max_steps:
                 break
             step_raw = PlanStore.get_next_step(plan)
             if step_raw is None:
@@ -420,36 +486,20 @@ class PlanRunner:
 
             try:
                 response = executor(step_raw, session_id, inputs)
-
-                # Détecte un bloquant via la réponse (erreur explicite)
-                if response and any(
-                    marker in response.lower()
-                    for marker in ("erreur", "bloqué", "impossible", "échoué", "failed")
-                ):
-                    raise StepExecutionError(response[:200])
-
                 PlanStore.mark_done(plan, step_raw)
                 executed += 1
 
             except Exception as e:
-                blocker = f"{step_clean} — {e}"
-                PlanStore.add_blocker(plan, blocker)
-                blocked = True
-                break
+                reason = str(e)[:200]
+                PlanStore.mark_failed(plan, step_raw, reason)
+                skipped += 1
+                # On continue vers la prochaine étape
 
         status = PlanStore.get_status(plan)
-        if blocked:
-            return (
-                f"Plan arrêté après {executed} étape(s). "
-                f"Bloquant enregistré dans `{plan.name}`. "
-                f"Statut : {status}"
-            )
+        skip_note = f", {skipped} ignorée(s)" if skipped else ""
         if PlanStore.is_complete(plan):
-            return (
-                f"Plan terminé — {executed} étape(s) complétée(s). "
-                f"Statut : {status}"
-            )
-        return f"{executed} étape(s) exécutée(s). Plan en cours : `{plan.name}`."
+            return f"Plan terminé — {executed} étape(s) complétée(s){skip_note}. Statut : {status}"
+        return f"{executed} étape(s) exécutée(s){skip_note}. Plan en cours : `{plan.name}`."
 
 
 def check_active_plans() -> list[Path]:

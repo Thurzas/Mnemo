@@ -1601,7 +1601,10 @@ def project_advance(slug: str, _: Auth):
         return {"done": True, "message": "Toutes les étapes sont terminées."}
 
     runner  = PlanRunner()
-    summary = runner.run(plan_path, max_steps=1)
+    summary = runner.run(plan_path, max_steps=1, base_inputs={
+        "project_dir": str(project_dir),
+        "slug": slug,
+    })
     return {"done": PlanStore.is_complete(plan_path), "message": summary}
 
 
