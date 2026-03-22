@@ -72,7 +72,10 @@ export function ProjectsPage({ active, targetSlug }: Props) {
   }, [])
 
   useEffect(() => {
-    if (active) loadProjects()
+    if (!active) return
+    loadProjects()
+    const interval = setInterval(loadProjects, 60_000)
+    return () => clearInterval(interval)
   }, [active, loadProjects])
 
   // ── Navigation vers un projet ciblé (depuis ChatPage) ───────────
@@ -222,7 +225,7 @@ export function ProjectsPage({ active, targetSlug }: Props) {
   }
 
   // ── Créer un projet ─────────────────────────────────────────────
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!newName.trim()) return
     setError(null)
@@ -246,6 +249,11 @@ export function ProjectsPage({ active, targetSlug }: Props) {
       await api.deleteProject(slug)
       setSlug(null)
       setFiles([])
+      setOpenFile(null)
+      setFileContent('')
+      setPlanSteps([])
+      setTerminalLog('')
+      setGitLog('')
       await loadProjects()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Erreur suppression')

@@ -1147,6 +1147,14 @@ async def ws_message(websocket: WebSocket):
 
     await websocket.send_json({"type": "auth_ok", "username": username})
 
+    async def _safe_send(payload: dict) -> bool:
+        """Envoie un message JSON — retourne False si la connexion est fermée."""
+        try:
+            await websocket.send_json(payload)
+            return True
+        except Exception:
+            return False
+
     async def _run_and_stream(
         text: str,
         sid: str,
@@ -1159,7 +1167,8 @@ async def ws_message(websocket: WebSocket):
         status_queue: asyncio.Queue = asyncio.Queue()
         _status_mod.set_session(sid, status_queue, loop)
 
-        await websocket.send_json({"type": "thinking"})
+        if not await _safe_send({"type": "thinking"}):
+            return
 
         # Lance handle_message dans le thread pool (non-bloquant)
         fut = loop.run_in_executor(
@@ -1173,20 +1182,22 @@ async def ws_message(websocket: WebSocket):
         while not fut.done():
             try:
                 event = status_queue.get_nowait()
-                await websocket.send_json(event)
+                if not await _safe_send(event):
+                    return
             except asyncio.QueueEmpty:
                 await asyncio.sleep(0.03)
 
         # Draine les événements émis juste avant que fut.done() devienne True
         while not status_queue.empty():
-            await websocket.send_json(status_queue.get_nowait())
+            if not await _safe_send(status_queue.get_nowait()):
+                return
 
         _status_mod.clear_session(sid)
 
         try:
             result = fut.result()
         except Exception as e:
-            await websocket.send_json({"type": "error", "detail": str(e)})
+            await _safe_send({"type": "error", "detail": str(e)})
             return
 
         if isinstance(result, dict) and result.get("__web_confirm__"):
@@ -1197,10 +1208,12 @@ async def ws_message(websocket: WebSocket):
                 words = plan_text.split(" ")
                 for i, word in enumerate(words):
                     chunk = word if i == len(words) - 1 else word + " "
-                    await websocket.send_json({"type": "token", "text": chunk})
+                    if not await _safe_send({"type": "token", "text": chunk}):
+                        return
                     await asyncio.sleep(0.012)
-                await websocket.send_json({"type": "done", "session_id": sid})
-            await websocket.send_json({
+                if not await _safe_send({"type": "done", "session_id": sid}):
+                    return
+            await _safe_send({
                 "type":             "web_confirm",
                 "web_query":        result["web_query"],
                 "session_id":       sid,
@@ -1222,14 +1235,16 @@ async def ws_message(websocket: WebSocket):
         words = (result or "").split(" ")
         for i, word in enumerate(words):
             chunk = word if i == len(words) - 1 else word + " "
-            await websocket.send_json({"type": "token", "text": chunk})
+            if not await _safe_send({"type": "token", "text": chunk}):
+                return
             await asyncio.sleep(0.012)
 
-        await websocket.send_json({"type": "done", "session_id": sid})
+        if not await _safe_send({"type": "done", "session_id": sid}):
+            return
 
         # Émis après done — le frontend peut ouvrir le modal sans interrompre le streaming
         if plan_step:
-            await websocket.send_json({"type": "plan_step_ready", **plan_step})
+            await _safe_send({"type": "plan_step_ready", **plan_step})
         if web_suggests:
             await websocket.send_json({
                 "type":        "web_suggest",
@@ -1247,11 +1262,11 @@ async def ws_message(websocket: WebSocket):
         Phase 6.5 — Exécute la recherche web pour l'étape 1 d'un plan (après confirmation).
         Marque l'étape done, émet les résultats, et émet plan_step_ready pour l'étape 2.
         """
-        await websocket.send_json({"type": "thinking"})
+        if not await _safe_send({"type": "thinking"}):
+            return
 
         if not confirmed:
-            await websocket.send_json({"type": "done", "session_id": sid})
-            # Étape 1 non exécutée — plan_step_ready reste disponible (déjà en world_state)
+            await _safe_send({"type": "done", "session_id": sid})
             return
 
         import Mnemo.status as _status_mod
@@ -1281,30 +1296,34 @@ async def ws_message(websocket: WebSocket):
         while not fut.done():
             try:
                 event = status_queue.get_nowait()
-                await websocket.send_json(event)
+                if not await _safe_send(event):
+                    return
             except asyncio.QueueEmpty:
                 await asyncio.sleep(0.03)
         while not status_queue.empty():
-            await websocket.send_json(status_queue.get_nowait())
+            if not await _safe_send(status_queue.get_nowait()):
+                return
         _status_mod.clear_session(sid)
 
         try:
             result = fut.result()
         except Exception as e:
-            await websocket.send_json({"type": "error", "detail": str(e)})
+            await _safe_send({"type": "error", "detail": str(e)})
             return
 
         words = (result or "").split(" ")
         for i, word in enumerate(words):
             chunk = word if i == len(words) - 1 else word + " "
-            await websocket.send_json({"type": "token", "text": chunk})
+            if not await _safe_send({"type": "token", "text": chunk}):
+                return
             await asyncio.sleep(0.012)
 
-        await websocket.send_json({"type": "done", "session_id": sid})
+        if not await _safe_send({"type": "done", "session_id": sid}):
+            return
 
         step2 = plan_web.get("step2_data")
         if step2:
-            await websocket.send_json({"type": "plan_step_ready", **step2})
+            await _safe_send({"type": "plan_step_ready", **step2})
 
     try:
         while True:
@@ -1334,7 +1353,8 @@ async def ws_message(websocket: WebSocket):
                 link_query = msg.get("original_query", link_title)
                 sid        = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
 
-                await websocket.send_json({"type": "thinking"})
+                if not await _safe_send({"type": "thinking"}):
+                    return
 
                 import Mnemo.status as _status_mod_lnk
                 sq: asyncio.Queue = asyncio.Queue()
@@ -1352,7 +1372,6 @@ async def ws_message(websocket: WebSocket):
                     saved = save_web_page(page["text"], page["title"] or link_title, link_url, link_query)
                     if saved:
                         _status_mod_lnk.emit(sid, f"Sauvegardé : {saved.name}")
-                    # Extrait un résumé (premiers 2000 caractères + compte des liens)
                     excerpt = page["text"][:2000].strip()
                     n_links = len(page.get("links", []))
                     reply = (
@@ -1369,27 +1388,32 @@ async def ws_message(websocket: WebSocket):
                 while not fut2.done():
                     try:
                         ev = sq.get_nowait()
-                        await websocket.send_json(ev)
+                        if not await _safe_send(ev):
+                            return
                     except asyncio.QueueEmpty:
                         await asyncio.sleep(0.03)
                 while not sq.empty():
-                    await websocket.send_json(sq.get_nowait())
+                    if not await _safe_send(sq.get_nowait()):
+                        return
                 _status_mod_lnk.clear_session(sid)
 
                 try:
                     link_result = fut2.result()
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "detail": str(e)})
+                    await _safe_send({"type": "error", "detail": str(e)})
                     continue
 
                 words = (link_result or "").split(" ")
                 for i, word in enumerate(words):
                     chunk = word if i == len(words) - 1 else word + " "
-                    await websocket.send_json({"type": "token", "text": chunk})
+                    if not await _safe_send({"type": "token", "text": chunk}):
+                        return
                     await asyncio.sleep(0.012)
-                await websocket.send_json({"type": "done", "session_id": sid})
+                await _safe_send({"type": "done", "session_id": sid})
 
-    except WebSocketDisconnect:
+    except Exception:
+        # Couvre WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK,
+        # RuntimeError("WebSocket is not connected") — toutes les déconnexions normales.
         pass
 
 

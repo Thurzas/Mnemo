@@ -151,7 +151,10 @@ _PLAN_KEYWORDS_STRONG = [
     "prépares moi un plan", "prepares moi un plan",
     "fais-moi un plan", "fais moi un plan",
     "fais un plan", "fait un plan",
+    "faire un plan", "faire le plan",
+    "on va faire un plan", "on fait un plan",
     "je veux un plan", "je voudrais un plan",
+    "je veux faire un plan", "je voudrais faire un plan",
     "donne-moi un plan", "donne moi un plan",
     "génère un plan", "genere un plan",
     "décompose la tâche", "decompose la tache",
@@ -250,14 +253,19 @@ def _detect_note_intent(msg: str) -> bool:
 
 # ── Handler ───────────────────────────────────────────────────────────────────
 
-# Seuil de mots au-delà duquel le bypass keyword est désactivé pour les routes
-# ambiguës (scheduler, calendar). Les messages longs sont des discussions,
-# pas des commandes directes — le ML/LLM est plus fiable dans ce cas.
-# Shell et Note restent actifs quelle que soit la longueur (impératifs de sécurité/mémoire).
-# Plan : seuil plus élevé car les demandes de plan sont naturellement longues
-# ("prépares-moi un plan pour implémenter X avec telle techno").
-_KEYWORD_BYPASS_MAX_WORDS = 12
-_KEYWORD_BYPASS_MAX_WORDS_PLAN = 20
+# Seuils de bypass keyword.
+#
+# PRINCIPE : le keyword bypass est fiable UNIQUEMENT pour les messages courts
+# de type commande directe, où il y a peu d'ambiguïté possible.
+# Pour les messages longs (langage naturel), un keyword trouvé en milieu de
+# phrase n'est pas un signal déterministe — le ML/LLM est plus fiable.
+#
+# Shell et Note : pas de limite — ce sont des impératifs de sécurité/mémoire
+#   dont la formulation est rarement ambiguë quelle que soit la longueur.
+# Plan/Scheduler/Calendar/Sandbox : seuil bas.
+#   "fais un plan" (3 mots) ou "rappelle-moi demain" (3 mots) → bypass OK.
+#   "salut, on va faire un plan de ML pour ..." (17 mots) → laisser au ML/LLM.
+_KEYWORD_BYPASS_MAX_WORDS = 8
 
 
 class KeywordHandler(RouterHandler):
@@ -271,17 +279,15 @@ class KeywordHandler(RouterHandler):
 
     def handle(self, ctx: RouterContext) -> RouterResult | None:
         msg    = ctx.message
-        nwords = len(msg.split())
-        _short      = nwords <= _KEYWORD_BYPASS_MAX_WORDS
-        _short_plan = nwords <= _KEYWORD_BYPASS_MAX_WORDS_PLAN
+        _short = len(msg.split()) <= _KEYWORD_BYPASS_MAX_WORDS
 
         # ── Note — priorité max, pas de limite de longueur ────────────────
         if _detect_note_intent(msg):
             return RouterResult("note", 1.0, "keyword")
 
-        # ── Plan fort — seuil étendu (demandes naturellement longues) ────
+        # ── Plan fort ─────────────────────────────────────────────────────
         plan_strong, plan_weak = _detect_plan_intent(msg)
-        if plan_strong and _short_plan:
+        if _short and plan_strong:
             return RouterResult("plan", 1.0, "keyword", {"needs_recon": True})
 
         if _short:
@@ -299,14 +305,17 @@ class KeywordHandler(RouterHandler):
             if strong:
                 return RouterResult("scheduler", 1.0, "keyword")
         else:
-            # Message long → pas de bypass, mais on calcule quand même les hints
+            # Message long → pas de bypass, hints seulement pour ML/LLM
             _, sandbox_weak = _detect_sandbox_intent(msg)
             _, weak         = _detect_scheduler_intent(msg)
             sandbox_strong  = False
 
         # ── Dépôt des hints pour les handlers aval ────────────────────────
+        # kw_plan_strong est toujours déposé (long ou court) — c'est un hint,
+        # pas un bypass. Le LLMHandler peut l'utiliser pour l'arbitrage.
         ctx._hints["kw_shell"]        = _detect_shell_intent(msg)
         ctx._hints["kw_sched_weak"]   = weak
+        ctx._hints["kw_plan_strong"]  = plan_strong
         ctx._hints["kw_plan_weak"]    = plan_weak
         ctx._hints["kw_sandbox_weak"] = sandbox_weak
 
