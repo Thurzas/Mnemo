@@ -960,6 +960,26 @@ class PlannerCrew:
             except Exception:
                 pass
 
+            # ── Peupler le KG avec les steps et leurs actions ──────────
+            _CREW_TO_KG_ACTION = {
+                "shell":          "write_markdown_file",
+                "note":           "analyse_et_note",
+                "conversation":   "generate_response",
+                "scheduler":      "create_structured_content",
+                "reconnaissance": "reconnaissance",
+            }
+            try:
+                from Mnemo.tools.kg_tools import kg_add_triplet
+                from Mnemo.context import get_data_dir as _gdd
+                _db = _gdd() / "memory.db"
+                for _step in steps:
+                    _ct     = crew_targets.get(_step, "conversation")
+                    _action = _CREW_TO_KG_ACTION.get(_ct, "generate_response")
+                    kg_add_triplet(_db, "step", _step, "requires", "action", _action,
+                                   weight=1.0, source="planner")
+            except Exception:
+                pass
+
             plan_id = project_slug  # identifiant stable du plan/projet
 
             lines = [f"**Projet** : `{project_slug}`", f"**Goal** : {goal}", ""]

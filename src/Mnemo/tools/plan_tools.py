@@ -298,6 +298,48 @@ def _build_step_executor() -> dict:
         clean = _RE_CREW_TARGET.sub("", step).strip(" —")
         return re.sub(r"[^\w\-]", "_", clean[:50]).strip("_")
 
+    # ── Mapping crew_target → action KG ──────────────────────────────
+    _CREW_TO_KG_ACTION: dict[str, str] = {
+        "shell":          "write_markdown_file",
+        "note":           "analyse_et_note",
+        "conversation":   "generate_response",
+        "scheduler":      "create_structured_content",
+        "reconnaissance": "reconnaissance",
+        "curiosity":      "assess_memory_gaps",
+    }
+
+    def _kg_actions(inputs: dict, step_text: str) -> list[dict]:
+        """
+        Interroge le HP-KG pour les actions connues de cette étape.
+        Retourne une liste de dicts {action_label, weight} triés par poids.
+        Retourne [] si KG indisponible ou step inconnu.
+        """
+        try:
+            from Mnemo.context import get_data_dir as _gdd
+            from Mnemo.tools.kg_tools import kg_actions_for_step
+            db_path  = _gdd() / "memory.db"
+            step_clean = _RE_CREW_TARGET.sub("", step_text).strip(" —")
+            rows     = kg_actions_for_step(db_path, step_clean)
+            return [{"action_label": r["dst_label"], "weight": r.get("weight", 1.0)} for r in rows]
+        except Exception:
+            return []
+
+    def _write_to_project_src(inputs: dict, step_label: str, content: str) -> None:
+        """
+        Écrit le contenu généré dans projects/<slug>/src/<fichier>.md.
+        Git-commite automatiquement via sandbox_tools.write_file.
+        """
+        slug = inputs.get("slug")
+        if not slug or not content:
+            return
+        try:
+            from Mnemo.tools.sandbox_tools import write_file as _wf
+            filename = re.sub(r"[^\w\-]", "_", step_label[:40]).strip("_").lower() + ".md"
+            _wf(slug, f"src/{filename}", content,
+                commit_msg=f"agent: {step_label[:50]}")
+        except Exception:
+            pass
+
     def _save_output(inputs: dict, step: str, content: str) -> None:
         """Écrit le résultat brut d'une étape dans projects/<slug>/outputs/<step>.md."""
         project_dir = inputs.get("project_dir")
@@ -432,40 +474,73 @@ def _build_step_executor() -> dict:
         return response
 
     def _run_shell(step: str, session_id: str, inputs: dict) -> str:
-        # Dans un plan, "crew : shell" = générer du contenu écrit (chapitres, fichiers)
-        # pas exécuter une commande système (le label n'est pas une commande valide).
+        """
+        crew : shell dans un plan = produire du contenu et l'écrire dans src/.
+        Consulte le KG pour l'action appropriée, génère avec ConversationCrew,
+        puis écrit dans projects/<slug>/src/ via sandbox.
+        """
         from Mnemo.crew import ConversationCrew
-        msg = f"Réalise cette tâche et produis le contenu demandé : {step}"
-        result = ConversationCrew().crew().kickoff(inputs=_conversation_inputs(msg, session_id, inputs))
+        clean = _RE_CREW_TARGET.sub("", step).strip(" —")
+
+        # Consulter KG — action par défaut : write_markdown_file
+        actions      = _kg_actions(inputs, step)
+        action_label = actions[0]["action_label"] if actions else "write_markdown_file"
+
+        msg    = f"Rédige le contenu complet et structuré en Markdown pour : {clean}"
+        result = ConversationCrew().crew().kickoff(
+            inputs=_conversation_inputs(msg, session_id, inputs)
+        )
         response = result.raw or ""
         _save_output(inputs, step, response)
+
+        if action_label == "write_markdown_file":
+            _write_to_project_src(inputs, clean, response)
+
         return response
 
     def _run_note(step: str, session_id: str, inputs: dict) -> str:
-        # Dans un plan, "crew : note" = produire du contenu structuré pour le projet,
-        # pas écrire en mémoire globale. On utilise ConversationCrew avec les outputs
-        # précédents comme contexte pour un résultat exploitable.
+        """
+        crew : note dans un plan = analyse + résultat structuré.
+        Consulte le KG — action par défaut : analyse_et_note.
+        Résultat sauvegardé en output (memory.md est mis à jour par PlanRunner).
+        """
         from Mnemo.crew import ConversationCrew
         clean = _RE_CREW_TARGET.sub("", step).strip(" —")
-        msg   = f"Rédige une analyse détaillée et structurée en markdown pour : {clean}"
+
+        actions      = _kg_actions(inputs, step)
+        action_label = actions[0]["action_label"] if actions else "analyse_et_note"
+
+        msg    = f"Rédige une analyse détaillée et structurée en markdown pour : {clean}"
         result = ConversationCrew().crew().kickoff(
             inputs=_conversation_inputs(msg, session_id, inputs)
         )
         response = result.raw or ""
         _save_output(inputs, step, response)
+
+        # Pour write_markdown_file (si KG le précise), écrire aussi dans src/
+        if action_label == "write_markdown_file":
+            _write_to_project_src(inputs, clean, response)
+
         return response
 
     def _run_scheduler(step: str, session_id: str, inputs: dict) -> str:
-        # Dans un plan, "crew : scheduler" = structurer/planifier du contenu,
-        # pas créer une tâche récurrente. On produit du contenu avec ConversationCrew.
+        """crew : scheduler dans un plan = structure/plan détaillé en markdown."""
         from Mnemo.crew import ConversationCrew
         clean = _RE_CREW_TARGET.sub("", step).strip(" —")
-        msg   = f"Crée et structure un plan détaillé en markdown pour : {clean}"
+
+        actions      = _kg_actions(inputs, step)
+        action_label = actions[0]["action_label"] if actions else "create_structured_content"
+
+        msg    = f"Crée et structure un plan détaillé en markdown pour : {clean}"
         result = ConversationCrew().crew().kickoff(
             inputs=_conversation_inputs(msg, session_id, inputs)
         )
         response = result.raw or ""
         _save_output(inputs, step, response)
+
+        if action_label == "write_markdown_file":
+            _write_to_project_src(inputs, clean, response)
+
         return response
 
     def _run_recon(step: str, session_id: str, inputs: dict) -> str:
@@ -526,6 +601,33 @@ class PlanRunner:
         """Retire l'annotation crew de l'affichage."""
         return _RE_CREW_TARGET.sub("", step_text).strip(" —")
 
+    @staticmethod
+    def _kg_feedback(inputs: dict, step_label: str, crew_target: str, success: bool) -> None:
+        """
+        Renforce (+0.1) ou affaiblit (-0.05) l'arête (step)-[requires]->(action) dans le KG.
+        Appelé après chaque étape pour que le KG apprenne quelles actions fonctionnent.
+        """
+        try:
+            from Mnemo.context import get_data_dir
+            from Mnemo.tools.kg_tools import kg_actions_for_step, kg_reinforce_edge
+            db_path = get_data_dir() / "memory.db"
+            actions = kg_actions_for_step(db_path, step_label)
+            if not actions:
+                return
+            delta = +0.1 if success else -0.05
+            for row in actions:
+                kg_reinforce_edge(
+                    db_path,
+                    src_id  = row["src"],
+                    rel     = "requires",
+                    dst_id  = row["dst"],
+                    delta   = delta,
+                    session_id = inputs.get("session_id", "plan"),
+                    outcome = "success" if success else "failed",
+                )
+        except Exception:
+            pass
+
     def run(
         self,
         plan: Path,
@@ -569,11 +671,13 @@ class PlanRunner:
                     self._executors["__update_memory__"](inputs, step_clean, response)
                 except Exception:
                     pass  # mise à jour mémoire non-bloquante
+                self._kg_feedback(inputs, step_clean, crew_target, success=True)
                 executed += 1
 
             except Exception as e:
                 reason = str(e)[:200]
                 PlanStore.mark_failed(plan, step_raw, reason)
+                self._kg_feedback(inputs, step_clean, crew_target, success=False)
                 skipped += 1
                 # On continue vers la prochaine étape
 
