@@ -1624,10 +1624,13 @@ def project_advance(slug: str, _: Auth):
     if next_step is None:
         return {"done": True, "message": "Toutes les étapes sont terminées."}
 
+    from Mnemo.tools.sandbox_tools import get_manifest
+    manifest = get_manifest(slug) or {}
     runner  = PlanRunner()
     summary = runner.run(plan_path, max_steps=1, base_inputs={
         "project_dir": str(project_dir),
-        "slug": slug,
+        "slug":        slug,
+        "goal":        manifest.get("goal", ""),
     })
     return {"done": PlanStore.is_complete(plan_path), "message": summary}
 

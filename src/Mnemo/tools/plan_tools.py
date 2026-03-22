@@ -299,7 +299,7 @@ def _build_step_executor() -> dict:
         return re.sub(r"[^\w\-]", "_", clean[:50]).strip("_")
 
     def _save_output(inputs: dict, step: str, content: str) -> None:
-        """Écrit le résultat d'une étape dans projects/<slug>/outputs/<step>.md."""
+        """Écrit le résultat brut d'une étape dans projects/<slug>/outputs/<step>.md."""
         project_dir = inputs.get("project_dir")
         if not project_dir or not content:
             return
@@ -310,12 +310,88 @@ def _build_step_executor() -> dict:
             content, encoding="utf-8"
         )
 
+    def _summarise(content: str, max_chars: int = 600) -> str:
+        """
+        Extrait les premières lignes non-vides d'un output jusqu'à max_chars.
+        Évite d'injecter de longs blobs de texte dans memory.md.
+        """
+        lines, total = [], 0
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            total += len(stripped) + 1
+            lines.append(stripped)
+            if total >= max_chars:
+                lines.append("…")
+                break
+        return "\n".join(lines)
+
+    def _update_project_memory(inputs: dict, step_label: str, content: str) -> None:
+        """
+        Met à jour memory.md du projet avec le résumé de l'étape complétée.
+
+        Structure de memory.md :
+          # Mémoire : <goal>
+          ## Étapes complétées
+          ### <step_label>
+          *<date>*
+          <résumé>
+        """
+        project_dir = inputs.get("project_dir")
+        if not project_dir or not content:
+            return
+        from pathlib import Path as _Path
+        from datetime import datetime as _dt
+        mem_path = _Path(project_dir) / "memory.md"
+        goal     = inputs.get("goal", "Projet")
+        now      = _dt.now().strftime("%Y-%m-%d %H:%M")
+        summary  = _summarise(content)
+
+        # Initialisation si vide ou absent
+        if not mem_path.exists() or mem_path.stat().st_size < 10:
+            mem_path.write_text(
+                f"# Mémoire : {goal}\n\n## Étapes complétées\n",
+                encoding="utf-8",
+            )
+
+        section = (
+            f"\n### {step_label}\n"
+            f"*{now}*\n\n"
+            f"{summary}\n"
+        )
+        with mem_path.open("a", encoding="utf-8") as fh:
+            fh.write(section)
+
+        # Git commit discret
+        try:
+            from Mnemo.tools.sandbox_tools import _git_commit as _sgc, _project_path
+            slug = inputs.get("slug")
+            if slug:
+                _sgc(_project_path(slug), f"memory: {step_label[:50]}", ["memory.md"])
+        except Exception:
+            pass
+
     def _load_previous_outputs(inputs: dict) -> str:
-        """Charge les outputs des étapes précédentes comme contexte pipeline."""
+        """
+        Charge le contexte des étapes précédentes depuis memory.md (source de vérité),
+        avec fallback sur outputs/ si memory.md est vide.
+        """
         project_dir = inputs.get("project_dir")
         if not project_dir:
             return ""
         from pathlib import Path as _Path
+        mem_path = _Path(project_dir) / "memory.md"
+        if mem_path.exists() and mem_path.stat().st_size > 50:
+            try:
+                text = mem_path.read_text(encoding="utf-8")
+                # Tronqué à 3000 chars — structuré donc dense en signal utile
+                if len(text) > 3000:
+                    text = text[:3000] + "\n\n[…tronqué]"
+                return f"## Mémoire du projet (étapes précédentes)\n\n{text}"
+            except Exception:
+                pass
+        # Fallback : outputs bruts (ancien comportement)
         out_dir = _Path(project_dir) / "outputs"
         if not out_dir.exists():
             return ""
@@ -323,7 +399,7 @@ def _build_step_executor() -> dict:
         for f in sorted(out_dir.iterdir()):
             if f.suffix == ".md" and f.is_file():
                 try:
-                    content = f.read_text(encoding="utf-8")[:2000]
+                    content = f.read_text(encoding="utf-8")[:1000]
                     parts.append(f"### {f.stem.replace('_', ' ')}\n{content}")
                 except Exception:
                     pass
@@ -408,12 +484,14 @@ def _build_step_executor() -> dict:
         )
 
     return {
-        "conversation":    _run_conversation,
-        "shell":           _run_shell,
-        "note":            _run_note,
-        "scheduler":       _run_scheduler,
-        "reconnaissance":  _run_recon,
-        "curiosity":       _run_curiosity,
+        "conversation":      _run_conversation,
+        "shell":             _run_shell,
+        "note":              _run_note,
+        "scheduler":         _run_scheduler,
+        "reconnaissance":    _run_recon,
+        "curiosity":         _run_curiosity,
+        # Callable utilitaire exposé pour PlanRunner (pas un crew_target)
+        "__update_memory__": _update_project_memory,
     }
 
 
@@ -487,6 +565,10 @@ class PlanRunner:
             try:
                 response = executor(step_raw, session_id, inputs)
                 PlanStore.mark_done(plan, step_raw)
+                try:
+                    self._executors["__update_memory__"](inputs, step_clean, response)
+                except Exception:
+                    pass  # mise à jour mémoire non-bloquante
                 executed += 1
 
             except Exception as e:
