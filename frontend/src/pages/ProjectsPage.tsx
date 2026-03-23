@@ -101,6 +101,7 @@ export function ProjectsPage({ active, targetSlug }: Props) {
   const [error,          setError]          = useState<string | null>(null)
   const [confirmations,  setConfirmations]  = useState<PendingConfirmation[]>([])
   const [confirmLoading, setConfirmLoading] = useState<Set<string>>(new Set())
+  const [autoApprove,    setAutoApprove]    = useState(false)
 
   // ── Tree state ────────────────────────────────────────────────
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
@@ -180,9 +181,18 @@ export function ProjectsPage({ active, targetSlug }: Props) {
   useEffect(() => {
     if (!active) return
     loadConfirmations()
+    api.getSettings().then(s => setAutoApprove(s.auto_approve_confirmations)).catch(() => {})
     confPollRef.current = setInterval(loadConfirmations, 30_000)
     return () => { if (confPollRef.current) clearInterval(confPollRef.current) }
   }, [active, loadConfirmations])
+
+  // ── Toggle auto-approve ───────────────────────────────────────────
+  const handleAutoApproveToggle = async (val: boolean) => {
+    setAutoApprove(val)
+    try {
+      await api.setSettings({ auto_approve_confirmations: val })
+    } catch { setAutoApprove(!val) /* rollback */ }
+  }
 
   // ── Approuver / Rejeter une confirmation ─────────────────────────
   const handleConfirm = async (id: string, approved: boolean) => {
@@ -599,38 +609,44 @@ export function ProjectsPage({ active, targetSlug }: Props) {
       {error && <div className={styles.errorBar}>{error}</div>}
 
       {/* ── Confirmations en attente (GOAP) ── */}
-      {confirmations.length > 0 && (
-        <div className={styles.confirmPanel}>
-          <div className={styles.confirmTitle}>
-            Actions en attente de confirmation ({confirmations.length})
-          </div>
-          {confirmations.map(c => (
-            <div key={c.id} className={styles.confirmCard}>
-              <div className={styles.confirmDesc}>{c.description}</div>
-              <div className={styles.confirmMeta}>
-                <span className={styles.confirmBadge}>{c.action}</span>
-                <span className={styles.confirmTs}>{c.ts}</span>
-              </div>
-              <div className={styles.confirmActions}>
-                <button
-                  className={styles.btnApprove}
-                  disabled={confirmLoading.has(c.id)}
-                  onClick={() => handleConfirm(c.id, true)}
-                >
-                  {confirmLoading.has(c.id) ? '…' : 'Approuver'}
-                </button>
-                <button
-                  className={styles.btnReject}
-                  disabled={confirmLoading.has(c.id)}
-                  onClick={() => handleConfirm(c.id, false)}
-                >
-                  Rejeter
-                </button>
-              </div>
-            </div>
-          ))}
+      <div className={styles.confirmPanel}>
+        <div className={styles.confirmTitle}>
+          <span>{confirmations.length > 0 ? ` (${confirmations.length})` : ''}</span>
+          <label className={styles.autoApproveLabel}>
+            <input
+              type="checkbox"
+              checked={autoApprove}
+              onChange={e => handleAutoApproveToggle(e.target.checked)}
+            />
+             Mode autonome
+          </label>
         </div>
-      )}
+        {confirmations.map(c => (
+          <div key={c.id} className={styles.confirmCard}>
+            <div className={styles.confirmDesc}>{c.description}</div>
+            <div className={styles.confirmMeta}>
+              <span className={styles.confirmBadge}>{c.action}</span>
+              <span className={styles.confirmTs}>{c.ts}</span>
+            </div>
+            <div className={styles.confirmActions}>
+              <button
+                className={styles.btnApprove}
+                disabled={confirmLoading.has(c.id)}
+                onClick={() => handleConfirm(c.id, true)}
+              >
+                {confirmLoading.has(c.id) ? '…' : 'Approuver'}
+              </button>
+              <button
+                className={styles.btnReject}
+                disabled={confirmLoading.has(c.id)}
+                onClick={() => handleConfirm(c.id, false)}
+              >
+                Rejeter
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
 
       {/* ── Corps — 3 colonnes ── */}
       <div className={styles.body}>

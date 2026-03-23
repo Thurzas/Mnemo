@@ -516,10 +516,11 @@ def _build_project_world_state(project_dir: Path) -> dict:
 
 def _push_pending_confirmation(
     username: str, slug: str, step_label: str, action_label: str
-) -> None:
+) -> bool:
     """
     Ajoute une action risquée dans pending_confirmations du world_state utilisateur.
     Évite les doublons (même action + même projet).
+    Retourne True si une nouvelle confirmation a été ajoutée, False si déjà présente.
     """
     import uuid
     ws_path = DATA_PATH / "users" / username / "world_state.json"
@@ -531,10 +532,10 @@ def _push_pending_confirmation(
             pass
 
     confirmations: list = ws.get("pending_confirmations", [])
-    # Dédoublonnage
-    if any(c.get("action") == action_label and c.get("project_slug") == slug
+    # Dédoublonnage — même step + même projet = déjà en attente
+    if any(c.get("step_label") == step_label and c.get("project_slug") == slug
            for c in confirmations):
-        return
+        return False
 
     confirmations.append({
         "id":           uuid.uuid4().hex[:12],
@@ -551,6 +552,7 @@ def _push_pending_confirmation(
         json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     log.info(f"[autonomy] Confirmation en attente : {action_label!r} → {slug} ({username})")
+    return True
 
 
 def _advance_project(
@@ -583,17 +585,26 @@ def _advance_project(
         log.info(f"[autonomy] Projet {slug!r} terminé pour {username!r}")
         return
 
-    # Vérification risque avant exécution : si l'étape suivante est shell, queue confirmation
+    # Lire auto_approve depuis le world_state propre à l'utilisateur
+    user_ws_path = DATA_PATH / "users" / username / "world_state.json"
+    try:
+        user_ws = json.loads(user_ws_path.read_text(encoding="utf-8")) if user_ws_path.exists() else {}
+    except Exception:
+        user_ws = {}
+    auto_approve = user_ws.get("auto_approve_confirmations", False)
+
+    # Vérification risque avant exécution : si l'étape suivante est shell,
+    # queue confirmation — sauf si auto_approve est activé.
     next_step = PlanStore.get_next_step(plan_path)
-    if next_step:
+    if next_step and not auto_approve:
         import re as _re
         crew_m = _re.search(r"—\s*crew\s*:\s*(\w+)", next_step, _re.IGNORECASE)
         crew_t = crew_m.group(1).lower() if crew_m else "conversation"
         if crew_t == "shell":
-            # shell = risqué → confirmation obligatoire via dashboard
             step_clean = _re.sub(r"—\s*crew\s*:\S+", "", next_step).strip(" —")
-            _push_pending_confirmation(username, slug, step_clean, "sandbox_shell")
-            log.info(f"[autonomy] Confirmation requise pour '{step_clean}' ({slug})")
+            added = _push_pending_confirmation(username, slug, step_clean, "sandbox_shell")
+            if added:
+                log.info(f"[autonomy] Confirmation requise pour '{step_clean}' ({slug})")
             return
 
     # Exécuter une étape via PlanRunner (source de vérité unique)

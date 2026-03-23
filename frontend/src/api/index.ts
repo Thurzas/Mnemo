@@ -467,6 +467,15 @@ export const api = {
       body: JSON.stringify({ approved }),
     }),
 
+  getSettings: () =>
+    request<{ auto_approve_confirmations: boolean }>('/api/settings'),
+
+  setSettings: (settings: { auto_approve_confirmations: boolean }) =>
+    request<{ ok: boolean; auto_approve_confirmations: boolean }>('/api/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    }),
+
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
     const token = auth.getToken()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }

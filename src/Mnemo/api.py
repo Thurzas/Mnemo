@@ -1578,6 +1578,37 @@ def confirm_action(confirmation_id: str, body: ConfirmActionRequest, _: Auth):
             "stderr": f"Action non exécutable depuis l'API : {action}", "returncode": None}
 
 
+# ── Paramètres globaux ─────────────────────────────────────────────
+
+class SettingsUpdate(BaseModel):
+    auto_approve_confirmations: bool
+
+@app.get("/api/settings")
+def settings_get(_: Auth):
+    """Retourne les paramètres persistés dans world_state.json."""
+    from Mnemo.context import get_data_dir
+    ws_path = get_data_dir() / "world_state.json"
+    try:
+        ws = json.loads(ws_path.read_text(encoding="utf-8")) if ws_path.exists() else {}
+    except Exception:
+        ws = {}
+    return {"auto_approve_confirmations": ws.get("auto_approve_confirmations", False)}
+
+
+@app.post("/api/settings")
+def settings_update(body: SettingsUpdate, _: Auth):
+    """Met à jour les paramètres dans world_state.json."""
+    from Mnemo.context import get_data_dir
+    ws_path = get_data_dir() / "world_state.json"
+    try:
+        ws = json.loads(ws_path.read_text(encoding="utf-8")) if ws_path.exists() else {}
+    except Exception:
+        ws = {}
+    ws["auto_approve_confirmations"] = body.auto_approve_confirmations
+    ws_path.write_text(json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "auto_approve_confirmations": body.auto_approve_confirmations}
+
+
 # ── Projets sandbox (Phase 7) ──────────────────────────────────────
 
 
