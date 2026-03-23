@@ -175,7 +175,7 @@ class MessageResponse(BaseModel):
     web_query: str | None = None
 
 
-# ── Pipeline web (sans confirmation interactive) ───────────────────
+# ── Pipeline web (sans confirmation interactive) ─��─────────────────
 
 _SHELL_BLOCKED = (
     "Les commandes shell ne sont pas disponibles depuis l'interface web. "
@@ -1147,6 +1147,14 @@ async def ws_message(websocket: WebSocket):
 
     await websocket.send_json({"type": "auth_ok", "username": username})
 
+    async def _safe_send(payload: dict) -> bool:
+        """Envoie un message JSON — retourne False si la connexion est fermée."""
+        try:
+            await websocket.send_json(payload)
+            return True
+        except Exception:
+            return False
+
     async def _run_and_stream(
         text: str,
         sid: str,
@@ -1159,7 +1167,8 @@ async def ws_message(websocket: WebSocket):
         status_queue: asyncio.Queue = asyncio.Queue()
         _status_mod.set_session(sid, status_queue, loop)
 
-        await websocket.send_json({"type": "thinking"})
+        if not await _safe_send({"type": "thinking"}):
+            return
 
         # Lance handle_message dans le thread pool (non-bloquant)
         fut = loop.run_in_executor(
@@ -1173,20 +1182,22 @@ async def ws_message(websocket: WebSocket):
         while not fut.done():
             try:
                 event = status_queue.get_nowait()
-                await websocket.send_json(event)
+                if not await _safe_send(event):
+                    return
             except asyncio.QueueEmpty:
                 await asyncio.sleep(0.03)
 
         # Draine les événements émis juste avant que fut.done() devienne True
         while not status_queue.empty():
-            await websocket.send_json(status_queue.get_nowait())
+            if not await _safe_send(status_queue.get_nowait()):
+                return
 
         _status_mod.clear_session(sid)
 
         try:
             result = fut.result()
         except Exception as e:
-            await websocket.send_json({"type": "error", "detail": str(e)})
+            await _safe_send({"type": "error", "detail": str(e)})
             return
 
         if isinstance(result, dict) and result.get("__web_confirm__"):
@@ -1197,10 +1208,12 @@ async def ws_message(websocket: WebSocket):
                 words = plan_text.split(" ")
                 for i, word in enumerate(words):
                     chunk = word if i == len(words) - 1 else word + " "
-                    await websocket.send_json({"type": "token", "text": chunk})
+                    if not await _safe_send({"type": "token", "text": chunk}):
+                        return
                     await asyncio.sleep(0.012)
-                await websocket.send_json({"type": "done", "session_id": sid})
-            await websocket.send_json({
+                if not await _safe_send({"type": "done", "session_id": sid}):
+                    return
+            await _safe_send({
                 "type":             "web_confirm",
                 "web_query":        result["web_query"],
                 "session_id":       sid,
@@ -1222,14 +1235,16 @@ async def ws_message(websocket: WebSocket):
         words = (result or "").split(" ")
         for i, word in enumerate(words):
             chunk = word if i == len(words) - 1 else word + " "
-            await websocket.send_json({"type": "token", "text": chunk})
+            if not await _safe_send({"type": "token", "text": chunk}):
+                return
             await asyncio.sleep(0.012)
 
-        await websocket.send_json({"type": "done", "session_id": sid})
+        if not await _safe_send({"type": "done", "session_id": sid}):
+            return
 
         # Émis après done — le frontend peut ouvrir le modal sans interrompre le streaming
         if plan_step:
-            await websocket.send_json({"type": "plan_step_ready", **plan_step})
+            await _safe_send({"type": "plan_step_ready", **plan_step})
         if web_suggests:
             await websocket.send_json({
                 "type":        "web_suggest",
@@ -1247,11 +1262,11 @@ async def ws_message(websocket: WebSocket):
         Phase 6.5 — Exécute la recherche web pour l'étape 1 d'un plan (après confirmation).
         Marque l'étape done, émet les résultats, et émet plan_step_ready pour l'étape 2.
         """
-        await websocket.send_json({"type": "thinking"})
+        if not await _safe_send({"type": "thinking"}):
+            return
 
         if not confirmed:
-            await websocket.send_json({"type": "done", "session_id": sid})
-            # Étape 1 non exécutée — plan_step_ready reste disponible (déjà en world_state)
+            await _safe_send({"type": "done", "session_id": sid})
             return
 
         import Mnemo.status as _status_mod
@@ -1281,30 +1296,34 @@ async def ws_message(websocket: WebSocket):
         while not fut.done():
             try:
                 event = status_queue.get_nowait()
-                await websocket.send_json(event)
+                if not await _safe_send(event):
+                    return
             except asyncio.QueueEmpty:
                 await asyncio.sleep(0.03)
         while not status_queue.empty():
-            await websocket.send_json(status_queue.get_nowait())
+            if not await _safe_send(status_queue.get_nowait()):
+                return
         _status_mod.clear_session(sid)
 
         try:
             result = fut.result()
         except Exception as e:
-            await websocket.send_json({"type": "error", "detail": str(e)})
+            await _safe_send({"type": "error", "detail": str(e)})
             return
 
         words = (result or "").split(" ")
         for i, word in enumerate(words):
             chunk = word if i == len(words) - 1 else word + " "
-            await websocket.send_json({"type": "token", "text": chunk})
+            if not await _safe_send({"type": "token", "text": chunk}):
+                return
             await asyncio.sleep(0.012)
 
-        await websocket.send_json({"type": "done", "session_id": sid})
+        if not await _safe_send({"type": "done", "session_id": sid}):
+            return
 
         step2 = plan_web.get("step2_data")
         if step2:
-            await websocket.send_json({"type": "plan_step_ready", **step2})
+            await _safe_send({"type": "plan_step_ready", **step2})
 
     try:
         while True:
@@ -1334,7 +1353,8 @@ async def ws_message(websocket: WebSocket):
                 link_query = msg.get("original_query", link_title)
                 sid        = msg.get("session_id") or f"web_{uuid.uuid4().hex[:12]}"
 
-                await websocket.send_json({"type": "thinking"})
+                if not await _safe_send({"type": "thinking"}):
+                    return
 
                 import Mnemo.status as _status_mod_lnk
                 sq: asyncio.Queue = asyncio.Queue()
@@ -1352,7 +1372,6 @@ async def ws_message(websocket: WebSocket):
                     saved = save_web_page(page["text"], page["title"] or link_title, link_url, link_query)
                     if saved:
                         _status_mod_lnk.emit(sid, f"Sauvegardé : {saved.name}")
-                    # Extrait un résumé (premiers 2000 caractères + compte des liens)
                     excerpt = page["text"][:2000].strip()
                     n_links = len(page.get("links", []))
                     reply = (
@@ -1369,27 +1388,32 @@ async def ws_message(websocket: WebSocket):
                 while not fut2.done():
                     try:
                         ev = sq.get_nowait()
-                        await websocket.send_json(ev)
+                        if not await _safe_send(ev):
+                            return
                     except asyncio.QueueEmpty:
                         await asyncio.sleep(0.03)
                 while not sq.empty():
-                    await websocket.send_json(sq.get_nowait())
+                    if not await _safe_send(sq.get_nowait()):
+                        return
                 _status_mod_lnk.clear_session(sid)
 
                 try:
                     link_result = fut2.result()
                 except Exception as e:
-                    await websocket.send_json({"type": "error", "detail": str(e)})
+                    await _safe_send({"type": "error", "detail": str(e)})
                     continue
 
                 words = (link_result or "").split(" ")
                 for i, word in enumerate(words):
                     chunk = word if i == len(words) - 1 else word + " "
-                    await websocket.send_json({"type": "token", "text": chunk})
+                    if not await _safe_send({"type": "token", "text": chunk}):
+                        return
                     await asyncio.sleep(0.012)
-                await websocket.send_json({"type": "done", "session_id": sid})
+                await _safe_send({"type": "done", "session_id": sid})
 
-    except WebSocketDisconnect:
+    except Exception:
+        # Couvre WebSocketDisconnect, ConnectionClosedError, ConnectionClosedOK,
+        # RuntimeError("WebSocket is not connected") — toutes les déconnexions normales.
         pass
 
 
@@ -1554,6 +1578,37 @@ def confirm_action(confirmation_id: str, body: ConfirmActionRequest, _: Auth):
             "stderr": f"Action non exécutable depuis l'API : {action}", "returncode": None}
 
 
+# ── Paramètres globaux ─────────────────────────────────────────────
+
+class SettingsUpdate(BaseModel):
+    auto_approve_confirmations: bool
+
+@app.get("/api/settings")
+def settings_get(_: Auth):
+    """Retourne les paramètres persistés dans world_state.json."""
+    from Mnemo.context import get_data_dir
+    ws_path = get_data_dir() / "world_state.json"
+    try:
+        ws = json.loads(ws_path.read_text(encoding="utf-8")) if ws_path.exists() else {}
+    except Exception:
+        ws = {}
+    return {"auto_approve_confirmations": ws.get("auto_approve_confirmations", False)}
+
+
+@app.post("/api/settings")
+def settings_update(body: SettingsUpdate, _: Auth):
+    """Met à jour les paramètres dans world_state.json."""
+    from Mnemo.context import get_data_dir
+    ws_path = get_data_dir() / "world_state.json"
+    try:
+        ws = json.loads(ws_path.read_text(encoding="utf-8")) if ws_path.exists() else {}
+    except Exception:
+        ws = {}
+    ws["auto_approve_confirmations"] = body.auto_approve_confirmations
+    ws_path.write_text(json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "auto_approve_confirmations": body.auto_approve_confirmations}
+
+
 # ── Projets sandbox (Phase 7) ──────────────────────────────────────
 
 
@@ -1585,12 +1640,48 @@ def project_get(slug: str, _: Auth):
     return {**manifest, "files": list_files(slug)}
 
 
+@app.post("/api/projects/{slug}/advance")
+def project_advance(slug: str, _: Auth):
+    """Exécute la prochaine étape non cochée du plan (1 seule étape)."""
+    from Mnemo.tools.sandbox_tools import _project_path
+    from Mnemo.tools.plan_tools import PlanRunner, PlanStore
+
+    project_dir = _project_path(slug)
+    plan_path   = project_dir / "plan.md"
+    if not plan_path.exists():
+        raise HTTPException(status_code=404, detail="plan.md introuvable")
+
+    next_step = PlanStore.get_next_step(plan_path)
+    if next_step is None:
+        return {"done": True, "message": "Toutes les étapes sont terminées."}
+
+    from Mnemo.tools.sandbox_tools import get_project
+    manifest = get_project(slug) or {}
+    runner  = PlanRunner()
+    summary = runner.run(plan_path, max_steps=1, base_inputs={
+        "project_dir": str(project_dir),
+        "slug":        slug,
+        "goal":        manifest.get("goal", ""),
+    })
+    return {"done": PlanStore.is_complete(plan_path), "message": summary}
+
+
+@app.get("/api/projects/{slug}/log")
+def project_log_read(slug: str, _: Auth):
+    """Retourne logs/commands.log — toujours 200, vide si pas encore créé."""
+    from Mnemo.tools.sandbox_tools import read_file
+    res = read_file(slug, "logs/commands.log")
+    return {"content": res["content"], "path": "logs/commands.log"}
+
+
 @app.get("/api/projects/{slug}/file")
 def project_file_read(slug: str, path: str, _: Auth):
     from Mnemo.tools.sandbox_tools import read_file
     res = read_file(slug, path)
     if res["error"]:
-        raise HTTPException(status_code=400, detail=res["error"])
+        # 400 pour chemin interdit, 404 pour fichier absent (polling normal)
+        code = 400 if "interdit" in res["error"] or "échappement" in res["error"] else 404
+        raise HTTPException(status_code=code, detail=res["error"])
     return {"content": res["content"], "path": path}
 
 
@@ -1611,6 +1702,63 @@ def project_file_write(slug: str, body: FileWriteRequest, _: Auth):
     if res["error"]:
         raise HTTPException(status_code=400, detail=res["error"])
     return res
+
+
+class MkdirRequest(BaseModel):
+    path: str  # relative path, e.g. "src/chapter_03"
+
+
+@app.post("/api/projects/{slug}/mkdir", status_code=201)
+def project_mkdir(slug: str, body: MkdirRequest, _: Auth):
+    """Crée un dossier dans le sandbox (avec .gitkeep)."""
+    from Mnemo.tools.sandbox_tools import _project_path, _resolve_safe, _git_commit
+    root   = _project_path(slug)
+    target = _resolve_safe(root, body.path)
+    if target is None:
+        raise HTTPException(status_code=400, detail="Chemin interdit")
+    target.mkdir(parents=True, exist_ok=True)
+    keepfile = target / ".gitkeep"
+    keepfile.touch()
+    try:
+        _git_commit(root, f"user: mkdir {body.path}", [str(keepfile.relative_to(root))])
+    except Exception:
+        pass
+    return {"path": body.path}
+
+
+@app.delete("/api/projects/{slug}/file")
+def project_file_delete(slug: str, path: str, _: Auth):
+    """Supprime un fichier du sandbox."""
+    from Mnemo.tools.sandbox_tools import _project_path, _resolve_safe, _git
+    root   = _project_path(slug)
+    target = _resolve_safe(root, path)
+    if target is None:
+        raise HTTPException(status_code=400, detail="Chemin interdit")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail="Pas un fichier")
+    target.unlink()
+    try:
+        _git(root, "rm", "--cached", "--ignore-unmatch", path)
+        _git(root, "commit", "-m", f"user: delete {path}")
+    except Exception:
+        pass
+    return {"deleted": path}
+
+
+class CommandRequest(BaseModel):
+    command: str
+
+
+@app.post("/api/projects/{slug}/command")
+def project_run_command(slug: str, body: CommandRequest, _: Auth):
+    """Exécute une commande shell dans le sandbox du projet."""
+    from Mnemo.tools.sandbox_tools import run_command
+    res = run_command(slug, body.command)
+    if res.get("error") and res.get("returncode") != 0:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return {"stdout": res.get("output", ""), "stderr": res.get("error", ""), "returncode": res.get("returncode", 0)}
 
 
 @app.delete("/api/projects/{slug}", status_code=200)

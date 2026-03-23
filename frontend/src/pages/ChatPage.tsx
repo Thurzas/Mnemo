@@ -48,7 +48,11 @@ function splitSentences(text: string): string[] {
   return parts.map(s => s.trim()).filter(s => s.length >= 4)
 }
 
-export function ChatPage() {
+interface ChatPageProps {
+  onOpenProject?: (slug: string) => void
+}
+
+export function ChatPage({ onOpenProject }: ChatPageProps = {}) {
   const [messages, setMessages]       = useState<Message[]>([
     { role: 'mnemo', content: 'Bonjour. Comment puis-je t\'aider ?' },
   ])
@@ -165,6 +169,14 @@ export function ChatPage() {
             originalQuery: String(data.original_query ?? ''),
           })
           break
+
+        case 'plan_step_ready': {
+          const projectSlug = data.project_slug as string | undefined
+          if (projectSlug && onOpenProject) {
+            onOpenProject(projectSlug)
+          }
+          break
+        }
 
         case 'error':
           setMessages(prev => [

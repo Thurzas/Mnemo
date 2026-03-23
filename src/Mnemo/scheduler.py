@@ -516,10 +516,11 @@ def _build_project_world_state(project_dir: Path) -> dict:
 
 def _push_pending_confirmation(
     username: str, slug: str, step_label: str, action_label: str
-) -> None:
+) -> bool:
     """
     Ajoute une action risquée dans pending_confirmations du world_state utilisateur.
     Évite les doublons (même action + même projet).
+    Retourne True si une nouvelle confirmation a été ajoutée, False si déjà présente.
     """
     import uuid
     ws_path = DATA_PATH / "users" / username / "world_state.json"
@@ -531,10 +532,10 @@ def _push_pending_confirmation(
             pass
 
     confirmations: list = ws.get("pending_confirmations", [])
-    # Dédoublonnage
-    if any(c.get("action") == action_label and c.get("project_slug") == slug
+    # Dédoublonnage — même step + même projet = déjà en attente
+    if any(c.get("step_label") == step_label and c.get("project_slug") == slug
            for c in confirmations):
-        return
+        return False
 
     confirmations.append({
         "id":           uuid.uuid4().hex[:12],
@@ -551,43 +552,32 @@ def _push_pending_confirmation(
         json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     log.info(f"[autonomy] Confirmation en attente : {action_label!r} → {slug} ({username})")
+    return True
 
 
 def _advance_project(
     username: str, db_path: Path, manifest: dict, project_dir: Path
 ) -> None:
     """
-    Tente d'avancer d'une étape sur un projet sandbox actif.
+    Avance d'une étape sur un projet sandbox actif en déléguant à PlanRunner.
 
-    Logique :
-      1. Lit plan.md, trouve la première étape non cochée
-      2. Interroge le KG pour les actions disponibles pour cette étape
-      3. Pour chaque action : vérifie les préconditions vs world_state projet
-      4a. Préconditions OK + non risquée → exécute (sandbox_write, sandbox_read)
-      4b. Préconditions OK + risquée    → pending_confirmations
-      4c. Préconditions KO              → log et passe à la suivante
-      5. Toutes les étapes cochées → marque le projet "done"
+    PlanRunner est la source de vérité pour l'exécution des étapes :
+      - Lit plan.md via PlanStore (pas de duplication de logique)
+      - Consulte le KG, exécute avec les executeurs crew-aware
+      - Met à jour memory.md, KG feedback, outputs
+
+    Les actions shell risquées passent toujours par pending_confirmations
+    (vérification préalable avant de déléguer à PlanRunner).
     """
-    from Mnemo.tools.kg_tools import kg_actions_for_step
-    from Mnemo.goap.planner import build_action_from_kg
+    from Mnemo.tools.plan_tools import PlanRunner, PlanStore
 
     slug      = manifest["slug"]
     plan_path = project_dir / "plan.md"
     if not plan_path.exists():
         return
 
-    plan_text = plan_path.read_text(encoding="utf-8", errors="replace")
-    steps = [
-        (bool(re.match(r'- \[x\]', line, re.IGNORECASE)), re.sub(r'^- \[[ xX]\]\s*', '', line).strip())
-        for line in plan_text.splitlines()
-        if re.match(r'\s*- \[[ xX]\]', line)
-    ]
-
-    if not steps:
-        return
-
-    # Projet terminé si toutes les étapes sont cochées
-    if all(done for done, _ in steps):
+    # Projet déjà terminé ?
+    if PlanStore.is_complete(plan_path):
         manifest["status"] = "done"
         (project_dir / "project.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -595,48 +585,48 @@ def _advance_project(
         log.info(f"[autonomy] Projet {slug!r} terminé pour {username!r}")
         return
 
-    # Première étape non cochée
-    step_label = next((label for done, label in steps if not done), None)
-    if not step_label:
-        return
+    # Lire auto_approve depuis le world_state propre à l'utilisateur
+    user_ws_path = DATA_PATH / "users" / username / "world_state.json"
+    try:
+        user_ws = json.loads(user_ws_path.read_text(encoding="utf-8")) if user_ws_path.exists() else {}
+    except Exception:
+        user_ws = {}
+    auto_approve = user_ws.get("auto_approve_confirmations", False)
 
-    actions_rows = kg_actions_for_step(db_path, step_label)
-    if not actions_rows:
-        log.debug(f"[autonomy] Aucune action KG pour '{step_label}' — {slug}")
-        return
+    # Vérification risque avant exécution : si l'étape suivante est shell,
+    # queue confirmation — sauf si auto_approve est activé.
+    next_step = PlanStore.get_next_step(plan_path)
+    if next_step and not auto_approve:
+        import re as _re
+        crew_m = _re.search(r"—\s*crew\s*:\s*(\w+)", next_step, _re.IGNORECASE)
+        crew_t = crew_m.group(1).lower() if crew_m else "conversation"
+        if crew_t == "shell":
+            step_clean = _re.sub(r"—\s*crew\s*:\S+", "", next_step).strip(" —")
+            added = _push_pending_confirmation(username, slug, step_clean, "sandbox_shell")
+            if added:
+                log.info(f"[autonomy] Confirmation requise pour '{step_clean}' ({slug})")
+            return
 
-    world_state = _build_project_world_state(project_dir)
-
-    for row in actions_rows:
-        action_label = row["dst_label"]
-        action       = build_action_from_kg(db_path, action_label)
-
-        # Préconditions satisfaites ?
-        preconds_ok = all(
-            world_state.get(k) == v
-            for k, v in action.preconditions.items()
-        )
-        if not preconds_ok:
-            log.debug(f"[autonomy] Préconditions KO pour {action_label!r} — {slug}")
-            continue
-
-        if _is_risky(action_label):
-            _push_pending_confirmation(username, slug, step_label, action_label)
-        else:
-            # Action non risquée : log uniquement pour l'instant
-            # (l'exécution effective viendra avec les outils SandboxCrew)
-            log.info(
-                f"[autonomy] Action non risquée disponible : {action_label!r} "
-                f"→ étape '{step_label}' ({slug}/{username})"
-            )
-        break  # une action par tick par projet
+    # Exécuter une étape via PlanRunner (source de vérité unique)
+    runner  = PlanRunner()
+    summary = runner.run(
+        plan_path,
+        session_id  = f"scheduler_{username}",
+        base_inputs = {
+            "slug":        slug,
+            "project_dir": str(project_dir),
+            "goal":        manifest.get("goal", slug),
+        },
+        max_steps = 1,
+    )
+    log.info(f"[autonomy] {slug!r} ({username}) — {summary}")
 
 
 def _goap_autonomy_tick() -> None:
     """
     Tick de la boucle d'autonomie Phase 7.4.
     Scanne tous les projets sandbox actifs de tous les utilisateurs.
-    Appelé toutes les 60s depuis run_scheduler().
+    Appelé toutes les 10s depuis run_scheduler().
     """
     users_dir = DATA_PATH / "users"
     if not users_dir.exists():
@@ -775,7 +765,7 @@ def run_scheduler() -> None:
         except Exception as e:
             log.error(f"[autonomy] Erreur tick : {e}", exc_info=True)
 
-        time.sleep(60)
+        time.sleep(5)
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -316,8 +316,9 @@ def run_command(slug: str, command: str) -> dict:
 
 def list_files(slug: str, subdir: str = "") -> list[str]:
     """
-    Liste les fichiers dans le sandbox (chemins relatifs à la racine projet).
-    Exclut .git/.
+    Liste les fichiers et répertoires dans le sandbox (chemins relatifs à la racine projet).
+    Exclut .git/. Les répertoires sont suffixés par '/' pour que le frontend puisse les distinguer.
+    Exemple : ["memory.md", "plan.md", "src/", "src/chapter_01.md", "logs/", "outputs/"]
     """
     root = _project_path(slug)
     if subdir:
@@ -331,11 +332,17 @@ def list_files(slug: str, subdir: str = "") -> list[str]:
     for p in sorted(base.rglob("*")):
         if ".git" in p.parts:
             continue
-        if p.is_file():
-            try:
-                result.append(str(p.relative_to(root)))
-            except ValueError:
-                pass
+        # Skip .gitkeep files — internal implementation detail
+        if p.name == ".gitkeep":
+            continue
+        try:
+            rel = str(p.relative_to(root))
+            if p.is_dir():
+                result.append(rel + "/")
+            elif p.is_file():
+                result.append(rel)
+        except ValueError:
+            pass
     return result
 
 

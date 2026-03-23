@@ -35,11 +35,56 @@ function parsePlan(md: string): PlanStep[] {
     }))
 }
 
+// ── Tree helpers ──────────────────────────────────────────────────
+
+interface TreeNode {
+  name: string
+  path: string
+  isDir: boolean
+  children: TreeNode[]
+}
+
+function buildTree(files: string[]): TreeNode[] {
+  const root: TreeNode[] = []
+  const dirMap = new Map<string, TreeNode>()
+
+  // Sort: dirs first, then files, both alphabetically
+  const sorted = [...files].sort((a, b) => {
+    const aDir = a.endsWith('/')
+    const bDir = b.endsWith('/')
+    if (aDir !== bDir) return aDir ? -1 : 1
+    return a.localeCompare(b)
+  })
+
+  for (const rawPath of sorted) {
+    const isDir = rawPath.endsWith('/')
+    const cleanPath = isDir ? rawPath.slice(0, -1) : rawPath
+    const parts = cleanPath.split('/')
+    const name = parts[parts.length - 1]
+    const parentPath = parts.slice(0, -1).join('/')
+
+    const node: TreeNode = { name, path: cleanPath, isDir, children: [] }
+    if (isDir) dirMap.set(cleanPath, node)
+
+    if (parentPath === '') {
+      root.push(node)
+    } else {
+      const parent = dirMap.get(parentPath)
+      if (parent) parent.children.push(node)
+      else root.push(node) // fallback: orphaned node
+    }
+  }
+  return root
+}
+
 // ── Component ─────────────────────────────────────────────────────
 
-interface Props { active: boolean }
+interface Props {
+  active: boolean
+  targetSlug?: string | null
+}
 
-export function ProjectsPage({ active }: Props) {
+export function ProjectsPage({ active, targetSlug }: Props) {
   const [projects,     setProjects]     = useState<ProjectManifest[]>([])
   const [slug,         setSlug]         = useState<string | null>(null)
   const [files,        setFiles]        = useState<string[]>([])
@@ -49,15 +94,38 @@ export function ProjectsPage({ active }: Props) {
   const [terminalLog,  setTerminalLog]  = useState('')
   const [gitLog,       setGitLog]       = useState('')
   const [saving,         setSaving]         = useState(false)
+  const [advancing,      setAdvancing]      = useState(false)
   const [creating,       setCreating]       = useState(false)
   const [newName,        setNewName]        = useState('')
   const [newGoal,        setNewGoal]        = useState('')
   const [error,          setError]          = useState<string | null>(null)
   const [confirmations,  setConfirmations]  = useState<PendingConfirmation[]>([])
   const [confirmLoading, setConfirmLoading] = useState<Set<string>>(new Set())
-  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
-  const logPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const confPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [autoApprove,    setAutoApprove]    = useState(false)
+
+  // ── Tree state ────────────────────────────────────────────────
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null)
+  const [newItemParent, setNewItemParent] = useState<string | null>(null)
+  const [newItemType, setNewItemType] = useState<'file' | 'dir'>('file')
+  const [newItemName, setNewItemName] = useState('')
+
+  // ── Terminal command input ────────────────────────────────────
+  const [cmdInput, setCmdInput] = useState('')
+  const [cmdRunning, setCmdRunning] = useState(false)
+
+  const editorRef    = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const logPollRef   = useRef<ReturnType<typeof setInterval> | null>(null)
+  const confPollRef  = useRef<ReturnType<typeof setInterval> | null>(null)
+  const filesPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // ── Close context menu on outside click ─────────────────────
+  useEffect(() => {
+    if (!ctxMenu) return
+    const handler = () => setCtxMenu(null)
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [ctxMenu])
 
   // ── Charger la liste des projets ────────────────────────────────
   const loadProjects = useCallback(async () => {
@@ -68,8 +136,16 @@ export function ProjectsPage({ active }: Props) {
   }, [])
 
   useEffect(() => {
-    if (active) loadProjects()
+    if (!active) return
+    loadProjects()
+    const interval = setInterval(loadProjects, 60_000)
+    return () => clearInterval(interval)
   }, [active, loadProjects])
+
+  // ── Navigation vers un projet ciblé (depuis ChatPage) ───────────
+  useEffect(() => {
+    if (targetSlug && active) setSlug(targetSlug)
+  }, [targetSlug, active])
 
   // ── Charger les fichiers d'un projet ────────────────────────────
   const loadProject = useCallback(async (s: string) => {
@@ -80,6 +156,11 @@ export function ProjectsPage({ active }: Props) {
       setFileContent('')
       setTerminalLog('')
       setGitLog('')
+      // Expand all top-level dirs by default
+      const topDirs = (p.files ?? [])
+        .filter(f => f.endsWith('/'))
+        .map(f => f.slice(0, -1))
+      setExpandedDirs(new Set(['', ...topDirs]))
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Erreur')
     }
@@ -100,9 +181,18 @@ export function ProjectsPage({ active }: Props) {
   useEffect(() => {
     if (!active) return
     loadConfirmations()
+    api.getSettings().then(s => setAutoApprove(s.auto_approve_confirmations)).catch(() => {})
     confPollRef.current = setInterval(loadConfirmations, 30_000)
     return () => { if (confPollRef.current) clearInterval(confPollRef.current) }
   }, [active, loadConfirmations])
+
+  // ── Toggle auto-approve ───────────────────────────────────────────
+  const handleAutoApproveToggle = async (val: boolean) => {
+    setAutoApprove(val)
+    try {
+      await api.setSettings({ auto_approve_confirmations: val })
+    } catch { setAutoApprove(!val) /* rollback */ }
+  }
 
   // ── Approuver / Rejeter une confirmation ─────────────────────────
   const handleConfirm = async (id: string, approved: boolean) => {
@@ -131,13 +221,39 @@ export function ProjectsPage({ active }: Props) {
     if (!slug) return
     const poll = async () => {
       try {
-        const res = await api.readProjectFile(slug, 'logs/commands.log')
+        const res = await api.readProjectLog(slug)
         setTerminalLog(res.content)
-      } catch { /* pas encore créé */ }
+      } catch { /* ignore */ }
     }
     poll()
     logPollRef.current = setInterval(poll, 3_000)
     return () => { if (logPollRef.current) clearInterval(logPollRef.current) }
+  }, [slug])
+
+  // ── Polling fichiers toutes les 5s (sans reset éditeur) ─────────
+  useEffect(() => {
+    if (filesPollRef.current) clearInterval(filesPollRef.current)
+    if (!slug) return
+    const refresh = async () => {
+      try {
+        const p = await api.getProject(slug)
+        const newFiles = p.files ?? []
+        setFiles(prev => {
+          // Mise à jour silencieuse : ne touche pas à l'éditeur
+          if (JSON.stringify(prev) === JSON.stringify(newFiles)) return prev
+          return newFiles
+        })
+        // Si plan.md a changé et qu'il est ouvert, le recharger aussi
+        if (newFiles.includes('plan.md')) {
+          try {
+            const r = await api.readProjectFile(slug, 'plan.md')
+            setPlanSteps(parsePlan(r.content))
+          } catch { /* silence */ }
+        }
+      } catch { /* silence */ }
+    }
+    filesPollRef.current = setInterval(refresh, 5_000)
+    return () => { if (filesPollRef.current) clearInterval(filesPollRef.current) }
   }, [slug])
 
   // ── Charger un fichier dans l'éditeur ────────────────────────────
@@ -155,8 +271,29 @@ export function ProjectsPage({ active }: Props) {
 
   // Charger plan.md automatiquement quand le projet change
   useEffect(() => {
-    if (slug && files.includes('plan.md')) handleOpenFile('plan.md')
+    if (slug && files.some(f => f === 'plan.md')) handleOpenFile('plan.md')
   }, [slug, files, handleOpenFile])
+
+  // ── Avancer d'une étape ──────────────────────────────────────────
+  const handleAdvance = useCallback(async () => {
+    if (!slug) return
+    setAdvancing(true)
+    setError(null)
+    try {
+      const res = await api.advanceProject(slug)
+      // Rafraîchit plan + git log après exécution
+      const planRes = await api.readProjectFile(slug, 'plan.md')
+      setFileContent(planRes.content)
+      setPlanSteps(parsePlan(planRes.content))
+      const { log } = await api.getProjectGitLog(slug)
+      setGitLog(log)
+      if (res.done) setError(null)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur avancement')
+    } finally {
+      setAdvancing(false)
+    }
+  }, [slug])
 
   // ── Sauvegarder ─────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
@@ -192,7 +329,7 @@ export function ProjectsPage({ active }: Props) {
   }
 
   // ── Créer un projet ─────────────────────────────────────────────
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!newName.trim()) return
     setError(null)
@@ -216,13 +353,200 @@ export function ProjectsPage({ active }: Props) {
       await api.deleteProject(slug)
       setSlug(null)
       setFiles([])
+      setOpenFile(null)
+      setFileContent('')
+      setPlanSteps([])
+      setTerminalLog('')
+      setGitLog('')
       await loadProjects()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Erreur suppression')
     }
   }
 
+  // ── Tree: toggle directory ────────────────────────────────────
+  const toggleDir = (path: string) => {
+    setExpandedDirs(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  // ── Tree: context menu ────────────────────────────────────────
+  const handleContextMenu = (e: React.MouseEvent, path: string, isDir: boolean) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCtxMenu({ x: e.clientX, y: e.clientY, path, isDir })
+    setNewItemParent(null)
+    setNewItemName('')
+  }
+
+  // ── Tree: new file/dir confirmed ──────────────────────────────
+  const handleNewItemSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!slug || newItemParent === null || !newItemName.trim()) return
+    const name = newItemName.trim()
+    const fullPath = newItemParent ? `${newItemParent}/${name}` : name
+    setError(null)
+    try {
+      if (newItemType === 'dir') {
+        await api.mkdir(slug, fullPath)
+      } else {
+        await api.writeProjectFile(slug, { path: fullPath, content: '', commit_msg: `user: new file ${fullPath}` })
+      }
+      await loadProject(slug)
+      setNewItemParent(null)
+      setNewItemName('')
+      if (newItemType === 'file') {
+        await handleOpenFile(fullPath)
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur création')
+    }
+  }
+
+  // ── Tree: delete file ─────────────────────────────────────────
+  const handleDeleteFile = async (path: string) => {
+    if (!slug) return
+    if (!window.confirm(`Supprimer « ${path} » ?`)) return
+    setError(null)
+    try {
+      await api.deleteFile(slug, path)
+      if (openFile === path) {
+        setOpenFile(null)
+        setFileContent('')
+      }
+      await loadProject(slug)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur suppression fichier')
+    }
+  }
+
+  // ── Tree: delete directory (recursively via multiple deletes) ─
+  const handleDeleteDir = async (dirPath: string) => {
+    if (!slug) return
+    if (!window.confirm(`Supprimer le dossier « ${dirPath} » et tout son contenu ?`)) return
+    setError(null)
+    try {
+      // Delete all files under this directory
+      const filesToDelete = files.filter(f => !f.endsWith('/') && f.startsWith(dirPath + '/'))
+      for (const f of filesToDelete) {
+        await api.deleteFile(slug, f)
+      }
+      // Also try to delete the .gitkeep if it exists
+      try { await api.deleteFile(slug, `${dirPath}/.gitkeep`) } catch { /* ignore */ }
+      if (openFile?.startsWith(dirPath + '/')) {
+        setOpenFile(null)
+        setFileContent('')
+      }
+      await loadProject(slug)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur suppression dossier')
+    }
+  }
+
+  // ── Terminal: run command ─────────────────────────────────────
+  const handleRunCommand = async (e: React.SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (!slug || !cmdInput.trim()) return
+    setCmdRunning(true)
+    try {
+      await api.runProjectCommand(slug, cmdInput.trim())
+      setCmdInput('')
+      // terminal log will auto-refresh via poll
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Erreur commande')
+    } finally {
+      setCmdRunning(false)
+    }
+  }
+
+  // ── Tree render ───────────────────────────────────────────────
+  const renderTree = (nodes: TreeNode[], depth = 0): React.ReactNode => {
+    return nodes.map(node => {
+      const isExpanded = expandedDirs.has(node.path)
+      const indent = depth * 12
+
+      return (
+        <div key={node.path}>
+          <div
+            className={`${styles.treeNode} ${!node.isDir && openFile === node.path ? styles.treeNodeActive : ''}`}
+            style={{ paddingLeft: `${0.5 + indent / 16}rem` }}
+            onContextMenu={e => handleContextMenu(e, node.path, node.isDir)}
+          >
+            {node.isDir ? (
+              <button
+                className={styles.treeDir}
+                onClick={() => toggleDir(node.path)}
+                title={node.path}
+              >
+                <span className={styles.treeToggle}>{isExpanded ? '▼' : '▶'}</span>
+                {node.name}/
+              </button>
+            ) : (
+              <button
+                className={styles.treeFile}
+                onClick={() => handleOpenFile(node.path)}
+                title={node.path}
+              >
+                {node.name}
+              </button>
+            )}
+          </div>
+
+          {/* Inline new item form */}
+          {newItemParent === node.path && (
+            <form
+              className={styles.newItemForm}
+              style={{ paddingLeft: `${0.5 + (indent + 12) / 16}rem` }}
+              onSubmit={handleNewItemSubmit}
+            >
+              <input
+                className={styles.newItemInput}
+                autoFocus
+                placeholder={newItemType === 'dir' ? 'nom-dossier' : 'fichier.md'}
+                value={newItemName}
+                onChange={e => setNewItemName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') { setNewItemParent(null); setNewItemName('') } }}
+              />
+              <button className={styles.newItemOk} type='submit'>+</button>
+            </form>
+          )}
+
+          {/* Children */}
+          {node.isDir && isExpanded && node.children.length > 0 && (
+            <div className={styles.treeChildren}>
+              {renderTree(node.children, depth + 1)}
+            </div>
+          )}
+        </div>
+      )
+    })
+  }
+
   const currentProject = projects.find(p => p.slug === slug)
+  const tree = buildTree(files)
+
+  // New item form at root level (parent = '')
+  const rootNewItemForm = newItemParent === '' && (
+    <form
+      className={styles.newItemForm}
+      style={{ paddingLeft: '0.5rem' }}
+      onSubmit={handleNewItemSubmit}
+    >
+      <input
+        className={styles.newItemInput}
+        autoFocus
+        placeholder={newItemType === 'dir' ? 'nom-dossier' : 'fichier.md'}
+        value={newItemName}
+        onChange={e => setNewItemName(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Escape') { setNewItemParent(null); setNewItemName('') } }}
+      />
+      <button className={styles.newItemOk} type='submit'>+</button>
+    </form>
+  )
 
   return (
     <div className={styles.root}>
@@ -285,56 +609,62 @@ export function ProjectsPage({ active }: Props) {
       {error && <div className={styles.errorBar}>{error}</div>}
 
       {/* ── Confirmations en attente (GOAP) ── */}
-      {confirmations.length > 0 && (
-        <div className={styles.confirmPanel}>
-          <div className={styles.confirmTitle}>
-            ⚡ Actions en attente de confirmation ({confirmations.length})
-          </div>
-          {confirmations.map(c => (
-            <div key={c.id} className={styles.confirmCard}>
-              <div className={styles.confirmDesc}>{c.description}</div>
-              <div className={styles.confirmMeta}>
-                <span className={styles.confirmBadge}>{c.action}</span>
-                <span className={styles.confirmTs}>{c.ts}</span>
-              </div>
-              <div className={styles.confirmActions}>
-                <button
-                  className={styles.btnApprove}
-                  disabled={confirmLoading.has(c.id)}
-                  onClick={() => handleConfirm(c.id, true)}
-                >
-                  {confirmLoading.has(c.id) ? '…' : 'Approuver'}
-                </button>
-                <button
-                  className={styles.btnReject}
-                  disabled={confirmLoading.has(c.id)}
-                  onClick={() => handleConfirm(c.id, false)}
-                >
-                  Rejeter
-                </button>
-              </div>
-            </div>
-          ))}
+      <div className={styles.confirmPanel}>
+        <div className={styles.confirmTitle}>
+          <span>{confirmations.length > 0 ? ` (${confirmations.length})` : ''}</span>
+          <label className={styles.autoApproveLabel}>
+            <input
+              type="checkbox"
+              checked={autoApprove}
+              onChange={e => handleAutoApproveToggle(e.target.checked)}
+            />
+             Mode autonome
+          </label>
         </div>
-      )}
+        {confirmations.map(c => (
+          <div key={c.id} className={styles.confirmCard}>
+            <div className={styles.confirmDesc}>{c.description}</div>
+            <div className={styles.confirmMeta}>
+              <span className={styles.confirmBadge}>{c.action}</span>
+              <span className={styles.confirmTs}>{c.ts}</span>
+            </div>
+            <div className={styles.confirmActions}>
+              <button
+                className={styles.btnApprove}
+                disabled={confirmLoading.has(c.id)}
+                onClick={() => handleConfirm(c.id, true)}
+              >
+                {confirmLoading.has(c.id) ? '…' : 'Approuver'}
+              </button>
+              <button
+                className={styles.btnReject}
+                disabled={confirmLoading.has(c.id)}
+                onClick={() => handleConfirm(c.id, false)}
+              >
+                Rejeter
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
 
       {/* ── Corps — 3 colonnes ── */}
       <div className={styles.body}>
 
         {/* FileTree */}
-        <div className={styles.tree}>
+        <div
+          className={styles.tree}
+          onContextMenu={e => {
+            // Right-click on empty tree area → context for root
+            if (e.target === e.currentTarget) {
+              handleContextMenu(e, '', true)
+            }
+          }}
+        >
           <div className={styles.treeTitle}>Fichiers</div>
           {files.length === 0 && <div className={styles.treeEmpty}>Aucun fichier</div>}
-          {files.map(f => (
-            <button
-              key={f}
-              className={`${styles.treeItem} ${openFile === f ? styles.treeItemActive : ''}`}
-              onClick={() => handleOpenFile(f)}
-              title={f}
-            >
-              {f}
-            </button>
-          ))}
+          {rootNewItemForm}
+          {renderTree(tree)}
         </div>
 
         {/* Monaco Editor */}
@@ -377,7 +707,19 @@ export function ProjectsPage({ active }: Props) {
 
         {/* Plan panel */}
         <div className={styles.planPanel}>
-          <div className={styles.planTitle}>Plan</div>
+          <div className={styles.planTitle}>
+            Plan
+            {slug && (
+              <button
+                className={styles.btnAdvance}
+                onClick={handleAdvance}
+                disabled={advancing}
+                title="Exécuter la prochaine étape"
+              >
+                {advancing ? '⏳' : '▶ Continuer'}
+              </button>
+            )}
+          </div>
           {planSteps.length === 0 ? (
             <div className={styles.planEmpty}>
               {slug ? 'plan.md vide ou non trouvé' : '—'}
@@ -411,7 +753,81 @@ export function ProjectsPage({ active }: Props) {
         <pre className={styles.terminalContent}>
           {terminalLog || (slug ? '(aucune commande exécutée)' : '—')}
         </pre>
+        {/* ── Command input ── */}
+        <form className={styles.cmdForm} onSubmit={handleRunCommand}>
+          <span className={styles.cmdPrompt}>$</span>
+          <input
+            className={styles.cmdInput}
+            value={cmdInput}
+            onChange={e => setCmdInput(e.target.value)}
+            placeholder={slug ? 'commande shell...' : ''}
+            disabled={!slug || cmdRunning}
+          />
+          <button className={styles.cmdRun} type='submit' disabled={!slug || cmdRunning || !cmdInput.trim()}>
+            {cmdRunning ? '⏳' : '▶'}
+          </button>
+        </form>
       </div>
+
+      {/* ── Context menu ── */}
+      {ctxMenu && (
+        <div
+          className={styles.ctxMenu}
+          style={{ top: ctxMenu.y, left: ctxMenu.x }}
+          onClick={e => e.stopPropagation()}
+        >
+          {ctxMenu.isDir ? (
+            <>
+              <div
+                className={styles.ctxMenuItem}
+                onClick={() => {
+                  setNewItemParent(ctxMenu.path)
+                  setNewItemType('file')
+                  setNewItemName('')
+                  // Ensure the dir is expanded
+                  if (ctxMenu.path) setExpandedDirs(prev => new Set(prev).add(ctxMenu.path))
+                  setCtxMenu(null)
+                }}
+              >
+                Nouveau fichier
+              </div>
+              <div
+                className={styles.ctxMenuItem}
+                onClick={() => {
+                  setNewItemParent(ctxMenu.path)
+                  setNewItemType('dir')
+                  setNewItemName('')
+                  if (ctxMenu.path) setExpandedDirs(prev => new Set(prev).add(ctxMenu.path))
+                  setCtxMenu(null)
+                }}
+              >
+                Nouveau dossier
+              </div>
+              {ctxMenu.path !== '' && (
+                <div
+                  className={`${styles.ctxMenuItem} ${styles.ctxMenuItemDanger}`}
+                  onClick={() => {
+                    handleDeleteDir(ctxMenu.path)
+                    setCtxMenu(null)
+                  }}
+                >
+                  Supprimer dossier
+                </div>
+              )}
+            </>
+          ) : (
+            <div
+              className={`${styles.ctxMenuItem} ${styles.ctxMenuItemDanger}`}
+              onClick={() => {
+                handleDeleteFile(ctxMenu.path)
+                setCtxMenu(null)
+              }}
+            >
+              Supprimer
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

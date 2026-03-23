@@ -23,6 +23,7 @@ _THRESHOLDS: dict[str, float] = {
     "shell":     0.80,
     "scheduler": 0.75,
     "calendar":  0.92,
+    "plan":      0.75,
 }
 _DEFAULT_THRESHOLD      = 0.70
 _ULTRA_CONF_THRESHOLD   = 0.95   # bypass total LLM (ML quasi-certain)
@@ -117,6 +118,7 @@ class MLHandler(RouterHandler):
 
         kw_shell      = ctx._hints.get("kw_shell", False)
         kw_sched_weak = ctx._hints.get("kw_sched_weak", False)
+        kw_plan_weak  = ctx._hints.get("kw_plan_weak", False)
 
         # ── Bypass total (ML quasi-certain) ────────────────────────────────
         if ml_conf >= _ULTRA_CONF_THRESHOLD:
@@ -135,6 +137,11 @@ class MLHandler(RouterHandler):
             return RouterResult(
                 "scheduler", ml_conf, "ml",
                 metadata={"ml_conf": ml_conf, "bypass": "kw+ml"},
+            )
+        if kw_plan_weak and ml_route == "plan" and ml_conf >= _THRESHOLDS["plan"]:
+            return RouterResult(
+                "plan", ml_conf, "ml",
+                metadata={"ml_conf": ml_conf, "bypass": "kw+ml", "needs_recon": True},
             )
 
         # ── Confiance insuffisante → délègue au LLM ───────────────────────

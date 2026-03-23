@@ -162,6 +162,68 @@ def _triplets() -> list[tuple]:
         ("step", "collecter les sources",            "requires", "action", "web_fetch"),
         ("step", "évaluer la pertinence",            "requires", "action", "sandbox_read"),
         ("step", "rédiger la synthèse",              "requires", "action", "sandbox_write"),
+
+        # ── Actions PlanRunner (crew executors) ───────────────────────────────
+        # write_markdown_file (crew : shell)
+        ("action", "write_markdown_file",       "precondition", "state", "sandbox_open"),
+        ("action", "write_markdown_file",       "effect",       "state", "file_created"),
+        ("action", "write_markdown_file",       "effect",       "state", "chapter_written"),
+
+        # analyse_et_note (crew : note)
+        ("action", "analyse_et_note",           "precondition", "state", "sandbox_open"),
+        ("action", "analyse_et_note",           "effect",       "state", "analysis_written"),
+        ("action", "analyse_et_note",           "effect",       "state", "memory_updated"),
+
+        # generate_response (crew : conversation)
+        ("action", "generate_response",         "precondition", "state", "sandbox_open"),
+        ("action", "generate_response",         "effect",       "state", "response_generated"),
+
+        # create_structured_content (crew : scheduler)
+        ("action", "create_structured_content", "precondition", "state", "sandbox_open"),
+        ("action", "create_structured_content", "effect",       "state", "structured_plan_written"),
+
+        # spawn_sub_plan (crew : planner — HTN)
+        ("action", "spawn_sub_plan",            "precondition", "state", "sandbox_open"),
+        ("action", "spawn_sub_plan",            "effect",       "state", "sub_plan_created"),
+        ("action", "spawn_sub_plan",            "effect",       "state", "sub_plan_executed"),
+        ("action", "spawn_sub_plan",            "causes",       "action","write_markdown_file"),
+
+        # ── Patterns plan executor — étapes génériques ───────────────────────
+        # Patterns "écrire/rédiger X"
+        ("step", "rédiger introduction",         "requires", "action", "write_markdown_file"),
+        ("step", "rédiger conclusion",           "requires", "action", "write_markdown_file"),
+        ("step", "rédiger un chapitre",          "requires", "action", "write_markdown_file"),
+        ("step", "écrire la documentation",      "requires", "action", "write_markdown_file"),
+        ("step", "écrire un résumé",             "requires", "action", "write_markdown_file"),
+        ("step", "créer le fichier README",      "requires", "action", "write_markdown_file"),
+
+        # Patterns "analyser/identifier X"
+        ("step", "analyser les besoins",         "requires", "action", "analyse_et_note"),
+        ("step", "identifier les concepts clés", "requires", "action", "analyse_et_note"),
+        ("step", "analyser le contenu",          "requires", "action", "analyse_et_note"),
+        ("step", "identifier les lacunes",       "requires", "action", "analyse_et_note"),
+        ("step", "évaluer la qualité",           "requires", "action", "analyse_et_note"),
+
+        # Patterns "réviser/corriger X"
+        ("step", "révision et correction",       "requires", "action", "spawn_sub_plan"),
+        ("step", "réviser le contenu",           "requires", "action", "analyse_et_note"),
+        ("step", "corriger les erreurs",         "requires", "action", "write_markdown_file"),
+        ("step", "relire et améliorer",          "requires", "action", "spawn_sub_plan"),
+
+        # Patterns "planifier/organiser X"
+        ("step", "planifier les étapes",         "requires", "action", "spawn_sub_plan"),
+        ("step", "organiser le travail",         "requires", "action", "create_structured_content"),
+        ("step", "créer le plan détaillé",       "requires", "action", "create_structured_content"),
+
+        # Patterns "rechercher X"
+        ("step", "rechercher des informations",  "requires", "action", "web_search"),
+        ("step", "rechercher des sources",       "requires", "action", "web_search"),
+        ("step", "rechercher sur le web",        "requires", "action", "web_search"),
+
+        # Patterns conversation/réponse
+        ("step", "répondre à la question",       "requires", "action", "generate_response"),
+        ("step", "expliquer le concept",         "requires", "action", "generate_response"),
+        ("step", "synthétiser les résultats",    "requires", "action", "generate_response"),
     ]
 
 

@@ -88,6 +88,7 @@ def kg_add_node(
     nid = kg_node_id(type_, label)
     meta_str = json.dumps(metadata or {}, ensure_ascii=False)
     conn = _conn(db_path)
+    _ensure_kg_tables(conn)
     conn.execute("""
         INSERT INTO kg_nodes(id, type, label, lang, source, metadata)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -113,6 +114,7 @@ def kg_add_edge(
     if rel not in VALID_RELATIONS:
         raise ValueError(f"Relation inconnue : {rel!r}. Valides : {sorted(VALID_RELATIONS)}")
     conn = _conn(db_path)
+    _ensure_kg_tables(conn)
     conn.execute("""
         INSERT INTO kg_edges(src, rel, dst, weight, source)
         VALUES (?, ?, ?, ?, ?)
@@ -197,6 +199,37 @@ def kg_record_event(
 # Lecture — double-lookup (user d'abord, seed en fallback)
 # ══════════════════════════════════════════════════════════════════════════════
 
+_KG_DDL = """
+CREATE TABLE IF NOT EXISTS kg_nodes (
+    id       TEXT PRIMARY KEY,
+    type     TEXT NOT NULL,
+    label    TEXT NOT NULL,
+    lang     TEXT NOT NULL DEFAULT 'fr',
+    source   TEXT NOT NULL DEFAULT 'user',
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS kg_edges (
+    src     TEXT NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+    rel     TEXT NOT NULL,
+    dst     TEXT NOT NULL REFERENCES kg_nodes(id) ON DELETE CASCADE,
+    weight  REAL NOT NULL DEFAULT 1.0,
+    source  TEXT NOT NULL DEFAULT 'user',
+    PRIMARY KEY (src, rel, dst)
+);
+CREATE INDEX IF NOT EXISTS kg_nodes_type  ON kg_nodes(type);
+CREATE INDEX IF NOT EXISTS kg_nodes_label ON kg_nodes(label);
+CREATE INDEX IF NOT EXISTS kg_edges_src   ON kg_edges(src);
+CREATE INDEX IF NOT EXISTS kg_edges_dst   ON kg_edges(dst);
+CREATE INDEX IF NOT EXISTS kg_edges_rel   ON kg_edges(rel);
+"""
+
+
+def _ensure_kg_tables(conn: sqlite3.Connection) -> None:
+    """Crée les tables KG si elles n'existent pas (lazy migration idempotente)."""
+    conn.executescript(_KG_DDL)
+    conn.commit()
+
+
 def _query_edges(
     conn: sqlite3.Connection,
     src_id: str | None = None,
@@ -206,6 +239,7 @@ def _query_edges(
     """
     Requête générique sur kg_edges + kg_nodes (src + dst).
     Filtre optionnel sur src_id, rel, dst_id.
+    Crée les tables si elles sont absentes (migration transparente).
     """
     where = []
     params = []
@@ -231,7 +265,13 @@ def _query_edges(
         {where_clause}
         ORDER BY e.weight DESC
     """
-    return _rows_to_dicts(conn.execute(sql, params).fetchall())
+    try:
+        return _rows_to_dicts(conn.execute(sql, params).fetchall())
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e):
+            _ensure_kg_tables(conn)
+            return _rows_to_dicts(conn.execute(sql, params).fetchall())
+        raise
 
 
 def _merge_results(user_rows: list[dict], seed_rows: list[dict]) -> list[dict]:

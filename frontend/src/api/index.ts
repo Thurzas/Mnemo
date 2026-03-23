@@ -419,6 +419,14 @@ export const api = {
   readProjectFile: (slug: string, path: string) =>
     request<ProjectFile>(`/api/projects/${encodeURIComponent(slug)}/file?path=${encodeURIComponent(path)}`),
 
+  readProjectLog: (slug: string) =>
+    request<ProjectFile>(`/api/projects/${encodeURIComponent(slug)}/log`),
+
+  advanceProject: (slug: string) =>
+    request<{ done: boolean; message: string }>(`/api/projects/${encodeURIComponent(slug)}/advance`, {
+      method: 'POST',
+    }),
+
   writeProjectFile: (slug: string, body: { path: string; content: string; commit_msg?: string }) =>
     request<FileWriteResult>(`/api/projects/${encodeURIComponent(slug)}/file`, {
       method: 'POST',
@@ -428,6 +436,23 @@ export const api = {
   deleteProject: (slug: string) =>
     request<{ ok: boolean }>(`/api/projects/${encodeURIComponent(slug)}`, {
       method: 'DELETE',
+    }),
+
+  mkdir: (slug: string, path: string) =>
+    request<{ path: string }>(`/api/projects/${encodeURIComponent(slug)}/mkdir`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+
+  deleteFile: (slug: string, path: string) =>
+    request<{ deleted: string }>(`/api/projects/${encodeURIComponent(slug)}/file?path=${encodeURIComponent(path)}`, {
+      method: 'DELETE',
+    }),
+
+  runProjectCommand: (slug: string, command: string) =>
+    request<{ stdout: string; stderr: string; returncode: number }>(`/api/projects/${encodeURIComponent(slug)}/command`, {
+      method: 'POST',
+      body: JSON.stringify({ command }),
     }),
 
   getProjectGitLog: (slug: string) =>
@@ -440,6 +465,15 @@ export const api = {
     request<ConfirmActionResult>(`/api/confirmations/${encodeURIComponent(id)}`, {
       method: 'POST',
       body: JSON.stringify({ approved }),
+    }),
+
+  getSettings: () =>
+    request<{ auto_approve_confirmations: boolean }>('/api/settings'),
+
+  setSettings: (settings: { auto_approve_confirmations: boolean }) =>
+    request<{ ok: boolean; auto_approve_confirmations: boolean }>('/api/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
     }),
 
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {

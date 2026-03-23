@@ -62,6 +62,12 @@ class LLMHandler(RouterHandler):
                 final_route = ml_route
             elif kw_shell:
                 final_route = "shell"
+            elif ctx._hints.get("kw_plan_strong"):
+                # Keyword fort de plan détecté (même dans un message long) :
+                # le LLM local est faible et dit souvent "conversation" par défaut.
+                # Un keyword fort ("faire un plan", "prépare-moi un plan"...) est
+                # un signal sémantique robuste → on l'emporte sur le LLM.
+                final_route = "plan"
 
         # Coercion : web_query non-null implique needs_web = True
         if eval_json.get("web_query") and not eval_json.get("needs_web"):
@@ -72,7 +78,7 @@ class LLMHandler(RouterHandler):
             if eval_json.get("complexity") == "complex":
                 eval_json["needs_recon"] = True
 
-        # Hint kw_plan_weak + LLM dit "conversation" → suggère "plan"
+        # Hint kw_plan_weak + LLM dit "conversation" + message complexe → "plan"
         if final_route == "conversation" and ctx._hints.get("kw_plan_weak"):
             if eval_json.get("complexity") == "complex":
                 final_route = "plan"

@@ -934,14 +934,56 @@ class PlannerCrew:
             if not steps:
                 return "Le planificateur n'a pas pu décomposer ce goal. Peux-tu le reformuler ?"
 
+            # ── Création du projet sandbox lié au plan ──────────
+            from Mnemo.tools.sandbox_tools import (
+                create_project as _create_sandbox_project,
+                _safe_slug as _sandbox_slug,
+                _project_path,
+                _git_commit as _sandbox_git_commit,
+            )
+            project_slug = _sandbox_slug(title or goal)
+            try:
+                _create_sandbox_project(project_slug, title or goal[:60], goal)
+            except Exception:
+                pass  # projet déjà existant → on écrase juste le plan
+            project_dir = _project_path(project_slug)
+
             plan_path = PlanStore.create(
                 goal         = goal,
                 steps        = steps,
                 context      = ctx_summary,
                 crew_targets = crew_targets,
+                path         = project_dir / "plan.md",
             )
+            try:
+                _sandbox_git_commit(project_dir, "agent: plan initial", ["plan.md"])
+            except Exception:
+                pass
 
-            lines = [f"**Plan créé** : `{plan_path.name}`", f"**Goal** : {goal}", ""]
+            # ── Peupler le KG avec les steps et leurs actions ──────────
+            _CREW_TO_KG_ACTION = {
+                "shell":          "write_markdown_file",
+                "note":           "analyse_et_note",
+                "conversation":   "generate_response",
+                "scheduler":      "create_structured_content",
+                "reconnaissance": "reconnaissance",
+                "planner":        "spawn_sub_plan",
+            }
+            try:
+                from Mnemo.tools.kg_tools import kg_add_triplet
+                from Mnemo.context import get_data_dir as _gdd
+                _db = _gdd() / "memory.db"
+                for _step in steps:
+                    _ct     = crew_targets.get(_step, "conversation")
+                    _action = _CREW_TO_KG_ACTION.get(_ct, "generate_response")
+                    kg_add_triplet(_db, "step", _step, "requires", "action", _action,
+                                   weight=1.0, source="planner")
+            except Exception:
+                pass
+
+            plan_id = project_slug  # identifiant stable du plan/projet
+
+            lines = [f"**Projet** : `{project_slug}`", f"**Goal** : {goal}", ""]
             for i, step in enumerate(steps, 1):
                 crew_t = crew_targets.get(step, "")
                 suffix = f" _(crew : {crew_t})_" if crew_t else ""
@@ -962,24 +1004,26 @@ class PlannerCrew:
             if len(steps) > 1:
                 step2 = steps[1]
                 step2_data = {
-                    "plan_id":    plan_path.stem,
-                    "plan_path":  str(plan_path),
-                    "step_index": 1,
-                    "step_total": len(steps),
-                    "step_label": step2,
-                    "crew_target": crew_targets.get(step2, "conversation"),
+                    "plan_id":      plan_id,
+                    "plan_path":    str(plan_path),
+                    "project_slug": project_slug,
+                    "step_index":   1,
+                    "step_total":   len(steps),
+                    "step_label":   step2,
+                    "crew_target":  crew_targets.get(step2, "conversation"),
                 }
 
             if immediate is None:
                 # Pas d'action immédiate → plan seul
                 _apply_world_state_update({
                     "pending_plan_step": {
-                        "plan_id":    plan_path.stem,
-                        "plan_path":  str(plan_path),
-                        "step_index": 0,
-                        "step_total": len(steps),
-                        "step_label": first_step,
-                        "crew_target": crew_target,
+                        "plan_id":      plan_id,
+                        "plan_path":    str(plan_path),
+                        "project_slug": project_slug,
+                        "step_index":   0,
+                        "step_total":   len(steps),
+                        "step_label":   first_step,
+                        "crew_target":  crew_target,
                     }
                 })
                 return plan_text
@@ -995,6 +1039,10 @@ class PlannerCrew:
                     _PS.mark_done(_Path(plan_path), first_step)
                     summary = recon.get("summary", "") if isinstance(recon, dict) else str(recon)
                     _PS.append_log(_Path(plan_path), f"Recon terminé : {summary[:200]}")
+                    try:
+                        _sandbox_git_commit(project_dir, "agent: étape 1 terminée", ["plan.md"])
+                    except Exception:
+                        pass
                     _apply_world_state_update(
                         {"pending_plan_step": step2_data} if step2_data else {}
                     )
@@ -1009,12 +1057,13 @@ class PlannerCrew:
                     # En cas d'échec recon → fallback plan seul
                     _apply_world_state_update({
                         "pending_plan_step": {
-                            "plan_id":    plan_path.stem,
-                            "plan_path":  str(plan_path),
-                            "step_index": 0,
-                            "step_total": len(steps),
-                            "step_label": first_step,
-                            "crew_target": crew_target,
+                            "plan_id":      plan_id,
+                            "plan_path":    str(plan_path),
+                            "project_slug": project_slug,
+                            "step_index":   0,
+                            "step_total":   len(steps),
+                            "step_label":   first_step,
+                            "crew_target":  crew_target,
                         }
                     })
                     return plan_text
@@ -1023,20 +1072,22 @@ class PlannerCrew:
                 # Requiert confirmation → déléguer à api.py via pending_web_search
                 _apply_world_state_update({
                     "pending_plan_step": {
-                        "plan_id":    plan_path.stem,
-                        "plan_path":  str(plan_path),
-                        "step_index": 0,
-                        "step_total": len(steps),
-                        "step_label": first_step,
-                        "crew_target": crew_target,
+                        "plan_id":      plan_id,
+                        "plan_path":    str(plan_path),
+                        "project_slug": project_slug,
+                        "step_index":   0,
+                        "step_total":   len(steps),
+                        "step_label":   first_step,
+                        "crew_target":  crew_target,
                     },
                     "pending_web_search": {
-                        "plan_id":    plan_path.stem,
-                        "plan_path":  str(plan_path),
-                        "step_index": 0,
-                        "query":      immediate["query"],
-                        "step_label": first_step,
-                        "step2_data": step2_data,
+                        "plan_id":      plan_id,
+                        "plan_path":    str(plan_path),
+                        "project_slug": project_slug,
+                        "step_index":   0,
+                        "query":        immediate["query"],
+                        "step_label":   first_step,
+                        "step2_data":   step2_data,
                     },
                 })
                 return plan_text
@@ -1044,12 +1095,13 @@ class PlannerCrew:
             # Fallback (ne devrait pas arriver)
             _apply_world_state_update({
                 "pending_plan_step": {
-                    "plan_id":    plan_path.stem,
-                    "plan_path":  str(plan_path),
-                    "step_index": 0,
-                    "step_total": len(steps),
-                    "step_label": first_step,
-                    "crew_target": crew_target,
+                    "plan_id":      plan_id,
+                    "plan_path":    str(plan_path),
+                    "project_slug": project_slug,
+                    "step_index":   0,
+                    "step_total":   len(steps),
+                    "step_label":   first_step,
+                    "crew_target":  crew_target,
                 }
             })
             return plan_text
