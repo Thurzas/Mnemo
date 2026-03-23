@@ -346,7 +346,7 @@ def list_files(slug: str, subdir: str = "") -> list[str]:
         if p.name == ".gitkeep":
             continue
         try:
-            rel = str(p.relative_to(root))
+            rel = p.relative_to(root).as_posix()  # toujours forward slashes
             if p.is_dir():
                 result.append(rel + "/")
             elif p.is_file():
