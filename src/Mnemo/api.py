@@ -1758,7 +1758,7 @@ def project_run_command(slug: str, body: CommandRequest, _: Auth):
     res = run_command(slug, body.command)
     if res.get("error") and res.get("returncode") != 0:
         raise HTTPException(status_code=400, detail=res["error"])
-    return {"stdout": res.get("output", ""), "stderr": res.get("error", ""), "returncode": res.get("returncode", 0)}
+    return {"stdout": res.get("stdout", ""), "stderr": res.get("stderr", ""), "returncode": res.get("returncode", 0)}
 
 
 @app.delete("/api/projects/{slug}", status_code=200)

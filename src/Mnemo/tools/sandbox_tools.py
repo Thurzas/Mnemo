@@ -308,7 +308,9 @@ def run_command(slug: str, command: str) -> dict:
             f"rc={proc.returncode}\n{stdout}{stderr}\n---\n"
         )
         try:
-            (root / "logs" / "commands.log").open("a", encoding="utf-8").write(log_entry)
+            log_path = root / "logs" / "commands.log"
+            log_path.parent.mkdir(exist_ok=True)
+            log_path.open("a", encoding="utf-8").write(log_entry)
         except Exception:
             pass
 
