@@ -325,19 +325,77 @@ def _build_step_executor() -> dict:
         except Exception:
             return []
 
+    # Mapping langage → extension par défaut
+    _LANG_EXT: dict[str, str] = {
+        "javascript": "js", "js": "js", "typescript": "ts", "ts": "ts",
+        "html": "html", "css": "css", "python": "py", "py": "py",
+        "json": "json", "yaml": "yaml", "yml": "yml", "sh": "sh",
+        "bash": "sh", "markdown": "md", "md": "md", "text": "txt",
+        "sql": "sql", "rust": "rs", "go": "go", "java": "java",
+        "c": "c", "cpp": "cpp", "toml": "toml",
+    }
+
+    def _extract_code_files(response: str) -> list[tuple[str, str]]:
+        """
+        Parse les blocs de code fencés dans une réponse LLM.
+
+        Formats reconnus :
+          ```filename.js          ← nom de fichier direct (priorité)
+          (contenu)
+          ```
+
+          ```javascript           ← langage seul → nom inféré (code.js, code_1.js…)
+          (contenu)
+          ```
+
+        Retourne une liste de (chemin_relatif, contenu).
+        """
+        files: list[tuple[str, str]] = []
+        unnamed: dict[str, int] = {}
+        pattern = re.compile(r"```([^\n`]+)\n(.*?)```", re.DOTALL)
+
+        for m in pattern.finditer(response):
+            header  = m.group(1).strip()
+            content = m.group(2).strip()
+            if not content:
+                continue
+
+            # Heuristique nom de fichier : contient un "." après un caractère word
+            # ex: "app.js", "src/index.html" → oui  /  "javascript", "python" → non
+            if re.search(r"\w\.\w", header):
+                fname = re.sub(r"[^\w\-./]", "_", header.lstrip("/"))
+                files.append((fname, content))
+            else:
+                lang   = header.lower().split()[0] if header else "txt"
+                ext    = _LANG_EXT.get(lang, "txt")
+                idx    = unnamed.get(ext, 0)
+                unnamed[ext] = idx + 1
+                suffix = f"_{idx}" if idx else ""
+                files.append((f"code{suffix}.{ext}", content))
+
+        return files
+
     def _write_to_project_src(inputs: dict, step_label: str, content: str) -> None:
         """
-        Écrit le contenu généré dans projects/<slug>/src/<fichier>.md.
-        Git-commite automatiquement via sandbox_tools.write_file.
+        Écrit le contenu dans projects/<slug>/src/.
+        - Si des blocs de code nommés sont détectés → écrit chaque fichier avec sa vraie extension
+        - Sinon → fallback Markdown (comportement legacy)
         """
         slug = inputs.get("slug")
         if not slug or not content:
             return
         try:
             from Mnemo.tools.sandbox_tools import write_file as _wf
-            filename = re.sub(r"[^\w\-]", "_", step_label[:40]).strip("_").lower() + ".md"
-            _wf(slug, f"src/{filename}", content,
-                commit_msg=f"agent: {step_label[:50]}")
+            code_files = _extract_code_files(content)
+            if code_files:
+                for rel_path, body in code_files:
+                    # Préfixer src/ si pas déjà dans un sous-dossier absolu
+                    dest = rel_path if rel_path.startswith("src/") else f"src/{rel_path}"
+                    _wf(slug, dest, body, commit_msg=f"agent: {step_label[:50]}")
+            else:
+                # Fallback : Markdown
+                filename = re.sub(r"[^\w\-]", "_", step_label[:40]).strip("_").lower() + ".md"
+                _wf(slug, f"src/{filename}", content, commit_msg=f"agent: {step_label[:50]}")
         except Exception:
             pass
 
@@ -496,27 +554,39 @@ def _build_step_executor() -> dict:
 
     def _run_shell(step: str, session_id: str, inputs: dict) -> str:
         """
-        crew : shell dans un plan = produire du contenu et l'écrire dans src/.
-        Consulte le KG pour l'action appropriée, génère avec ConversationCrew,
-        puis écrit dans projects/<slug>/src/ via sandbox.
+        crew : shell dans un plan = produire et écrire des fichiers réels dans src/.
+
+        Le LLM est invité à répondre avec des blocs de code fencés nommés :
+          ```app.js
+          // code here
+          ```
+        Chaque bloc est extrait et écrit dans src/ avec la bonne extension.
+        Fallback Markdown si aucun bloc nommé n'est trouvé.
         """
         from Mnemo.crew import ConversationCrew
         clean = _RE_CREW_TARGET.sub("", step).strip(" —")
+        goal  = inputs.get("goal", "")
 
-        # Consulter KG — action par défaut : write_markdown_file
-        actions      = _kg_actions(inputs, step)
-        action_label = actions[0]["action_label"] if actions else "write_markdown_file"
-
-        msg    = f"Rédige le contenu complet et structuré en Markdown pour : {clean}"
+        msg = (
+            f"Tâche : {clean}\n"
+            f"Contexte du projet : {goal}\n\n"
+            "Produis le ou les fichiers nécessaires pour réaliser cette tâche. "
+            "Pour chaque fichier, utilise EXACTEMENT ce format (le nom du fichier sur la première ligne) :\n\n"
+            "```nom_du_fichier.ext\n"
+            "// contenu complet ici\n"
+            "```\n\n"
+            "Règles :\n"
+            "- Écris du code réel et fonctionnel, pas de commentaires placeholder\n"
+            "- Utilise l'extension correcte : .js, .html, .css, .py, .ts, etc.\n"
+            "- Tu peux produire plusieurs fichiers si nécessaire\n"
+            "- Si c'est de la documentation/analyse, utilise .md"
+        )
         result = ConversationCrew().crew().kickoff(
             inputs=_conversation_inputs(msg, session_id, inputs)
         )
         response = result.raw or ""
         _save_output(inputs, step, response)
-
-        if action_label == "write_markdown_file":
-            _write_to_project_src(inputs, clean, response)
-
+        _write_to_project_src(inputs, clean, response)
         return response
 
     def _run_note(step: str, session_id: str, inputs: dict) -> str:
