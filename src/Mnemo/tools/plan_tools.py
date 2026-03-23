@@ -452,9 +452,28 @@ def _build_step_executor() -> dict:
 
     def _conversation_inputs(step: str, session_id: str, inputs: dict) -> dict:
         """Inputs minimaux requis par conversation_tasks.yaml, avec contexte pipeline."""
-        prev      = _load_previous_outputs(inputs)
-        base_mem  = inputs.get("memory_context", "")
-        memory_ctx = "\n\n".join(filter(None, [base_mem, prev]))
+        prev     = _load_previous_outputs(inputs)
+        base_mem = inputs.get("memory_context", "")
+
+        # E.1 — Index du projet (carte des fichiers existants)
+        project_ctx = ""
+        slug = inputs.get("slug")
+        if slug:
+            try:
+                from Mnemo.tools.project_index import format_project_context
+                project_ctx = format_project_context(slug)
+            except Exception:
+                pass
+
+        # E.2 — Passages issus des documents ingérés (RAG)
+        doc_ctx = ""
+        try:
+            from Mnemo.tools.doc_context import search_ingested_docs, format_doc_context
+            doc_ctx = format_doc_context(search_ingested_docs(step))
+        except Exception:
+            pass
+
+        memory_ctx = "\n\n".join(filter(None, [base_mem, prev, project_ctx, doc_ctx]))
         return {
             **inputs,
             "user_message":      step,

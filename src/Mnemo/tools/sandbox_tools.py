@@ -254,6 +254,14 @@ def write_file(slug: str, relative_path: str, content: str,
     target.write_text(content, encoding="utf-8")
     msg = commit_msg or f"agent: update {relative_path}"
     committed = _git_commit(root, msg, [relative_path])
+
+    # E.1 — Mise à jour de l'index projet après chaque écriture
+    try:
+        from Mnemo.tools.project_index import update_index
+        update_index(slug, relative_path)
+    except Exception:
+        pass
+
     return {"path": relative_path, "committed": committed,
             "conflict": False, "error": None}
 

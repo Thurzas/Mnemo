@@ -8,12 +8,25 @@ prêts à être injectés dans les prompts.
 from __future__ import annotations
 
 
-def search_ingested_docs(query: str, top_k: int = 4) -> list[dict]:
+# Seuil de pertinence minimal (cosine similarity score_vector).
+# Valeur recommandée : 0.5 (utile) → 0.7 (très pertinent).
+# 0.8+ = passage quasi-identique à la query — souvent trop strict pour de la doc technique.
+MIN_RELEVANCE: float = 0.5
+
+
+def search_ingested_docs(
+    query: str,
+    top_k: int = 4,
+    min_relevance: float = MIN_RELEVANCE,
+) -> list[dict]:
     """
     Recherche dans les documents ingérés (doc_chunks) via RRF (FTS5 + cosine).
 
+    Filtre les résultats dont score_vector < min_relevance (cosine similarity [0,1]).
+    Les résultats sans score vectoriel (FTS seul) sont conservés.
+
     Retourne une liste de dicts :
-      {content: str, source: str, page: int|None, score: float}
+      {content: str, source: str, page: int|None, score: float, relevance: float}
 
     Retourne [] si aucun document ingéré, DB indisponible, ou query vide.
     """
@@ -32,15 +45,24 @@ def search_ingested_docs(query: str, top_k: int = 4) -> list[dict]:
             return []
 
         merged = reciprocal_rank_fusion(kw, vec, query=query)
-        return [
-            {
-                "content": r.get("content", ""),
-                "source":  r.get("source", "document"),
-                "page":    r.get("page"),
-                "score":   round(r.get("score_final", 0.0), 3),
-            }
-            for r in merged[:top_k]
-        ]
+
+        results = []
+        for r in merged:
+            # score_vector = cosine similarity [0,1] — présent si le chunk avait un embedding
+            relevance = r.get("score_vector")
+            if relevance is not None and relevance < min_relevance:
+                continue  # pas assez pertinent, on ignore
+            results.append({
+                "content":   r.get("content", ""),
+                "source":    r.get("source", "document"),
+                "page":      r.get("page"),
+                "score":     round(r.get("score_final", 0.0), 3),
+                "relevance": round(relevance, 2) if relevance is not None else None,
+            })
+            if len(results) >= top_k:
+                break
+
+        return results
     except Exception:
         return []
 
