@@ -176,10 +176,29 @@ def dispatch(
     # Conversation (défaut) — interface .crew().kickoff()
     from Mnemo.crew import ConversationCrew
     _emit(session_id, "Recherche en mémoire...")
+
+    # Fix 3 — injecter le contexte du projet actif si le scheduler travaille dessus
+    active_project_ctx = ""
+    try:
+        from Mnemo.tools.memory_tools import load_world_state
+        ws = load_world_state()
+        ap = ws.get("active_project")
+        if ap and ap.get("slug"):
+            step_label = ap.get("step", "")
+            step_info  = f" — étape en cours : *{step_label}*" if step_label and step_label != "terminé" else " — **terminé**"
+            active_project_ctx = (
+                f"## Projet actif\n"
+                f"Le scheduler travaille actuellement sur le projet **{ap['slug']}**.\n"
+                f"Objectif : {ap.get('goal', '')}{step_info}\n"
+                f"Tu peux répondre aux questions de l'utilisateur en tenant compte de ce contexte."
+            )
+    except Exception:
+        pass
+
     conv_result = ConversationCrew().crew().kickoff(inputs={
         **base_inputs,
         "session_id":     session_id,
-        "memory_context": "",
+        "memory_context": active_project_ctx,
     })
     return conv_result.raw
 

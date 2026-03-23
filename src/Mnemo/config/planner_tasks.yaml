@@ -11,29 +11,39 @@ planner_task:
     {memory_gap_summary}
 
     RÈGLES :
-    - Si recon_context est vide ou "(non disponible)", ajoute une première étape
-      "Explorer le code concerné" avec crew_target "reconnaissance".
+    - Si recon_context est vide, "(non disponible)", ou indique "aucun fichier trouvé",
+      ET que le goal est ambigu (stack inconnue, périmètre flou, dépendances implicites),
+      alors NE crée PAS de plan — retourne un objet needs_clarification à la place.
+    - Si recon_context est vide mais que le goal est suffisamment précis (ex: "créer un
+      fichier README", "écrire un script Python"), crée le plan normalement en ajoutant
+      une étape "Explorer le code concerné" avec crew_target "reconnaissance".
     - Si memory_gap_summary contient des lacunes bloquantes, ajoute une étape
       "Combler les lacunes mémoire" avec crew_target "curiosity" AVANT les étapes
       qui en dépendent.
     - Maximum 8 étapes. Chaque étape doit être actionnable et précise.
     - crew_target : crew qui exécutera l'étape.
-      Valeurs possibles : conversation, shell, note, scheduler, reconnaissance, curiosity
+      Valeurs possibles : conversation, shell, note, scheduler, reconnaissance, curiosity, planner
       Si tu n'es pas sûr, utilise "conversation".
 
-    Retourne UNIQUEMENT un objet JSON valide :
+    FORMAT si le goal est suffisamment clair — retourne UNIQUEMENT ce JSON :
     {{
       "title": "Titre court du plan (< 60 caractères)",
-      "steps": [
-        "Description concise de l'étape 1",
-        "Description concise de l'étape 2"
-      ],
-      "crew_targets": {{
-        "Description concise de l'étape 1": "conversation",
-        "Description concise de l'étape 2": "shell"
-      }},
-      "context_summary": "Ce que l'agent sait du goal au moment de la planification (1-3 phrases)"
+      "steps": ["étape 1", "étape 2"],
+      "crew_targets": {{"étape 1": "conversation", "étape 2": "shell"}},
+      "context_summary": "Ce que l'agent sait du goal (1-3 phrases)"
+    }}
+
+    FORMAT si incertitude trop élevée pour planifier — retourne UNIQUEMENT ce JSON :
+    {{
+      "needs_clarification": true,
+      "title": "Titre court du projet (< 60 caractères)",
+      "questions": [
+        "Question précise 1 (ex: stack technique visée ?)",
+        "Question précise 2 (ex: existe-t-il déjà du code ?)",
+        "Question précise 3 (optionnel)"
+      ]
     }}
   expected_output: >
-    Un objet JSON valide avec title, steps (liste ordonnée), crew_targets et context_summary.
+    Un objet JSON valide : soit {title, steps, crew_targets, context_summary},
+    soit {needs_clarification: true, title, questions} si le contexte est insuffisant.
   agent: planner_agent

@@ -925,7 +925,20 @@ class PlannerCrew:
             if start == -1 or end <= start:
                 raise ValueError("JSON introuvable dans la réponse du LLM")
 
-            plan_data     = _json.loads(raw[start:end])
+            plan_data = _json.loads(raw[start:end])
+
+            # Fix 2 — incertitude trop élevée : retourner des questions avant de planifier
+            if plan_data.get("needs_clarification"):
+                title_hint = plan_data.get("title", goal[:60])
+                questions  = plan_data.get("questions", [])
+                if questions:
+                    q_lines = "\n".join(f"- {q}" for q in questions)
+                    return (
+                        f"Avant de créer le plan **{title_hint}**, j'ai besoin de quelques précisions :\n\n"
+                        f"{q_lines}\n\n"
+                        "Réponds à ces questions et je prépare le plan complet."
+                    )
+
             title         = plan_data.get("title", goal[:60])
             steps         = plan_data.get("steps", [])
             crew_targets  = plan_data.get("crew_targets", {})
@@ -948,8 +961,10 @@ class PlannerCrew:
                 pass  # projet déjà existant → on écrase juste le plan
             project_dir = _project_path(project_slug)
 
+            # Fix 1 — utiliser le titre reformulé par le LLM comme goal (pas le message brut)
+            plan_goal = title if title else goal
             plan_path = PlanStore.create(
-                goal         = goal,
+                goal         = plan_goal,
                 steps        = steps,
                 context      = ctx_summary,
                 crew_targets = crew_targets,
@@ -983,7 +998,7 @@ class PlannerCrew:
 
             plan_id = project_slug  # identifiant stable du plan/projet
 
-            lines = [f"**Projet** : `{project_slug}`", f"**Goal** : {goal}", ""]
+            lines = [f"**Projet** : `{project_slug}`", f"**Goal** : {plan_goal}", ""]
             for i, step in enumerate(steps, 1):
                 crew_t = crew_targets.get(step, "")
                 suffix = f" _(crew : {crew_t})_" if crew_t else ""

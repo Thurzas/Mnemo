@@ -621,6 +621,23 @@ def _advance_project(
     )
     log.info(f"[autonomy] {slug!r} ({username}) — {summary}")
 
+    # Fix 3 — marquer le projet actif dans world_state pour que ConversationCrew
+    # ait conscience du travail en cours si l'utilisateur revient dans le chat.
+    try:
+        next_s = PlanStore.get_next_step(plan_path)
+        active: dict = {
+            "slug": slug,
+            "goal": manifest.get("goal", slug),
+            "step": next_s or "terminé",
+        }
+        ws_now: dict = {}
+        if user_ws_path.exists():
+            ws_now = json.loads(user_ws_path.read_text(encoding="utf-8"))
+        ws_now["active_project"] = active
+        user_ws_path.write_text(json.dumps(ws_now, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
 
 def _goap_autonomy_tick() -> None:
     """
