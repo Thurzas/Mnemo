@@ -21,9 +21,21 @@ planner_task:
       "Combler les lacunes mémoire" avec crew_target "curiosity" AVANT les étapes
       qui en dépendent.
     - Maximum 8 étapes. Chaque étape doit être actionnable et précise.
-    - crew_target : crew qui exécutera l'étape.
+    - crew_target : crew qui exécutera l'étape. Choisis selon les règles STRICTES ci-dessous.
       Valeurs possibles : conversation, shell, note, scheduler, reconnaissance, curiosity, planner
-      Si tu n'es pas sûr, utilise "conversation".
+
+      RÈGLES DE SÉLECTION crew_target (applique ces règles dans l'ordre) :
+      → "reconnaissance" si l'étape contient : rechercher, explorer, trouver, lister, scanner,
+        inventorier, examiner les fichiers, analyser l'existant
+      → "shell" si l'étape contient : créer, écrire, implémenter, développer, générer, coder,
+        produire, construire, installer, configurer un fichier/script/composant
+      → "shell" si l'étape contient : tester, vérifier, valider, lancer, exécuter, compiler
+      → "note" si l'étape contient : analyser, documenter, résumer, évaluer, rédiger une analyse,
+        rédiger un rapport, documenter le code (mais PAS créer du code)
+      → "conversation" si l'étape contient : définir les specs, planifier, organiser, décider,
+        discuter, proposer des options
+      → "planner" si l'étape est une grande tâche qui nécessite elle-même plusieurs sous-étapes
+      → "conversation" pour tout le reste (cas incertains)
 
     FORMAT si le goal est suffisamment clair — retourne UNIQUEMENT ce JSON :
     {{

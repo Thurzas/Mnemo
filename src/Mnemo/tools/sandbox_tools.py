@@ -324,11 +324,17 @@ def run_command(slug: str, command: str) -> dict:
         return {"stdout": "", "stderr": "", "returncode": 1, "error": str(e)}
 
 
+_LIST_FILES_IGNORE = {
+    ".git", "node_modules", "__pycache__", ".venv", ".mypy_cache", ".pytest_cache",
+    "dist", "build", ".next", ".nuxt",
+}
+
 def list_files(slug: str, subdir: str = "") -> list[str]:
     """
     Liste les fichiers et répertoires dans le sandbox (chemins relatifs à la racine projet).
-    Exclut .git/. Les répertoires sont suffixés par '/' pour que le frontend puisse les distinguer.
-    Exemple : ["memory.md", "plan.md", "src/", "src/chapter_01.md", "logs/", "outputs/"]
+    Exclut .git/, node_modules/ et autres dossiers de build/dépendances.
+    Les répertoires sont suffixés par '/' pour que le frontend puisse les distinguer.
+    Exemple : ["memory.md", "plan.md", "src/", "src/index.html", "logs/"]
     """
     root = _project_path(slug)
     if subdir:
@@ -340,10 +346,10 @@ def list_files(slug: str, subdir: str = "") -> list[str]:
 
     result = []
     for p in sorted(base.rglob("*")):
-        if ".git" in p.parts:
+        # Exclure les dossiers ignorés et tout ce qu'ils contiennent
+        if any(part in _LIST_FILES_IGNORE for part in p.parts):
             continue
-        # Skip .gitkeep files — internal implementation detail
-        if p.name == ".gitkeep":
+        if p.name in (".gitkeep", "project_index.json"):
             continue
         try:
             rel = p.relative_to(root).as_posix()  # toujours forward slashes

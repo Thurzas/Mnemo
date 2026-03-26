@@ -569,7 +569,12 @@ def _advance_project(
     Les actions shell risquées passent toujours par pending_confirmations
     (vérification préalable avant de déléguer à PlanRunner).
     """
+    from Mnemo.context import set_data_dir
     from Mnemo.tools.plan_tools import PlanRunner, PlanStore
+
+    # Positionne le data_dir sur le répertoire utilisateur pour que get_data_dir()
+    # retourne le bon chemin dans tous les tools (sandbox, KG, memory, etc.)
+    set_data_dir(DATA_PATH / "users" / username)
 
     slug      = manifest["slug"]
     plan_path = project_dir / "plan.md"
