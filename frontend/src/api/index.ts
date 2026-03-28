@@ -185,6 +185,24 @@ export interface RvcModel {
   index: string | null
 }
 
+export interface AssistantConfig {
+  name: string
+  persona_short: string
+  persona_full: string
+  language_style: string
+  pronouns: string
+  created_at?: string
+  default_name?: string
+}
+
+export interface AssistantUpdate {
+  name?: string
+  persona_short?: string
+  persona_full?: string
+  language_style?: string
+  pronouns?: string
+}
+
 export interface VoiceSettings {
   rvc_enabled: boolean
   kokoro_voice_fr: string
@@ -474,6 +492,15 @@ export const api = {
     request<{ ok: boolean; auto_approve_confirmations: boolean }>('/api/settings', {
       method: 'POST',
       body: JSON.stringify(settings),
+    }),
+
+  getAssistant: () =>
+    request<AssistantConfig>('/api/assistant'),
+
+  updateAssistant: (body: AssistantUpdate) =>
+    request<AssistantConfig>('/api/assistant', {
+      method: 'PUT',
+      body: JSON.stringify(body),
     }),
 
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {

@@ -17,6 +17,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'knowledge', label: 'Connaissances' },
   { id: 'voice',     label: 'Voix' },
   { id: 'projects',  label: 'Projets' },
+  { id: 'settings',  label: 'Paramètres' },
 ]
 
 const STATUS_LABEL = { ok: 'connecté', error: 'hors ligne', connecting: 'connexion…' }

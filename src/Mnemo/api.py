@@ -1609,6 +1609,31 @@ def settings_update(body: SettingsUpdate, _: Auth):
     return {"ok": True, "auto_approve_confirmations": body.auto_approve_confirmations}
 
 
+# ── Assistant identity (Phase A) ──────────────────────────────────
+
+class AssistantUpdate(BaseModel):
+    name: str | None = None
+    persona_short: str | None = None
+    persona_full: str | None = None
+    language_style: str | None = None
+    pronouns: str | None = None
+
+
+@app.get("/api/assistant")
+def assistant_get(username: Auth):
+    from Mnemo.tools.assistant_tools import get_assistant_config
+    return get_assistant_config(username)
+
+
+@app.put("/api/assistant")
+def assistant_update(body: AssistantUpdate, username: Auth):
+    from Mnemo.tools.assistant_tools import set_assistant_config
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Aucun champ fourni")
+    return set_assistant_config(username, **updates)
+
+
 # ── Projets sandbox (Phase 7) ──────────────────────────────────────
 
 
