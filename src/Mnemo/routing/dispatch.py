@@ -114,6 +114,21 @@ def dispatch(
     eval_raw        = json.dumps(metadata, ensure_ascii=False)
     calendar_context = _prefetch_calendar(metadata)
 
+    # Identité de l'assistant (assistant.json par utilisateur)
+    assistant_name    = "Mnemo"
+    assistant_persona = ""
+    try:
+        from Mnemo.context import get_data_dir as _gdd
+        from Mnemo.tools.assistant_tools import get_assistant_config, get_assistant_context
+        _data_dir = _gdd()
+        # username = dernier segment de data/users/<username>
+        _username = _data_dir.name
+        _cfg = get_assistant_config(_username)
+        assistant_name    = _cfg.get("name", "Mnemo")
+        assistant_persona = get_assistant_context(_username)
+    except Exception:
+        pass
+
     base_inputs = {
         "user_message":      user_message,
         "evaluation_result": eval_raw,
@@ -121,6 +136,8 @@ def dispatch(
         "web_context":       web_context,
         "calendar_context":  calendar_context,
         "_web_mode":         metadata.get("_web_mode", False),
+        "assistant_name":    assistant_name,
+        "assistant_persona": assistant_persona,
     }
 
     try:

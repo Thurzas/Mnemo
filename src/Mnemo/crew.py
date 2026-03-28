@@ -9,6 +9,7 @@ from Mnemo.tools.memory_tools import (
     SyncMemoryDbTool,
     ListDocumentsTool,
 )
+from Mnemo.tools.dreamer_tools import ApplyDreamPatchesTool
 from Mnemo.tools.calendar_tools import GetCalendarTool
 from Mnemo.tools.web_tools import WebSearchTool
 from Mnemo.tools.sandbox_tools import (
@@ -1211,3 +1212,75 @@ class SandboxCrew:
             "user_message":    user_msg,
         })
         return result.raw.strip()
+
+# ══════════════════════════════════════════════════════════════
+# DreamerCrew — consolidation mémoire long terme (sommeil profond)
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class DreamerCrew:
+    """
+    Consolidation périodique de memory.md.
+    Déclenchée par le scheduler sur détection d inactivité (DREAMER_IDLE_THRESHOLD).
+
+    Inputs attendus (produits par prepare_dream_inputs()) :
+      username, memory_content, dedup_report, sessions_summary
+    """
+    agents_config = "config/dreamer_agents.yaml"
+    tasks_config  = "config/dreamer_tasks.yaml"
+
+    def __init__(self, username: str = "") -> None:
+        super().__init__()
+        self._username = username
+
+    @agent
+    def memory_analyst(self) -> Agent:
+        return Agent(
+            config=self.agents_config["memory_analyst"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=3,
+            llm=_llm(0.2),
+        )
+
+    @agent
+    def memory_patcher(self) -> Agent:
+        return Agent(
+            config=self.agents_config["memory_patcher"],
+            verbose=False,
+            allow_delegation=False,
+            tools=[ApplyDreamPatchesTool(username=self._username)],
+            max_iter=2,
+            llm=_llm(0.0),
+        )
+
+    @task
+    def analyze_task(self) -> Task:
+        return Task(config=self.tasks_config["analyze_task"])
+
+    @task
+    def apply_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["apply_task"],
+            context=[self.analyze_task()],
+        )
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, username: str = "") -> str:
+        """
+        Point d entree depuis scheduler._run_dreamer().
+        Prépare les inputs, lance le crew, retourne le rapport.
+        """
+        from Mnemo.tools.dreamer_tools import prepare_dream_inputs
+        uname  = username or self._username
+        inputs = prepare_dream_inputs(uname)
+        result = self.crew().kickoff(inputs=inputs)
+        return result.raw or "Rêve terminé."

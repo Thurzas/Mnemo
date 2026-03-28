@@ -754,13 +754,17 @@ def _set_dreamer_state(username: str, running: bool) -> None:
 def _run_dreamer(username: str) -> None:
     """
     Lance DreamerCrew pour un utilisateur dans un thread séparé.
-    Stub pour D0 — l'implémentation LLM viendra avec D1-D4.
+    Configure le contexte utilisateur (set_data_dir) avant le lancement.
     """
     log.info(f"[dreamer] 💤 Début consolidation mémoire — {username}")
     _set_dreamer_state(username, running=True)
     try:
-        # TODO D3 — remplacer par : DreamerCrew().run(username)
-        log.info(f"[dreamer] ✅ Consolidation terminée (stub) — {username}")
+        from Mnemo.context import set_data_dir
+        set_data_dir(DATA_PATH / "users" / username)
+
+        from Mnemo.crew import DreamerCrew
+        report = DreamerCrew(username=username).run(username=username)
+        log.info(f"[dreamer] ✅ {username} — {report[:200]}")
     except Exception as e:
         log.error(f"[dreamer] Erreur pour {username}: {e}", exc_info=True)
     finally:
