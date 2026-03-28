@@ -6,6 +6,7 @@ Il sert à la fois de WorldState persistant et de trace humainement lisible.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import re
 from datetime import datetime, timezone
@@ -374,17 +375,175 @@ def _build_step_executor() -> dict:
 
     # Mapping langage → extension par défaut
     _LANG_EXT: dict[str, str] = {
-        "javascript": "js", "js": "js", "typescript": "ts", "ts": "ts",
-        "html": "html", "css": "css", "python": "py", "py": "py",
-        "json": "json", "yaml": "yaml", "yml": "yml", "sh": "sh",
-        "bash": "sh", "markdown": "md", "md": "md", "text": "txt",
-        "sql": "sql", "rust": "rs", "go": "go", "java": "java",
-        "c": "c", "cpp": "cpp", "toml": "toml",
+        # JS / TS et variantes React, Vue, Svelte
+        "javascript": "js", "js": "js",
+        "typescript": "ts", "ts": "ts",
+        "jsx": "jsx", "react": "jsx",
+        "tsx": "tsx",
+        "vue": "vue",
+        "svelte": "svelte",
+        # Web
+        "html": "html", "css": "css", "scss": "scss", "sass": "sass",
+        "less": "less",
+        # Python
+        "python": "py", "py": "py",
+        # Données / config
+        "json": "json", "yaml": "yaml", "yml": "yml", "toml": "toml",
+        "xml": "xml", "env": "env",
+        # Shell
+        "sh": "sh", "bash": "sh", "zsh": "sh", "shell": "sh",
+        # Systèmes
+        "rust": "rs", "go": "go", "java": "java",
+        "c": "c", "cpp": "cpp", "c++": "cpp",
+        "kotlin": "kt", "swift": "swift", "dart": "dart",
+        # Texte
+        "markdown": "md", "md": "md", "text": "txt", "txt": "txt",
+        "sql": "sql",
     }
+
+    # ── Détection de stack ────────────────────────────────────────────
+
+    @dataclasses.dataclass
+    class _StackInfo:
+        """Info sur la stack technique d'un projet."""
+        frameworks: list[str]         # ["React", "TypeScript", "Vite"]
+        lang_overrides: dict[str, str]  # {"js": "jsx", "ts": "tsx"} si React+TS
+        prompt_hint: str              # texte injecté dans le prompt
+
+    def _detect_stack(slug: str, goal: str) -> "_StackInfo":
+        """
+        Détecte la stack technique du projet depuis :
+        1. package.json (dépendances npm)
+        2. requirements.txt / pyproject.toml (Python)
+        3. Extensions des fichiers src/ existants
+        4. Mots-clés dans le goal
+
+        Retourne un _StackInfo avec les infos pour adapter le prompt et les extensions.
+        """
+        frameworks: list[str] = []
+        lang_overrides: dict[str, str] = {}
+
+        # ── 1. package.json ──────────────────────────────────────────
+        if slug:
+            try:
+                from Mnemo.tools.sandbox_tools import read_file as _rf
+                pkg_data = _rf(slug, "package.json")
+                if not pkg_data.get("error"):
+                    import json as _j
+                    pkg = _j.loads(pkg_data["content"])
+                    deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+                    if "react" in deps or "react-dom" in deps:
+                        frameworks.append("React")
+                    if "next" in deps:
+                        frameworks.append("Next.js")
+                    if "vue" in deps or "@vue/core" in deps:
+                        frameworks.append("Vue 3")
+                    if "svelte" in deps or "@sveltejs/kit" in deps:
+                        frameworks.append("Svelte")
+                    if "typescript" in deps or "@types/react" in deps:
+                        frameworks.append("TypeScript")
+                    if "vite" in deps:
+                        frameworks.append("Vite")
+                    if "tailwindcss" in deps:
+                        frameworks.append("Tailwind CSS")
+            except Exception:
+                pass
+
+        # ── 2. requirements.txt / pyproject.toml ─────────────────────
+        if slug and not frameworks:
+            try:
+                from Mnemo.tools.sandbox_tools import read_file as _rf
+                req = _rf(slug, "requirements.txt")
+                if not req.get("error"):
+                    content = req["content"].lower()
+                    if "fastapi" in content:
+                        frameworks.append("FastAPI")
+                    if "flask" in content:
+                        frameworks.append("Flask")
+                    if "django" in content:
+                        frameworks.append("Django")
+                    if "sqlalchemy" in content:
+                        frameworks.append("SQLAlchemy")
+                    if frameworks or "python" not in "".join(frameworks):
+                        frameworks.append("Python")
+            except Exception:
+                pass
+
+        # ── 3. Fichiers existants → inférer stack depuis extensions ──
+        if slug and not frameworks:
+            try:
+                from Mnemo.tools.sandbox_tools import list_files as _lf
+                exts = {Path(f).suffix.lower() for f in _lf(slug) if "." in f}
+                if ".jsx" in exts or ".tsx" in exts:
+                    frameworks.append("React")
+                if ".tsx" in exts:
+                    frameworks.append("TypeScript")
+                if ".vue" in exts:
+                    frameworks.append("Vue 3")
+                if ".svelte" in exts:
+                    frameworks.append("Svelte")
+                if ".py" in exts:
+                    frameworks.append("Python")
+            except Exception:
+                pass
+
+        # ── 4. Mots-clés dans le goal ─────────────────────────────────
+        goal_low = goal.lower()
+        kw_map = [
+            (["react", "jsx", "tsx", "create-react-app", "vite react"], "React"),
+            (["next.js", "nextjs", "next js"],                           "Next.js"),
+            (["vue", "nuxt"],                                            "Vue 3"),
+            (["svelte", "sveltekit"],                                    "Svelte"),
+            (["typescript", " ts ", "typesafe"],                         "TypeScript"),
+            (["tailwind"],                                               "Tailwind CSS"),
+            (["fastapi", "fast api"],                                    "FastAPI"),
+            (["flask"],                                                   "Flask"),
+            (["django"],                                                  "Django"),
+            (["python"],                                                  "Python"),
+        ]
+        for keywords, fw in kw_map:
+            if fw not in frameworks and any(kw in goal_low for kw in keywords):
+                frameworks.append(fw)
+
+        # ── Déduire les overrides d'extension ─────────────────────────
+        is_react = "React" in frameworks or "Next.js" in frameworks
+        is_ts    = "TypeScript" in frameworks
+        if is_react:
+            # Composants React → .jsx ou .tsx ; modules utilitaires → .js ou .ts
+            lang_overrides["js"]  = "tsx" if is_ts else "jsx"
+            lang_overrides["ts"]  = "tsx"
+            lang_overrides["jsx"] = "tsx" if is_ts else "jsx"
+
+        # ── Construire le hint texte ───────────────────────────────────
+        if frameworks:
+            fw_str = ", ".join(frameworks)
+            ext_examples = []
+            if is_react and is_ts:
+                ext_examples = [".tsx pour les composants", ".ts pour les utilitaires", ".css / .module.css pour les styles"]
+            elif is_react:
+                ext_examples = [".jsx pour les composants React", ".js pour les utilitaires", ".css pour les styles"]
+            elif "Vue 3" in frameworks:
+                ext_examples = [".vue pour les composants", ".ts/.js pour les utilitaires"]
+            elif "Python" in frameworks:
+                ext_examples = [".py pour le code", ".yaml/.toml pour la config"]
+
+            hint_parts = [f"Stack détectée : **{fw_str}**"]
+            if ext_examples:
+                hint_parts.append("Extensions à utiliser : " + ", ".join(ext_examples))
+            prompt_hint = "\n".join(hint_parts)
+        else:
+            prompt_hint = ""
+
+        return _StackInfo(
+            frameworks=frameworks,
+            lang_overrides=lang_overrides,
+            prompt_hint=prompt_hint,
+        )
 
     def _extract_code_files(
         response: str,
         existing_files: list[str] | None = None,
+        lang_overrides: dict[str, str] | None = None,
     ) -> list[tuple[str, str]]:
         """
         Parse les blocs de code fencés dans une réponse LLM.
@@ -393,13 +552,17 @@ def _build_step_executor() -> dict:
           ```filename.js          ← nom de fichier direct (priorité)
           ```javascript           ← langage seul → fallback sur existing_files ou nom générique
 
-        existing_files : liste des chemins relatifs déjà présents dans src/ (ex: ["src/App.js"]).
-        Quand le LLM ne nomme pas son fichier mais qu'un seul fichier de même extension existe,
-        on réutilise ce nom au lieu de créer code.js.
+        existing_files  : chemins relatifs présents dans src/ (ex: ["src/App.jsx"]).
+                          Quand le LLM ne nomme pas son fichier, on réutilise un existant
+                          de même extension plutôt que de créer code.js.
+        lang_overrides  : surcharge d'extension par stack (ex: {"js": "jsx"} pour React).
+                          Permet que ```javascript → .jsx en contexte React.
 
         Retourne une liste de (chemin_relatif, contenu).
         """
         files: list[tuple[str, str]] = []
+        overrides = lang_overrides or {}
+
         # Index des existants par extension pour le fallback
         existing_by_ext: dict[str, list[str]] = {}
         for f in (existing_files or []):
@@ -423,15 +586,18 @@ def _build_step_executor() -> dict:
                 files.append((fname, content))
             else:
                 lang = header.lower().split()[0] if header else "txt"
-                ext  = "." + _LANG_EXT.get(lang, "txt")
-                # Fallback intelligent : si un seul fichier existant a cette extension, on le réutilise
+                # Résoudre l'extension : d'abord via overrides de stack, puis _LANG_EXT
+                base_ext = _LANG_EXT.get(lang, "txt")
+                ext_str  = overrides.get(base_ext, base_ext)  # ex: "js" → "jsx" si React
+                ext      = "." + ext_str
+
+                # Fallback intelligent : si un fichier existant a cette extension, on le réutilise
                 candidates = existing_by_ext.get(ext, [])
                 idx = unnamed_count.get(ext, 0)
                 unnamed_count[ext] = idx + 1
                 if candidates and idx < len(candidates):
                     files.append((candidates[idx], content))
                 else:
-                    # Vraiment pas de candidat — nom générique mais pas "code.js"
                     suffix = f"_{idx}" if idx else ""
                     files.append((f"src/app{suffix}{ext}", content))
 
@@ -708,8 +874,9 @@ def _build_step_executor() -> dict:
         goal  = inputs.get("goal", "")
         slug  = inputs.get("slug", "")
 
-        # Lire les fichiers src/ existants pour les injecter dans le prompt
+        # Lire les fichiers src/ existants + détecter la stack
         existing_files = _read_src_files(slug)
+        stack          = _detect_stack(slug, goal)
 
         def _build_existing_ctx() -> str:
             if not existing_files:
@@ -720,16 +887,19 @@ def _build_step_executor() -> dict:
             return "\n".join(lines)
 
         def _build_msg(error_feedback: str = "") -> str:
-            existing_ctx = _build_existing_ctx()
+            existing_ctx  = _build_existing_ctx()
             existing_names = [rel for rel, _ in existing_files]
 
             rules = [
                 "- Écris du code réel et fonctionnel, pas de commentaires placeholder",
-                "- Utilise l'extension correcte : .js, .jsx, .html, .css, .py, .ts, etc.",
                 "- Tu peux produire plusieurs fichiers si nécessaire",
                 "- Si c'est de la documentation/analyse, utilise .md",
                 "- INTERDIT : nommer un fichier 'code.js', 'code_1.js', 'untitled', 'example', etc.",
             ]
+            if stack.prompt_hint:
+                rules.append(f"- {stack.prompt_hint}")
+            else:
+                rules.append("- Utilise l'extension correcte : .js, .jsx, .html, .css, .py, .ts, etc.")
             if existing_names:
                 rules.append(
                     f"- PRIORITÉ : modifie les fichiers existants ({', '.join(existing_names)}) "
@@ -740,6 +910,8 @@ def _build_step_executor() -> dict:
                 f"Tâche : {clean}\n"
                 f"Objectif du projet : {goal}\n"
             )
+            if stack.prompt_hint:
+                base += f"\n{stack.prompt_hint}\n"
             if existing_ctx:
                 base += f"\n{existing_ctx}\n"
             base += (
@@ -759,7 +931,11 @@ def _build_step_executor() -> dict:
 
         def _write_and_track(response: str) -> None:
             nonlocal written
-            code_files = _extract_code_files(response, existing_files=existing_names)
+            code_files = _extract_code_files(
+                response,
+                existing_files=existing_names,
+                lang_overrides=stack.lang_overrides,
+            )
             if not code_files:
                 filename = re.sub(r"[^\w\-]", "_", clean[:40]).strip("_").lower() + ".md"
                 code_files = [(f"src/{filename}", response)]

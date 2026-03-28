@@ -50,6 +50,11 @@ MARKDOWN_PATH = DATA_PATH / "memory.md"
 BRIEFING_TIME = os.getenv("BRIEFING_TIME", "07:30")
 WEEKLY_TIME   = os.getenv("WEEKLY_TIME",   "08:00")
 
+# ── DreamerCrew — détection d'inactivité ──────────────────────────
+DREAMER_ENABLED        = os.getenv("DREAMER_ENABLED", "true").lower() == "true"
+DREAMER_IDLE_THRESHOLD = int(os.getenv("DREAMER_IDLE_THRESHOLD", "1800"))  # 30 min
+DREAMER_MIN_INTERVAL   = int(os.getenv("DREAMER_MIN_INTERVAL",   "86400")) # 24h
+
 _JOURS_FR = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]
 _MOIS_FR  = ["janvier","février","mars","avril","mai","juin",
              "juillet","août","septembre","octobre","novembre","décembre"]
@@ -644,6 +649,145 @@ def _advance_project(
         pass
 
 
+# ══════════════════════════════════════════════════════════════════
+# DreamerCrew — détection d'inactivité + déclenchement
+# ══════════════════════════════════════════════════════════════════
+
+def _last_session_ts(username: str) -> datetime | None:
+    """
+    Retourne le timestamp de fin de la session la plus récente.
+    Se base sur le mtime du fichier .done le plus récent dans sessions/.
+    Retourne None si aucune session terminée n'existe.
+    """
+    sessions_dir = DATA_PATH / "sessions"
+    if not sessions_dir.exists():
+        return None
+    done_files = sorted(sessions_dir.glob("*.done"), reverse=True)
+    if not done_files:
+        return None
+    return datetime.fromtimestamp(done_files[0].stat().st_mtime)
+
+
+def _has_active_session(username: str) -> bool:
+    """
+    Retourne True si une session est ouverte (json sans .done correspondant).
+    Ignore les orphelins de plus de 4h (crash probable).
+    """
+    sessions_dir = DATA_PATH / "sessions"
+    if not sessions_dir.exists():
+        return False
+    for json_file in sessions_dir.glob("session_*.json"):
+        if not json_file.with_suffix(".done").exists():
+            age = (datetime.now() - datetime.fromtimestamp(json_file.stat().st_mtime)).total_seconds()
+            if age < 14400:  # < 4h → session probablement active
+                return True
+    return False
+
+
+def _should_dream(username: str) -> bool:
+    """
+    Retourne True si toutes les conditions sont réunies pour lancer DreamerCrew :
+    1. DREAMER_ENABLED = true
+    2. Aucune session active (utilisateur absent)
+    3. Inactivité >= DREAMER_IDLE_THRESHOLD depuis la dernière session
+    4. Intervalle >= DREAMER_MIN_INTERVAL depuis le dernier rêve
+    5. Pas de rêve déjà en cours (dreamer_running dans world_state)
+    """
+    if not DREAMER_ENABLED:
+        return False
+
+    if _has_active_session(username):
+        return False
+
+    last_ts = _last_session_ts(username)
+    if last_ts is None:
+        return False
+    if (datetime.now() - last_ts).total_seconds() < DREAMER_IDLE_THRESHOLD:
+        return False
+
+    user_ws_path = DATA_PATH / "users" / username / "world_state.json"
+    ws: dict = {}
+    if user_ws_path.exists():
+        try:
+            ws = json.loads(user_ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    if ws.get("dreamer_running"):
+        return False
+
+    last_dream_str = ws.get("last_dream_ts")
+    if last_dream_str:
+        try:
+            since = (datetime.now() - datetime.fromisoformat(last_dream_str)).total_seconds()
+            if since < DREAMER_MIN_INTERVAL:
+                return False
+        except Exception:
+            pass
+
+    return True
+
+
+def _set_dreamer_state(username: str, running: bool) -> None:
+    """Met à jour dreamer_running (+ last_dream_ts si fin) dans world_state utilisateur."""
+    user_ws_path = DATA_PATH / "users" / username / "world_state.json"
+    ws: dict = {}
+    if user_ws_path.exists():
+        try:
+            ws = json.loads(user_ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    ws["dreamer_running"] = running
+    if not running:
+        ws["last_dream_ts"] = datetime.now().isoformat()
+    try:
+        user_ws_path.write_text(json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        log.warning(f"[dreamer] Impossible d'écrire world_state pour {username}: {e}")
+
+
+def _run_dreamer(username: str) -> None:
+    """
+    Lance DreamerCrew pour un utilisateur dans un thread séparé.
+    Stub pour D0 — l'implémentation LLM viendra avec D1-D4.
+    """
+    log.info(f"[dreamer] 💤 Début consolidation mémoire — {username}")
+    _set_dreamer_state(username, running=True)
+    try:
+        # TODO D3 — remplacer par : DreamerCrew().run(username)
+        log.info(f"[dreamer] ✅ Consolidation terminée (stub) — {username}")
+    except Exception as e:
+        log.error(f"[dreamer] Erreur pour {username}: {e}", exc_info=True)
+    finally:
+        _set_dreamer_state(username, running=False)
+
+
+def _dream_tick() -> None:
+    """
+    Tick du détecteur d'inactivité DreamerCrew.
+    Appelé à chaque tour de boucle scheduler.
+    Lance _run_dreamer() dans un thread daemon si les conditions sont réunies.
+    """
+    import threading
+
+    users_dir = DATA_PATH / "users"
+    if not users_dir.exists():
+        return
+
+    for user_dir in sorted(users_dir.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        username = user_dir.name
+        if _should_dream(username):
+            log.info(f"[dreamer] Inactivité ≥ {DREAMER_IDLE_THRESHOLD}s détectée → lancement")
+            threading.Thread(
+                target=_run_dreamer,
+                args=(username,),
+                daemon=True,
+                name=f"dreamer-{username}",
+            ).start()
+
+
 def _goap_autonomy_tick() -> None:
     """
     Tick de la boucle d'autonomie Phase 7.4.
@@ -786,6 +930,12 @@ def run_scheduler() -> None:
             _goap_autonomy_tick()
         except Exception as e:
             log.error(f"[autonomy] Erreur tick : {e}", exc_info=True)
+
+        # DreamerCrew — consolidation mémoire sur inactivité
+        try:
+            _dream_tick()
+        except Exception as e:
+            log.error(f"[dreamer] Erreur tick : {e}", exc_info=True)
 
         time.sleep(5)
 
