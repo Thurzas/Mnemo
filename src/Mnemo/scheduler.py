@@ -653,13 +653,18 @@ def _advance_project(
 # DreamerCrew — détection d'inactivité + déclenchement
 # ══════════════════════════════════════════════════════════════════
 
+def _user_sessions_dir(username: str) -> Path:
+    """Retourne le dossier sessions de l'utilisateur (par user, pas global)."""
+    return DATA_PATH / "users" / username / "sessions"
+
+
 def _last_session_ts(username: str) -> datetime | None:
     """
-    Retourne le timestamp de fin de la session la plus récente.
-    Se base sur le mtime du fichier .done le plus récent dans sessions/.
+    Retourne le timestamp de fin de la session la plus récente pour cet utilisateur.
+    Se base sur le mtime du fichier .done le plus récent dans users/<username>/sessions/.
     Retourne None si aucune session terminée n'existe.
     """
-    sessions_dir = DATA_PATH / "sessions"
+    sessions_dir = _user_sessions_dir(username)
     if not sessions_dir.exists():
         return None
     done_files = sorted(sessions_dir.glob("*.done"), reverse=True)
@@ -673,10 +678,10 @@ def _has_active_session(username: str) -> bool:
     Retourne True si une session est ouverte (json sans .done correspondant).
     Ignore les orphelins de plus de 4h (crash probable).
     """
-    sessions_dir = DATA_PATH / "sessions"
+    sessions_dir = _user_sessions_dir(username)
     if not sessions_dir.exists():
         return False
-    for json_file in sessions_dir.glob("session_*.json"):
+    for json_file in sessions_dir.glob("*.json"):
         if not json_file.with_suffix(".done").exists():
             age = (datetime.now() - datetime.fromtimestamp(json_file.stat().st_mtime)).total_seconds()
             if age < 14400:  # < 4h → session probablement active
