@@ -764,7 +764,7 @@ def _run_dreamer(username: str) -> None:
         set_data_dir(DATA_PATH / "users" / username)
 
         from Mnemo.crew import DreamerCrew
-        report = DreamerCrew(username=username).run(username=username)
+        report = DreamerCrew().run(username=username)
         log.info(f"[dreamer] ✅ {username} — {report[:200]}")
 
         # D4 — élagage après consolidation LLM

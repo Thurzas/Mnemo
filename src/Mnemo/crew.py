@@ -1229,10 +1229,6 @@ class DreamerCrew:
     agents_config = "config/dreamer_agents.yaml"
     tasks_config  = "config/dreamer_tasks.yaml"
 
-    def __init__(self, username: str = "") -> None:
-        super().__init__()
-        self._username = username
-
     @agent
     def memory_analyst(self) -> Agent:
         return Agent(
@@ -1245,11 +1241,15 @@ class DreamerCrew:
 
     @agent
     def memory_patcher(self) -> Agent:
+        # username dérivé du contexte utilisateur positionné par set_data_dir()
+        # avant le kickoff (dans _run_dreamer ou run())
+        from Mnemo.context import get_data_dir
+        username = get_data_dir().name
         return Agent(
             config=self.agents_config["memory_patcher"],
             verbose=False,
             allow_delegation=False,
-            tools=[ApplyDreamPatchesTool(username=self._username)],
+            tools=[ApplyDreamPatchesTool(username=username)],
             max_iter=2,
             llm=_llm(0.0),
         )
@@ -1278,9 +1278,12 @@ class DreamerCrew:
         """
         Point d entree depuis scheduler._run_dreamer().
         Prépare les inputs, lance le crew, retourne le rapport.
+        set_data_dir(user_dir) doit être appelé AVANT run() pour que
+        memory_patcher puisse dériver le username via get_data_dir().name.
         """
         from Mnemo.tools.dreamer_tools import prepare_dream_inputs
-        uname  = username or self._username
+        from Mnemo.context import get_data_dir
+        uname  = username or get_data_dir().name
         inputs = prepare_dream_inputs(uname)
         result = self.crew().kickoff(inputs=inputs)
         return result.raw or "Rêve terminé."
