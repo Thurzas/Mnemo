@@ -1634,6 +1634,48 @@ def assistant_update(body: AssistantUpdate, username: Auth):
     return set_assistant_config(username, **updates)
 
 
+# ── DreamerCrew (Phase D6) ────────────────────────────────────────
+
+@app.post("/api/dream")
+def dream_trigger(username: Auth):
+    """
+    Déclenche manuellement un cycle DreamerCrew pour l'utilisateur.
+    Si un rêve est déjà en cours, retourne already_running=True sans en lancer un second.
+    """
+    import threading
+    from Mnemo.tools.memory_tools import load_world_state
+    from Mnemo.scheduler import _run_dreamer, _set_dreamer_state
+
+    ws = load_world_state(username)
+    if ws.get("dreamer_running"):
+        return {"started": False, "already_running": True}
+
+    threading.Thread(
+        target=_run_dreamer,
+        args=(username,),
+        daemon=True,
+        name=f"dreamer-manual-{username}",
+    ).start()
+    return {"started": True, "already_running": False}
+
+
+@app.get("/api/dream/log")
+def dream_log(username: Auth):
+    """Retourne le contenu de dream_log.md (journal des consolidations)."""
+    from Mnemo.context import get_data_dir
+    path = get_data_dir() / "dream_log.md"
+    if not path.exists():
+        return {"content": "", "last_dream_ts": None}
+
+    from Mnemo.tools.memory_tools import load_world_state
+    ws = load_world_state(username)
+    return {
+        "content":       path.read_text(encoding="utf-8"),
+        "last_dream_ts": ws.get("last_dream_ts"),
+        "dreamer_running": ws.get("dreamer_running", False),
+    }
+
+
 # ── Projets sandbox (Phase 7) ──────────────────────────────────────
 
 

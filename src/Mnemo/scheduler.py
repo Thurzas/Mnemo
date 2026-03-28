@@ -755,6 +755,7 @@ def _run_dreamer(username: str) -> None:
     """
     Lance DreamerCrew pour un utilisateur dans un thread séparé.
     Configure le contexte utilisateur (set_data_dir) avant le lancement.
+    Enchaîne avec prune_memory (D4) après la consolidation LLM.
     """
     log.info(f"[dreamer] 💤 Début consolidation mémoire — {username}")
     _set_dreamer_state(username, running=True)
@@ -765,6 +766,15 @@ def _run_dreamer(username: str) -> None:
         from Mnemo.crew import DreamerCrew
         report = DreamerCrew(username=username).run(username=username)
         log.info(f"[dreamer] ✅ {username} — {report[:200]}")
+
+        # D4 — élagage après consolidation LLM
+        try:
+            from Mnemo.tools.memory_archive import prune_memory
+            prune_report = prune_memory(username, data_path=DATA_PATH)
+            log.info(f"[dreamer] {prune_report[:200]}")
+        except Exception as e:
+            log.warning(f"[dreamer] Élagage échoué pour {username}: {e}")
+
     except Exception as e:
         log.error(f"[dreamer] Erreur pour {username}: {e}", exc_info=True)
     finally:

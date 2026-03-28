@@ -503,6 +503,12 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  getDreamLog: () =>
+    request<{ content: string; last_dream_ts: string | null; dreamer_running: boolean }>('/api/dream/log'),
+
+  triggerDream: () =>
+    request<{ started: boolean; already_running: boolean }>('/api/dream', { method: 'POST' }),
+
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
     const token = auth.getToken()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }

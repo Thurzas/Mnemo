@@ -115,3 +115,33 @@
 .saveBtn:not(:disabled):hover {
   opacity: 0.85;
 }
+
+/* ── DreamerCrew ──────────────────────────────────────────────── */
+
+.dreamerStatus {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.dreamerDot {
+  font-size: 1.1rem;
+  opacity: 0.5;
+  transition: opacity 0.3s, filter 0.3s;
+}
+
+.dreamerActive {
+  opacity: 1;
+  animation: dreamerPulse 2s ease-in-out infinite;
+}
+
+.dreamerLabel {
+  color: var(--text);
+}
+
+@keyframes dreamerPulse {
+  0%, 100% { filter: brightness(1); }
+  50%       { filter: brightness(1.6); }
+}

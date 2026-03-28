@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/api'
 import type { AssistantConfig, AssistantUpdate } from '@/api'
 import styles from './SettingsPage.module.css'
@@ -7,12 +7,95 @@ interface Props {
   active: boolean
 }
 
+function _timeAgo(isoTs: string): string {
+  const diff = (Date.now() - new Date(isoTs).getTime()) / 1000
+  if (diff < 60)      return 'à l\'instant'
+  if (diff < 3600)    return `il y a ${Math.floor(diff / 60)} min`
+  if (diff < 86400)   return `il y a ${Math.floor(diff / 3600)} h`
+  return `il y a ${Math.floor(diff / 86400)} j`
+}
+
+// ── Section DreamerCrew ───────────────────────────────────────────
+
+function DreamerSection() {
+  const [lastDream, setLastDream]   = useState<string | null>(null)
+  const [running, setRunning]       = useState(false)
+  const [triggering, setTriggering] = useState(false)
+  const [dreamError, setDreamError] = useState<string | null>(null)
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const { last_dream_ts, dreamer_running } = await api.getDreamLog()
+      setLastDream(last_dream_ts)
+      setRunning(dreamer_running)
+    } catch {
+      // silence — backend optionnel
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchStatus()
+    const id = setInterval(fetchStatus, 15_000)
+    return () => clearInterval(id)
+  }, [fetchStatus])
+
+  const handleTrigger = async () => {
+    setTriggering(true)
+    setDreamError(null)
+    try {
+      const { started, already_running } = await api.triggerDream()
+      if (already_running) {
+        setDreamError('Une consolidation est déjà en cours.')
+      } else if (started) {
+        setRunning(true)
+        setTimeout(fetchStatus, 3000)
+      }
+    } catch (e: unknown) {
+      setDreamError(e instanceof Error ? e.message : 'Erreur inconnue')
+    } finally {
+      setTriggering(false)
+    }
+  }
+
+  return (
+    <div className={styles.section}>
+      <h3 className={styles.sectionTitle}>Consolidation mémoire</h3>
+
+      <div className={styles.dreamerStatus}>
+        <span className={`${styles.dreamerDot} ${running ? styles.dreamerActive : ''}`}>💤</span>
+        <span className={styles.dreamerLabel}>
+          {running
+            ? 'Consolidation en cours…'
+            : lastDream
+              ? `Dernier rêve : ${_timeAgo(lastDream)}`
+              : 'Aucune consolidation enregistrée'
+          }
+        </span>
+      </div>
+
+      {dreamError && <p className={styles.error}>{dreamError}</p>}
+
+      <div className={styles.actions}>
+        <button
+          className={styles.saveBtn}
+          onClick={handleTrigger}
+          disabled={triggering || running}
+        >
+          {running ? 'En cours…' : 'Lancer maintenant'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Page principale ───────────────────────────────────────────────
+
 export function SettingsPage({ active }: Props) {
   const [config, setConfig] = useState<AssistantConfig | null>(null)
-  const [form, setForm] = useState<AssistantUpdate>({})
+  const [form, setForm]     = useState<AssistantUpdate>({})
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved]   = useState(false)
+  const [error, setError]   = useState<string | null>(null)
 
   useEffect(() => {
     if (!active) return
@@ -20,11 +103,11 @@ export function SettingsPage({ active }: Props) {
       .then(cfg => {
         setConfig(cfg)
         setForm({
-          name: cfg.name,
-          persona_short: cfg.persona_short,
-          persona_full: cfg.persona_full,
+          name:           cfg.name,
+          persona_short:  cfg.persona_short,
+          persona_full:   cfg.persona_full,
           language_style: cfg.language_style,
-          pronouns: cfg.pronouns,
+          pronouns:       cfg.pronouns,
         })
       })
       .catch(e => setError(e.message))
@@ -52,11 +135,11 @@ export function SettingsPage({ active }: Props) {
   }
 
   const isDirty = config && (
-    form.name !== config.name ||
-    form.persona_short !== config.persona_short ||
-    form.persona_full !== config.persona_full ||
+    form.name           !== config.name           ||
+    form.persona_short  !== config.persona_short  ||
+    form.persona_full   !== config.persona_full   ||
     form.language_style !== config.language_style ||
-    form.pronouns !== config.pronouns
+    form.pronouns       !== config.pronouns
   )
 
   if (!config) return (
@@ -140,6 +223,8 @@ export function SettingsPage({ active }: Props) {
           </button>
         </div>
       </div>
+
+      <DreamerSection />
     </div>
   )
 }
