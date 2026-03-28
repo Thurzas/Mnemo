@@ -440,6 +440,100 @@ class ApplyDreamPatchesTool(BaseTool):
 
 # ── Préparation des inputs pour le crew ─────────────────────────
 
+# ══════════════════════════════════════════════════════════════════
+# Compression de contexte : Option A (ciblage) + Option B (rotation)
+# ══════════════════════════════════════════════════════════════════
+
+def _section_line_ranges(memory_md: str) -> list[dict]:
+    """
+    Retourne [{header, start_line, end_line, raw}] pour chaque section ## .
+    Les numéros de lignes sont 1-indexés.
+    """
+    lines    = memory_md.splitlines()
+    sections: list[dict] = []
+    current: dict | None = None
+
+    for i, line in enumerate(lines, start=1):
+        if line.startswith("## "):
+            if current is not None:
+                current["end_line"] = i - 1
+                current["raw"] = "\n".join(lines[current["start_line"] - 1 : i - 1])
+                sections.append(current)
+            current = {"header": line[3:].strip(), "start_line": i, "end_line": len(lines), "raw": ""}
+
+    if current is not None:
+        current["end_line"] = len(lines)
+        current["raw"] = "\n".join(lines[current["start_line"] - 1 :])
+        sections.append(current)
+
+    return sections
+
+
+def _extract_hot_sections(memory_md: str, dedup_report: dict) -> tuple[str, str]:
+    """
+    Option A — retourne le contenu des sections contenant des doublons ou
+    des références mortes identifiés dans dedup_report.
+
+    Retourne :
+        (memory_content, scope_label)
+        memory_content : sections ciblées concaténées
+        scope_label    : description pour {memory_scope} dans le prompt
+    """
+    hot_lines: set[int] = set()
+    for dup in dedup_report.get("exact_duplicates", []):
+        hot_lines.update(dup.get("occurrences", []))
+    for dead in dedup_report.get("dead_references", []):
+        ln = dead.get("line_no")
+        if ln:
+            hot_lines.add(ln)
+
+    if not hot_lines:
+        return "", ""
+
+    ranges   = _section_line_ranges(memory_md)
+    hot_secs = [
+        s for s in ranges
+        if any(s["start_line"] <= ln <= s["end_line"] for ln in hot_lines)
+    ]
+
+    if not hot_secs:
+        return "", ""
+
+    content = "\n\n".join(s["raw"] for s in hot_secs)
+    n_dup   = dedup_report.get("duplicate_count", 0)
+    n_dead  = dedup_report.get("dead_ref_count", 0)
+    issues  = []
+    if n_dup:
+        issues.append(f"{n_dup} doublon(s)")
+    if n_dead:
+        issues.append(f"{n_dead} référence(s) morte(s)")
+    names = ", ".join(f'"{s["header"]}"' for s in hot_secs)
+    label = f"Analyse ciblée ({', '.join(issues)}) — sections : {names}"
+    return content, label
+
+
+def _get_rotation_section(
+    memory_md: str,
+    last_idx: int,
+) -> tuple[str, str, int]:
+    """
+    Option B — retourne la prochaine section à analyser en rotation.
+
+    Retourne :
+        (memory_content, scope_label, next_idx)
+        next_idx : valeur à sauvegarder dans world_state pour le prochain rêve
+    """
+    ranges = _section_line_ranges(memory_md)
+    if not ranges:
+        return memory_md, "Mémoire complète (pas de sections détectées)", 0
+
+    idx      = last_idx % len(ranges)
+    section  = ranges[idx]
+    next_idx = (idx + 1) % len(ranges)
+    label    = f'Rotation section {idx + 1}/{len(ranges)} : "{section["header"]}"'
+    return section["raw"], label, next_idx
+
+
 def prepare_dream_inputs(
     username: str,
     data_path: Path | None = None,
@@ -448,7 +542,14 @@ def prepare_dream_inputs(
 ) -> dict:
     """
     Prépare le dict d'inputs pour DreamerCrew.crew().kickoff().
-    Lit memory.md, construit le rapport dedup, scanne les sessions récentes.
+
+    Stratégie de compression du contexte :
+      A) Si dedup_report détecte des problèmes → envoyer uniquement les sections
+         contenant des doublons ou références mortes.
+      B) Sinon → rotation : envoyer la section suivante dans l'ordre
+         (last_dream_section_idx dans world_state.json).
+
+    Le champ memory_scope décrit au LLM ce qu'il est en train d'analyser.
     """
     if data_path is None:
         try:
@@ -459,25 +560,53 @@ def prepare_dream_inputs(
 
     user_dir    = data_path / "users" / username
     memory_path = user_dir / "memory.md"
+    ws_path     = user_dir / "world_state.json"
 
-    # memory.md (cappé)
-    memory_content = ""
+    # Lit memory.md en entier (le rapport dedup doit voir tout le fichier)
+    raw = ""
     if memory_path.exists():
         raw = memory_path.read_text(encoding="utf-8")
-        memory_content = raw if len(raw) <= max_memory_chars else raw[:max_memory_chars] + "\n…[tronqué]"
 
-    # Rapport doublons
-    dedup_report = json.dumps(build_dedup_report(memory_content), ensure_ascii=False, indent=2)
+    # Rapport dedup sur le fichier entier (Python pur)
+    dedup_dict   = build_dedup_report(raw)
+    dedup_report = json.dumps(dedup_dict, ensure_ascii=False, indent=2)
 
-    # Sessions depuis le dernier rêve
+    # World state
     ws: dict = {}
-    ws_path = user_dir / "world_state.json"
     if ws_path.exists():
         try:
             ws = json.loads(ws_path.read_text(encoding="utf-8"))
         except Exception:
             pass
 
+    # ── Sélection du contenu à analyser ──────────────────────────
+    memory_content = ""
+    memory_scope   = ""
+
+    if raw:
+        # Option A — sections chaudes
+        hot_content, hot_scope = _extract_hot_sections(raw, dedup_dict)
+        if hot_content:
+            memory_content = hot_content
+            memory_scope   = hot_scope
+        else:
+            # Option B — rotation
+            last_idx = int(ws.get("last_dream_section_idx", 0))
+            rot_content, rot_scope, next_idx = _get_rotation_section(raw, last_idx)
+            memory_content = rot_content
+            memory_scope   = rot_scope
+            # Avance le pointeur dans world_state
+            ws["last_dream_section_idx"] = next_idx
+            try:
+                ws_path.write_text(json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+        # Cappe si la section ciblée dépasse quand même le budget
+        if len(memory_content) > max_memory_chars:
+            memory_content = memory_content[:max_memory_chars] + "\n…[tronqué]"
+
+    # Sessions depuis le dernier rêve
     since_ts = None
     if ws.get("last_dream_ts"):
         try:
@@ -510,6 +639,7 @@ def prepare_dream_inputs(
         "assistant_name":    assistant_name,
         "assistant_persona": assistant_persona,
         "memory_content":    memory_content,
+        "memory_scope":      memory_scope,
         "dedup_report":      dedup_report,
         "sessions_summary":  sessions_text or "Aucune session récente.",
     }

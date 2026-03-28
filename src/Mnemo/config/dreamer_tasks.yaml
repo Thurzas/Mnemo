@@ -2,7 +2,10 @@ analyze_task:
   description: >
     Tu es {assistant_name}. Tu es en train de consolider ta propre mémoire long terme.
 
-    ## Contenu actuel de memory.md
+    ## Périmètre d'analyse
+    {memory_scope}
+
+    ## Contenu analysé (extrait de memory.md)
     {memory_content}
 
     ## Rapport automatique (doublons et références mortes)
