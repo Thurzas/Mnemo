@@ -6,6 +6,7 @@ Il sert à la fois de WorldState persistant et de trace humainement lisible.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import re
 from datetime import datetime, timezone
@@ -225,6 +226,34 @@ class PlanStore:
         PlanStore.append_log(plan, f"Étape échouée (skip) : {step} — {reason[:120]}")
 
     @staticmethod
+    def replace_step(plan: Path, old_step: str, new_steps: list[str]) -> bool:
+        """
+        Remplace une étape [ ] ou [!] par une liste de nouvelles étapes [ ].
+
+        Les nouvelles étapes s'insèrent à la position de l'ancienne avec le même indentage.
+        Chaque nouvelle étape est marquée avec ⟳ pour indiquer qu'elle est issue d'une
+        reformulation — ce marqueur empêche une re-reformulation en boucle.
+        Retourne True si l'étape a été trouvée et remplacée.
+        """
+        lines = plan.read_text(encoding="utf-8").splitlines(keepends=True)
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            is_todo   = _RE_STEP_TODO.match(stripped)
+            is_failed = re.match(r"^- \[!\]", stripped)
+            if (is_todo or is_failed) and old_step in line:
+                indent = len(line) - len(line.lstrip())
+                # Marque ⟳ : indique que l'étape vient d'une reformulation (pas re-reformulable)
+                replacements = [" " * indent + f"- [ ] {s} ⟳\n" for s in new_steps]
+                lines[i : i + 1] = replacements
+                plan.write_text("".join(lines), encoding="utf-8")
+                PlanStore.append_log(
+                    plan,
+                    f"Reformulation : {old_step!r} → {len(new_steps)} sous-étapes",
+                )
+                return True
+        return False
+
+    @staticmethod
     def add_blocker(plan: Path, blocker: str) -> None:
         """Ajoute un bloquant dans la section ## Bloquants."""
         lines = plan.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -280,6 +309,25 @@ class PlanStore:
 # ex: "Lire le fichier — crew : shell" → "shell"
 _RE_CREW_TARGET = re.compile(r"—\s*crew\s*:\s*(\w+)", re.IGNORECASE)
 
+# Pattern pour détecter les sous-étapes génériques (produites par une mauvaise reformulation)
+_RE_GENERIC_STEP = re.compile(
+    r"^-\s*\[\s*\]\s*(sous-?étape|étape|step|phase|tâche|task)\s*\d",
+    re.IGNORECASE,
+)
+
+
+def _purge_generic_steps(plan: Path) -> None:
+    """
+    Supprime les étapes [ ] avec des noms génériques ('Sous-étape N', 'Step N', etc.)
+    encore présentes dans plan.md — typiquement des orphelines laissées par une
+    reformulation précédente dont seule la première étape a été reformulée.
+    """
+    lines = plan.read_text(encoding="utf-8").splitlines(keepends=True)
+    cleaned = [l for l in lines if not _RE_GENERIC_STEP.match(l.strip())]
+    if len(cleaned) < len(lines):
+        plan.write_text("".join(cleaned), encoding="utf-8")
+        PlanStore.append_log(plan, "Nettoyage : sous-étapes génériques orphelines supprimées")
+
 
 def _build_step_executor() -> dict:
     """
@@ -325,19 +373,257 @@ def _build_step_executor() -> dict:
         except Exception:
             return []
 
+    # Mapping langage → extension par défaut
+    _LANG_EXT: dict[str, str] = {
+        # JS / TS et variantes React, Vue, Svelte
+        "javascript": "js", "js": "js",
+        "typescript": "ts", "ts": "ts",
+        "jsx": "jsx", "react": "jsx",
+        "tsx": "tsx",
+        "vue": "vue",
+        "svelte": "svelte",
+        # Web
+        "html": "html", "css": "css", "scss": "scss", "sass": "sass",
+        "less": "less",
+        # Python
+        "python": "py", "py": "py",
+        # Données / config
+        "json": "json", "yaml": "yaml", "yml": "yml", "toml": "toml",
+        "xml": "xml", "env": "env",
+        # Shell
+        "sh": "sh", "bash": "sh", "zsh": "sh", "shell": "sh",
+        # Systèmes
+        "rust": "rs", "go": "go", "java": "java",
+        "c": "c", "cpp": "cpp", "c++": "cpp",
+        "kotlin": "kt", "swift": "swift", "dart": "dart",
+        # Texte
+        "markdown": "md", "md": "md", "text": "txt", "txt": "txt",
+        "sql": "sql",
+    }
+
+    # ── Détection de stack ────────────────────────────────────────────
+
+    @dataclasses.dataclass
+    class _StackInfo:
+        """Info sur la stack technique d'un projet."""
+        frameworks: list[str]         # ["React", "TypeScript", "Vite"]
+        lang_overrides: dict[str, str]  # {"js": "jsx", "ts": "tsx"} si React+TS
+        prompt_hint: str              # texte injecté dans le prompt
+
+    def _detect_stack(slug: str, goal: str) -> "_StackInfo":
+        """
+        Détecte la stack technique du projet depuis :
+        1. package.json (dépendances npm)
+        2. requirements.txt / pyproject.toml (Python)
+        3. Extensions des fichiers src/ existants
+        4. Mots-clés dans le goal
+
+        Retourne un _StackInfo avec les infos pour adapter le prompt et les extensions.
+        """
+        frameworks: list[str] = []
+        lang_overrides: dict[str, str] = {}
+
+        # ── 1. package.json ──────────────────────────────────────────
+        if slug:
+            try:
+                from Mnemo.tools.sandbox_tools import read_file as _rf
+                pkg_data = _rf(slug, "package.json")
+                if not pkg_data.get("error"):
+                    import json as _j
+                    pkg = _j.loads(pkg_data["content"])
+                    deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+                    if "react" in deps or "react-dom" in deps:
+                        frameworks.append("React")
+                    if "next" in deps:
+                        frameworks.append("Next.js")
+                    if "vue" in deps or "@vue/core" in deps:
+                        frameworks.append("Vue 3")
+                    if "svelte" in deps or "@sveltejs/kit" in deps:
+                        frameworks.append("Svelte")
+                    if "typescript" in deps or "@types/react" in deps:
+                        frameworks.append("TypeScript")
+                    if "vite" in deps:
+                        frameworks.append("Vite")
+                    if "tailwindcss" in deps:
+                        frameworks.append("Tailwind CSS")
+            except Exception:
+                pass
+
+        # ── 2. requirements.txt / pyproject.toml ─────────────────────
+        if slug and not frameworks:
+            try:
+                from Mnemo.tools.sandbox_tools import read_file as _rf
+                req = _rf(slug, "requirements.txt")
+                if not req.get("error"):
+                    content = req["content"].lower()
+                    if "fastapi" in content:
+                        frameworks.append("FastAPI")
+                    if "flask" in content:
+                        frameworks.append("Flask")
+                    if "django" in content:
+                        frameworks.append("Django")
+                    if "sqlalchemy" in content:
+                        frameworks.append("SQLAlchemy")
+                    if frameworks or "python" not in "".join(frameworks):
+                        frameworks.append("Python")
+            except Exception:
+                pass
+
+        # ── 3. Fichiers existants → inférer stack depuis extensions ──
+        if slug and not frameworks:
+            try:
+                from Mnemo.tools.sandbox_tools import list_files as _lf
+                exts = {Path(f).suffix.lower() for f in _lf(slug) if "." in f}
+                if ".jsx" in exts or ".tsx" in exts:
+                    frameworks.append("React")
+                if ".tsx" in exts:
+                    frameworks.append("TypeScript")
+                if ".vue" in exts:
+                    frameworks.append("Vue 3")
+                if ".svelte" in exts:
+                    frameworks.append("Svelte")
+                if ".py" in exts:
+                    frameworks.append("Python")
+            except Exception:
+                pass
+
+        # ── 4. Mots-clés dans le goal ─────────────────────────────────
+        goal_low = goal.lower()
+        kw_map = [
+            (["react", "jsx", "tsx", "create-react-app", "vite react"], "React"),
+            (["next.js", "nextjs", "next js"],                           "Next.js"),
+            (["vue", "nuxt"],                                            "Vue 3"),
+            (["svelte", "sveltekit"],                                    "Svelte"),
+            (["typescript", " ts ", "typesafe"],                         "TypeScript"),
+            (["tailwind"],                                               "Tailwind CSS"),
+            (["fastapi", "fast api"],                                    "FastAPI"),
+            (["flask"],                                                   "Flask"),
+            (["django"],                                                  "Django"),
+            (["python"],                                                  "Python"),
+        ]
+        for keywords, fw in kw_map:
+            if fw not in frameworks and any(kw in goal_low for kw in keywords):
+                frameworks.append(fw)
+
+        # ── Déduire les overrides d'extension ─────────────────────────
+        is_react = "React" in frameworks or "Next.js" in frameworks
+        is_ts    = "TypeScript" in frameworks
+        if is_react:
+            # Composants React → .jsx ou .tsx ; modules utilitaires → .js ou .ts
+            lang_overrides["js"]  = "tsx" if is_ts else "jsx"
+            lang_overrides["ts"]  = "tsx"
+            lang_overrides["jsx"] = "tsx" if is_ts else "jsx"
+
+        # ── Construire le hint texte ───────────────────────────────────
+        if frameworks:
+            fw_str = ", ".join(frameworks)
+            ext_examples = []
+            if is_react and is_ts:
+                ext_examples = [".tsx pour les composants", ".ts pour les utilitaires", ".css / .module.css pour les styles"]
+            elif is_react:
+                ext_examples = [".jsx pour les composants React", ".js pour les utilitaires", ".css pour les styles"]
+            elif "Vue 3" in frameworks:
+                ext_examples = [".vue pour les composants", ".ts/.js pour les utilitaires"]
+            elif "Python" in frameworks:
+                ext_examples = [".py pour le code", ".yaml/.toml pour la config"]
+
+            hint_parts = [f"Stack détectée : **{fw_str}**"]
+            if ext_examples:
+                hint_parts.append("Extensions à utiliser : " + ", ".join(ext_examples))
+            prompt_hint = "\n".join(hint_parts)
+        else:
+            prompt_hint = ""
+
+        return _StackInfo(
+            frameworks=frameworks,
+            lang_overrides=lang_overrides,
+            prompt_hint=prompt_hint,
+        )
+
+    def _extract_code_files(
+        response: str,
+        existing_files: list[str] | None = None,
+        lang_overrides: dict[str, str] | None = None,
+    ) -> list[tuple[str, str]]:
+        """
+        Parse les blocs de code fencés dans une réponse LLM.
+
+        Formats reconnus :
+          ```filename.js          ← nom de fichier direct (priorité)
+          ```javascript           ← langage seul → fallback sur existing_files ou nom générique
+
+        existing_files  : chemins relatifs présents dans src/ (ex: ["src/App.jsx"]).
+                          Quand le LLM ne nomme pas son fichier, on réutilise un existant
+                          de même extension plutôt que de créer code.js.
+        lang_overrides  : surcharge d'extension par stack (ex: {"js": "jsx"} pour React).
+                          Permet que ```javascript → .jsx en contexte React.
+
+        Retourne une liste de (chemin_relatif, contenu).
+        """
+        files: list[tuple[str, str]] = []
+        overrides = lang_overrides or {}
+
+        # Index des existants par extension pour le fallback
+        existing_by_ext: dict[str, list[str]] = {}
+        for f in (existing_files or []):
+            ext = Path(f).suffix.lower()
+            existing_by_ext.setdefault(ext, []).append(f)
+
+        unnamed_count: dict[str, int] = {}
+        pattern = re.compile(r"```([^\n`]+)\n(.*?)```", re.DOTALL)
+
+        for m in pattern.finditer(response):
+            header  = m.group(1).strip()
+            content = m.group(2).strip()
+            if not content:
+                continue
+
+            # Heuristique nom de fichier : contient un "." après un caractère word
+            # ex: "app.js", "src/index.html", "components/Foo.tsx" → oui
+            # "javascript", "python" → non
+            if re.search(r"\w\.\w", header):
+                fname = re.sub(r"[^\w\-./]", "_", header.lstrip("/"))
+                files.append((fname, content))
+            else:
+                lang = header.lower().split()[0] if header else "txt"
+                # Résoudre l'extension : d'abord via overrides de stack, puis _LANG_EXT
+                base_ext = _LANG_EXT.get(lang, "txt")
+                ext_str  = overrides.get(base_ext, base_ext)  # ex: "js" → "jsx" si React
+                ext      = "." + ext_str
+
+                # Fallback intelligent : si un fichier existant a cette extension, on le réutilise
+                candidates = existing_by_ext.get(ext, [])
+                idx = unnamed_count.get(ext, 0)
+                unnamed_count[ext] = idx + 1
+                if candidates and idx < len(candidates):
+                    files.append((candidates[idx], content))
+                else:
+                    suffix = f"_{idx}" if idx else ""
+                    files.append((f"src/app{suffix}{ext}", content))
+
+        return files
+
     def _write_to_project_src(inputs: dict, step_label: str, content: str) -> None:
         """
-        Écrit le contenu généré dans projects/<slug>/src/<fichier>.md.
-        Git-commite automatiquement via sandbox_tools.write_file.
+        Écrit le contenu dans projects/<slug>/src/.
+        - Si des blocs de code nommés sont détectés → écrit chaque fichier avec sa vraie extension
+        - Sinon → fallback Markdown (comportement legacy)
         """
         slug = inputs.get("slug")
         if not slug or not content:
             return
         try:
             from Mnemo.tools.sandbox_tools import write_file as _wf
-            filename = re.sub(r"[^\w\-]", "_", step_label[:40]).strip("_").lower() + ".md"
-            _wf(slug, f"src/{filename}", content,
-                commit_msg=f"agent: {step_label[:50]}")
+            code_files = _extract_code_files(content)
+            if code_files:
+                for rel_path, body in code_files:
+                    # Préfixer src/ si pas déjà dans un sous-dossier absolu
+                    dest = rel_path if rel_path.startswith("src/") else f"src/{rel_path}"
+                    _wf(slug, dest, body, commit_msg=f"agent: {step_label[:50]}")
+            else:
+                # Fallback : Markdown
+                filename = re.sub(r"[^\w\-]", "_", step_label[:40]).strip("_").lower() + ".md"
+                _wf(slug, f"src/{filename}", content, commit_msg=f"agent: {step_label[:50]}")
         except Exception:
             pass
 
@@ -494,28 +780,209 @@ def _build_step_executor() -> dict:
         _save_output(inputs, step, response)
         return response
 
+    # Vérificateurs syntaxiques par extension : uniquement Python pour l'instant.
+    # node --check ne supporte pas JSX (React) → false positives constants.
+    # Les fichiers .js/.ts sont écrits mais leur syntaxe n'est pas vérifiée
+    # (le LLM devra s'auto-corriger lors des étapes de test dédiées).
+    _SYNTAX_CHECKS: dict[str, str] = {
+        ".py": "python -m py_compile {path}",
+    }
+
+    def _syntax_check_files(slug: str, written_paths: list[str]) -> list[tuple[str, str]]:
+        """
+        Vérifie la syntaxe des fichiers écrits (Python uniquement).
+        Retourne la liste de (path, error_message) pour les fichiers en erreur.
+        """
+        from Mnemo.tools.sandbox_tools import run_command as _rc
+        errors = []
+        for rel_path in written_paths:
+            ext = Path(rel_path).suffix.lower()
+            if ext not in _SYNTAX_CHECKS:
+                continue
+            cmd = _SYNTAX_CHECKS[ext].format(path=rel_path)
+            result = _rc(slug, cmd)
+            if result.get("returncode", 0) != 0:
+                err = (result.get("stderr") or result.get("stdout") or "erreur inconnue").strip()
+                errors.append((rel_path, err[:400]))
+        return errors
+
+    # Extensions considérées comme du code source (pas de documentation)
+    _CODE_EXTENSIONS = {
+        ".js", ".jsx", ".ts", ".tsx", ".py", ".html", ".css", ".scss",
+        ".json", ".yaml", ".yml", ".sh", ".rs", ".go", ".java", ".rb",
+    }
+    # Budget total de lecture src/ injecté dans le prompt (chars)
+    _SRC_TOTAL_BUDGET = 4000
+
+    def _read_src_files(slug: str) -> list[tuple[str, str]]:
+        """
+        Lit les fichiers de src/ du projet et retourne [(rel_path, content), ...].
+
+        Budget total : _SRC_TOTAL_BUDGET chars répartis entre les fichiers.
+        Les fichiers les plus petits sont injectés en entier ; les plus grands sont tronqués.
+        Les fichiers > 50 Ko sont ignorés.
+        """
+        if not slug:
+            return []
+        try:
+            from Mnemo.tools.sandbox_tools import list_files as _lf, read_file as _rf
+            all_files = _lf(slug)
+            src_files = [
+                f for f in all_files
+                if f.startswith("src/") and not f.endswith("/")
+                and Path(f).suffix.lower() in _CODE_EXTENSIONS
+            ]
+            # Lire tous, ignorer les trop gros
+            loaded: list[tuple[str, str]] = []
+            for rel in src_files[:12]:
+                data = _rf(slug, rel)
+                content = data.get("content", "")
+                if content and len(content) <= 50_000:
+                    loaded.append((rel, content))
+            # Répartir le budget : les petits fichiers en entier, les gros tronqués
+            loaded.sort(key=lambda x: len(x[1]))  # petits d'abord
+            result, used = [], 0
+            per_file_max = max(400, _SRC_TOTAL_BUDGET // max(len(loaded), 1))
+            for rel, content in loaded:
+                if used >= _SRC_TOTAL_BUDGET:
+                    break
+                allowed = min(per_file_max, _SRC_TOTAL_BUDGET - used)
+                if len(content) <= allowed:
+                    result.append((rel, content))
+                    used += len(content)
+                else:
+                    result.append((rel, content[:allowed] + "\n…[tronqué]"))
+                    used += allowed
+            return result
+        except Exception:
+            return []
+
     def _run_shell(step: str, session_id: str, inputs: dict) -> str:
         """
-        crew : shell dans un plan = produire du contenu et l'écrire dans src/.
-        Consulte le KG pour l'action appropriée, génère avec ConversationCrew,
-        puis écrit dans projects/<slug>/src/ via sandbox.
+        crew : shell dans un plan = produire et écrire des fichiers réels dans src/.
+
+        Le LLM est invité à répondre avec des blocs de code fencés nommés :
+          ```app.js
+          // code here
+          ```
+        Les fichiers src/ existants sont injectés dans le prompt pour que le LLM
+        puisse les modifier plutôt que créer de nouveaux fichiers.
+        Boucle de vérification (B2) : après écriture, check syntaxe Python → 1 retry.
         """
         from Mnemo.crew import ConversationCrew
-        clean = _RE_CREW_TARGET.sub("", step).strip(" —")
+        clean = _RE_CREW_TARGET.sub("", step).strip(" —").rstrip(" ⟳").strip()
+        goal  = inputs.get("goal", "")
+        slug  = inputs.get("slug", "")
 
-        # Consulter KG — action par défaut : write_markdown_file
-        actions      = _kg_actions(inputs, step)
-        action_label = actions[0]["action_label"] if actions else "write_markdown_file"
+        # Lire les fichiers src/ existants + détecter la stack
+        existing_files = _read_src_files(slug)
+        stack          = _detect_stack(slug, goal)
 
-        msg    = f"Rédige le contenu complet et structuré en Markdown pour : {clean}"
-        result = ConversationCrew().crew().kickoff(
-            inputs=_conversation_inputs(msg, session_id, inputs)
+        def _build_existing_ctx() -> str:
+            if not existing_files:
+                return ""
+            lines = ["## Fichiers existants dans src/ (à modifier si besoin)"]
+            for rel, preview in existing_files:
+                lines.append(f"\n### {rel}\n```\n{preview}\n```")
+            return "\n".join(lines)
+
+        def _build_msg(error_feedback: str = "") -> str:
+            existing_ctx  = _build_existing_ctx()
+            existing_names = [rel for rel, _ in existing_files]
+
+            rules = [
+                "- Écris du code réel et fonctionnel, pas de commentaires placeholder",
+                "- Tu peux produire plusieurs fichiers si nécessaire",
+                "- Si c'est de la documentation/analyse, utilise .md",
+                "- INTERDIT : nommer un fichier 'code.js', 'code_1.js', 'untitled', 'example', etc.",
+            ]
+            if stack.prompt_hint:
+                rules.append(f"- {stack.prompt_hint}")
+            else:
+                rules.append("- Utilise l'extension correcte : .js, .jsx, .html, .css, .py, .ts, etc.")
+            if existing_names:
+                rules.append(
+                    f"- PRIORITÉ : modifie les fichiers existants ({', '.join(existing_names)}) "
+                    "plutôt que d'en créer de nouveaux. Utilise leur nom EXACT."
+                )
+
+            base = (
+                f"Tâche : {clean}\n"
+                f"Objectif du projet : {goal}\n"
+            )
+            if stack.prompt_hint:
+                base += f"\n{stack.prompt_hint}\n"
+            if existing_ctx:
+                base += f"\n{existing_ctx}\n"
+            base += (
+                "\nProduis le contenu complet de chaque fichier créé ou modifié. "
+                "Pour chaque fichier, utilise EXACTEMENT ce format :\n\n"
+                "```chemin/vers/fichier.ext\n"
+                "// contenu complet ici\n"
+                "```\n\n"
+                "Règles :\n" + "\n".join(rules)
+            )
+            if error_feedback:
+                base += f"\n\n⚠ ERREURS À CORRIGER :\n{error_feedback}\nCorrige ces erreurs dans ta réponse."
+            return base
+
+        written: list[str] = []
+        existing_names = [rel for rel, _ in existing_files]
+
+        def _write_and_track(response: str) -> None:
+            nonlocal written
+            code_files = _extract_code_files(
+                response,
+                existing_files=existing_names,
+                lang_overrides=stack.lang_overrides,
+            )
+            if not code_files:
+                filename = re.sub(r"[^\w\-]", "_", clean[:40]).strip("_").lower() + ".md"
+                code_files = [(f"src/{filename}", response)]
+            written = []
+            if slug:
+                from Mnemo.tools.sandbox_tools import write_file as _wf
+                for rel_path, body in code_files:
+                    dest = rel_path if rel_path.startswith("src/") else f"src/{rel_path}"
+                    _wf(slug, dest, body, commit_msg=f"agent: {clean[:50]}")
+                    written.append(dest)
+            else:
+                # Fallback sans slug
+                from pathlib import Path as _Path
+                project_dir = inputs.get("project_dir", "")
+                if project_dir:
+                    src_dir = _Path(project_dir) / "src"
+                    src_dir.mkdir(exist_ok=True)
+                    for rel_path, body in code_files:
+                        fname = Path(rel_path).name
+                        (_Path(project_dir) / "src" / fname).write_text(body, encoding="utf-8")
+
+        # Tentative 1
+        result1 = ConversationCrew().crew().kickoff(
+            inputs=_conversation_inputs(_build_msg(), session_id, inputs)
         )
-        response = result.raw or ""
+        response = result1.raw or ""
         _save_output(inputs, step, response)
+        _write_and_track(response)
 
-        if action_label == "write_markdown_file":
-            _write_to_project_src(inputs, clean, response)
+        # Boucle B2 — vérification syntaxe (1 retry max)
+        if slug and written:
+            errors = _syntax_check_files(slug, written)
+            if errors:
+                err_lines = "\n".join(f"- {p}: {e}" for p, e in errors)
+                result2 = ConversationCrew().crew().kickoff(
+                    inputs=_conversation_inputs(_build_msg(err_lines), session_id, inputs)
+                )
+                response2 = result2.raw or ""
+                if response2:
+                    _save_output(inputs, step, response2)
+                    _write_and_track(response2)
+                    # Vérifie à nouveau — si toujours en erreur, on lève pour que PlanRunner marque [!]
+                    errors2 = _syntax_check_files(slug, written)
+                    if errors2:
+                        err_summary = "; ".join(f"{p}" for p, _ in errors2)
+                        raise RuntimeError(f"Syntax errors after retry: {err_summary}")
+                    response = response2
 
         return response
 
@@ -709,8 +1176,120 @@ class PlanRunner:
 
     @staticmethod
     def _clean_step(step_text: str) -> str:
-        """Retire l'annotation crew de l'affichage."""
-        return _RE_CREW_TARGET.sub("", step_text).strip(" —")
+        """Retire l'annotation crew et le marqueur ⟳ de reformulation."""
+        return _RE_CREW_TARGET.sub("", step_text).strip(" —").rstrip(" ⟳").strip()
+
+    def _try_reformulate(
+        self,
+        plan: Path,
+        step_raw: str,
+        reason: str,
+        session_id: str,
+        inputs: dict,
+    ) -> bool:
+        """
+        Tente de reformuler une étape bloquée en sous-étapes plus concrètes.
+
+        Appelle ConversationCrew avec un prompt de décomposition, parse le JSON retourné,
+        puis appelle PlanStore.replace_step() pour réécrire plan.md.
+
+        Retourne True si la reformulation a réussi (plan modifié).
+        Retourne False si le LLM n'a pas pu produire de JSON valide.
+        """
+        import json as _json
+        from Mnemo.crew import ConversationCrew
+
+        # ⟳ = étape déjà issue d'une reformulation → pas de re-reformulation
+        if "⟳" in step_raw:
+            return False
+
+        step_clean  = self._clean_step(step_raw)
+        crew_target = self._get_crew_target(step_raw)
+
+        goal = inputs.get("goal", "")
+        prompt = (
+            f"L'étape suivante d'un plan de projet est bloquée ou trop vague :\n"
+            f"Étape : {step_clean}\n"
+            f"Crew prévu : {crew_target}\n"
+            f"Problème : {reason}\n"
+            f"Objectif du projet : {goal}\n\n"
+            "Décompose cette étape en 2 à 4 sous-étapes CONCRÈTES avec des noms descriptifs.\n\n"
+            "RÈGLES ABSOLUES :\n"
+            "- Chaque nom décrit l'action réelle (ex: 'Créer src/App.jsx', "
+            "'Analyser les dépendances npm', 'Explorer les fichiers src/')\n"
+            "- INTERDIT : 'Sous-étape N', 'Étape N', 'Step N', 'Phase N', 'Tâche N'\n"
+            "- Chaque étape se termine par '— crew : <cible>'\n\n"
+            "Réponds UNIQUEMENT avec ce JSON, sans texte avant ni après :\n"
+            '{"steps": ["<action concrète> — crew : shell", "<autre action> — crew : note"]}\n\n'
+            "RÈGLES crew :\n"
+            "- créer / écrire / implémenter / générer / développer → crew : shell\n"
+            "- analyser / documenter / résumer / évaluer → crew : note\n"
+            "- rechercher / explorer / scanner / lister → crew : reconnaissance\n"
+            "- définir / planifier / organiser / discuter → crew : conversation"
+        )
+
+        try:
+            result = ConversationCrew().crew().kickoff(inputs={
+                **inputs,
+                "user_message":      prompt,
+                "session_id":        session_id or "plan",
+                "memory_context":    "",
+                "temporal_context":  "",
+                "calendar_context":  "",
+                "evaluation_result": (
+                    '{"route":"conversation","needs_memory":false,'
+                    '"needs_web":false,"needs_clarification":false}'
+                ),
+            })
+            raw = result.raw or ""
+            # Extraction robuste : parcourt tous les { } et prend le premier contenant "steps"
+            import json as _json
+            data = None
+            for m in re.finditer(r'\{', raw):
+                start = m.start()
+                depth, end = 0, start
+                for j, ch in enumerate(raw[start:]):
+                    if ch == '{':
+                        depth += 1
+                    elif ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            end = start + j + 1
+                            break
+                candidate = raw[start:end]
+                if '"steps"' in candidate:
+                    try:
+                        data = _json.loads(candidate)
+                        break
+                    except Exception:
+                        continue
+            if data is None:
+                return False
+
+            _generic = re.compile(
+                r'^(sous-?étape|étape|step|phase|tâche|task)\s*\d', re.IGNORECASE
+            )
+            new_steps_raw = [s.strip() for s in data.get("steps", []) if s.strip()]
+            # Filtrer noms génériques et dédupliquer
+            seen: set[str] = set()
+            new_steps = []
+            for s in new_steps_raw:
+                label = re.sub(r"\s*—\s*crew\s*:.*", "", s).strip()
+                if not _generic.match(label) and s not in seen:
+                    new_steps.append(s)
+                    seen.add(s)
+
+            if len(new_steps) < 2:
+                return False
+
+            ok = PlanStore.replace_step(plan, step_raw, new_steps)
+            if ok:
+                # Nettoyer les sous-étapes génériques orphelines (sœurs de la même
+                # reformulation qui n'ont pas encore été exécutées)
+                _purge_generic_steps(plan)
+            return ok
+        except Exception:
+            return False
 
     @staticmethod
     def _kg_feedback(inputs: dict, step_label: str, crew_target: str, success: bool) -> None:
@@ -762,8 +1341,9 @@ class PlanRunner:
         # Injecter _plan_depth par défaut (max 2 niveaux de récursion)
         if "_plan_depth" not in inputs:
             inputs["_plan_depth"] = 2
-        executed = 0
-        skipped  = 0
+        executed    = 0
+        skipped     = 0
+        reformulated: set[str] = set()  # guard : pas de reformulation en boucle
 
         while True:
             if max_steps and (executed + skipped) >= max_steps:
@@ -790,6 +1370,13 @@ class PlanRunner:
 
             except Exception as e:
                 reason = str(e)[:200]
+                # Tentative de reformulation (une seule fois par étape)
+                if step_raw not in reformulated:
+                    ok = self._try_reformulate(plan, step_raw, reason, session_id, inputs)
+                    if ok:
+                        reformulated.add(step_raw)
+                        # La boucle reprend sur la première sous-étape reformulée
+                        continue
                 PlanStore.mark_failed(plan, step_raw, reason)
                 self._kg_feedback(inputs, step_clean, crew_target, success=False)
                 skipped += 1

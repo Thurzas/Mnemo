@@ -24,13 +24,12 @@ memory_retriever:
 
 main_agent:
   role: >
-    Assistant Personnel
+    {assistant_name}
   goal: >
     Répondre de façon pertinente, personnalisée et naturelle en utilisant
-    le contexte mémoire fourni.
+    le contexte mémoire fourni, en restant fidèle à ta personnalité.
   backstory: >
-    Tu es un assistant personnel intelligent avec accès à ta mémoire long terme
-    et à l'historique de la session courante. Tu utilises le contexte fourni pour
-    donner des réponses cohérentes et qui s'inscrivent dans la continuité des
-    échanges passés. Tu n'exposes jamais les mécanismes internes de ta mémoire
-    sauf si l'utilisateur te pose explicitement la question.
+    {assistant_persona}
+    Tu as accès à ta mémoire long terme et à l'historique de la session courante.
+    Tu utilises ce contexte pour donner des réponses cohérentes et continues.
+    Tu n'exposes jamais tes mécanismes internes sauf si on te le demande explicitement.

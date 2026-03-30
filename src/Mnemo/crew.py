@@ -9,6 +9,7 @@ from Mnemo.tools.memory_tools import (
     SyncMemoryDbTool,
     ListDocumentsTool,
 )
+from Mnemo.tools.dreamer_tools import ApplyDreamPatchesTool
 from Mnemo.tools.calendar_tools import GetCalendarTool
 from Mnemo.tools.web_tools import WebSearchTool
 from Mnemo.tools.sandbox_tools import (
@@ -925,7 +926,20 @@ class PlannerCrew:
             if start == -1 or end <= start:
                 raise ValueError("JSON introuvable dans la réponse du LLM")
 
-            plan_data     = _json.loads(raw[start:end])
+            plan_data = _json.loads(raw[start:end])
+
+            # Fix 2 — incertitude trop élevée : retourner des questions avant de planifier
+            if plan_data.get("needs_clarification"):
+                title_hint = plan_data.get("title", goal[:60])
+                questions  = plan_data.get("questions", [])
+                if questions:
+                    q_lines = "\n".join(f"- {q}" for q in questions)
+                    return (
+                        f"Avant de créer le plan **{title_hint}**, j'ai besoin de quelques précisions :\n\n"
+                        f"{q_lines}\n\n"
+                        "Réponds à ces questions et je prépare le plan complet."
+                    )
+
             title         = plan_data.get("title", goal[:60])
             steps         = plan_data.get("steps", [])
             crew_targets  = plan_data.get("crew_targets", {})
@@ -948,8 +962,10 @@ class PlannerCrew:
                 pass  # projet déjà existant → on écrase juste le plan
             project_dir = _project_path(project_slug)
 
+            # Fix 1 — utiliser le titre reformulé par le LLM comme goal (pas le message brut)
+            plan_goal = title if title else goal
             plan_path = PlanStore.create(
-                goal         = goal,
+                goal         = plan_goal,
                 steps        = steps,
                 context      = ctx_summary,
                 crew_targets = crew_targets,
@@ -983,7 +999,7 @@ class PlannerCrew:
 
             plan_id = project_slug  # identifiant stable du plan/projet
 
-            lines = [f"**Projet** : `{project_slug}`", f"**Goal** : {goal}", ""]
+            lines = [f"**Projet** : `{project_slug}`", f"**Goal** : {plan_goal}", ""]
             for i, step in enumerate(steps, 1):
                 crew_t = crew_targets.get(step, "")
                 suffix = f" _(crew : {crew_t})_" if crew_t else ""
@@ -1196,3 +1212,78 @@ class SandboxCrew:
             "user_message":    user_msg,
         })
         return result.raw.strip()
+
+# ══════════════════════════════════════════════════════════════
+# DreamerCrew — consolidation mémoire long terme (sommeil profond)
+# ══════════════════════════════════════════════════════════════
+
+@CrewBase
+class DreamerCrew:
+    """
+    Consolidation périodique de memory.md.
+    Déclenchée par le scheduler sur détection d inactivité (DREAMER_IDLE_THRESHOLD).
+
+    Inputs attendus (produits par prepare_dream_inputs()) :
+      username, memory_content, dedup_report, sessions_summary
+    """
+    agents_config = "config/dreamer_agents.yaml"
+    tasks_config  = "config/dreamer_tasks.yaml"
+
+    @agent
+    def memory_analyst(self) -> Agent:
+        return Agent(
+            config=self.agents_config["memory_analyst"],
+            verbose=False,
+            allow_delegation=False,
+            max_iter=3,
+            llm=_llm(0.2),
+        )
+
+    @agent
+    def memory_patcher(self) -> Agent:
+        # username dérivé du contexte utilisateur positionné par set_data_dir()
+        # avant le kickoff (dans _run_dreamer ou run())
+        from Mnemo.context import get_data_dir
+        username = get_data_dir().name
+        return Agent(
+            config=self.agents_config["memory_patcher"],
+            verbose=False,
+            allow_delegation=False,
+            tools=[ApplyDreamPatchesTool(username=username)],
+            max_iter=2,
+            llm=_llm(0.0),
+        )
+
+    @task
+    def analyze_task(self) -> Task:
+        return Task(config=self.tasks_config["analyze_task"])
+
+    @task
+    def apply_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["apply_task"],
+            context=[self.analyze_task()],
+        )
+
+    @crew
+    def crew(self) -> Crew:
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential,
+            verbose=False,
+        )
+
+    def run(self, username: str = "") -> str:
+        """
+        Point d entree depuis scheduler._run_dreamer().
+        Prépare les inputs, lance le crew, retourne le rapport.
+        set_data_dir(user_dir) doit être appelé AVANT run() pour que
+        memory_patcher puisse dériver le username via get_data_dir().name.
+        """
+        from Mnemo.tools.dreamer_tools import prepare_dream_inputs
+        from Mnemo.context import get_data_dir
+        uname  = username or get_data_dir().name
+        inputs = prepare_dream_inputs(uname)
+        result = self.crew().kickoff(inputs=inputs)
+        return result.raw or "Rêve terminé."

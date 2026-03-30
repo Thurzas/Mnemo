@@ -185,6 +185,24 @@ export interface RvcModel {
   index: string | null
 }
 
+export interface AssistantConfig {
+  name: string
+  persona_short: string
+  persona_full: string
+  language_style: string
+  pronouns: string
+  created_at?: string
+  default_name?: string
+}
+
+export interface AssistantUpdate {
+  name?: string
+  persona_short?: string
+  persona_full?: string
+  language_style?: string
+  pronouns?: string
+}
+
 export interface VoiceSettings {
   rvc_enabled: boolean
   kokoro_voice_fr: string
@@ -475,6 +493,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(settings),
     }),
+
+  getAssistant: () =>
+    request<AssistantConfig>('/api/assistant'),
+
+  updateAssistant: (body: AssistantUpdate) =>
+    request<AssistantConfig>('/api/assistant', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  getDreamLog: () =>
+    request<{ content: string; last_dream_ts: string | null; dreamer_running: boolean }>('/api/dream/log'),
+
+  triggerDream: () =>
+    request<{ started: boolean; already_running: boolean }>('/api/dream', { method: 'POST' }),
 
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
     const token = auth.getToken()

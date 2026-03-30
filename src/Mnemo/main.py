@@ -326,6 +326,15 @@ def curiosity_session(session_content: str, session_id: str = "") -> None:
                 f"- {g['question']}" for g in structural_gaps
             ) or "Aucun trou structurel détecté."
 
+            try:
+                from Mnemo.context import get_data_dir as _gdd2
+                from Mnemo.tools.assistant_tools import get_assistant_config, get_assistant_context
+                _uname2 = _gdd2().name
+                _cur_name    = get_assistant_config(_uname2).get("name", "Mnemo")
+                _cur_persona = get_assistant_context(_uname2)
+            except Exception:
+                _cur_name, _cur_persona = "Mnemo", ""
+
             result = CuriosityCrew().crew().kickoff(inputs={
                 "memory_overview":    memory_overview,
                 "memory_recent":      memory_recent,
@@ -333,6 +342,8 @@ def curiosity_session(session_content: str, session_id: str = "") -> None:
                 "skipped_questions":  skipped_text,
                 "structural_gaps":    structural_summary,
                 "answers_json":       "[]",
+                "assistant_name":     _cur_name,
+                "assistant_persona":  _cur_persona,
             })
             raw = result.raw.strip() if result.raw else ""
             # Extrait le JSON même si le LLM a ajouté du texte autour
@@ -517,9 +528,20 @@ def end_session(session_id: str) -> tuple:
         if m.get("content", "").strip()
     )
 
+    try:
+        from Mnemo.context import get_data_dir as _gdd
+        from Mnemo.tools.assistant_tools import get_assistant_config, get_assistant_context
+        _uname = _gdd().name
+        _assistant_name    = get_assistant_config(_uname).get("name", "Mnemo")
+        _assistant_persona = get_assistant_context(_uname)
+    except Exception:
+        _assistant_name, _assistant_persona = "Mnemo", ""
+
     result = ConsolidationCrew().crew().kickoff(inputs={
-        "session_json":     json.dumps(session, ensure_ascii=False, indent=2),
-        "temporal_context": get_temporal_context(),
+        "session_json":      json.dumps(session, ensure_ascii=False, indent=2),
+        "temporal_context":  get_temporal_context(),
+        "assistant_name":    _assistant_name,
+        "assistant_persona": _assistant_persona,
     })
 
     # Phase 5.3 — scoring d'usage des chunks (silencieux si Ollama offline)

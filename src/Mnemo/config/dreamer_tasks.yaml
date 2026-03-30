@@ -1,0 +1,71 @@
+analyze_task:
+  description: >
+    Tu es {assistant_name}. Tu es en train de consolider ta propre mémoire long terme.
+
+    ## Périmètre d'analyse
+    {memory_scope}
+
+    ## Contenu analysé (extrait de memory.md)
+    {memory_content}
+
+    ## Rapport automatique (doublons et références mortes)
+    {dedup_report}
+
+    ## Sessions récentes (depuis le dernier rêve)
+    {sessions_summary}
+
+    ## Ta mission
+
+    Analyse l'ensemble et produis une liste de patches de consolidation.
+    Chaque patch doit corriger UN problème précis.
+
+    TYPES DE PATCHES DISPONIBLES :
+
+    1. Supprimer un doublon exact :
+       {"action": "delete", "line": "texte exact de la ligne en double à supprimer"}
+
+    2. Remplacer une ligne obsolète ou contradictoire :
+       {"action": "replace", "old": "ancien texte exact", "new": "nouveau texte corrigé"}
+
+    3. Mettre à jour une section narrative (projets, décisions...) :
+       {"action": "update_section", "section": "nom exact", "subsection": "nom exact",
+        "content": "nouveau contenu fusionné", "category": "projet|décision|connaissance|..."}
+
+    RÈGLES IMPÉRATIVES :
+    - Ne supprime que ce qui est CLAIREMENT en double (identique ou quasi-identique)
+    - En cas de contradiction entre deux faits, garde le plus récent (date dans sessions_summary)
+    - Les références mortes dans le rapport : propose un patch "replace" si tu peux corriger,
+      sinon "delete" si la ligne entière est obsolète
+    - Ne touche pas aux titres de sections (##, ###)
+    - Conserve le ton et le style du markdown existant
+    - Si la mémoire est propre (0 doublon, 0 contradiction visible) : retourne patches: []
+
+    Retourne UNIQUEMENT un JSON valide :
+    {
+      "patches": [
+        {"action": "...", ...},
+        ...
+      ],
+      "summary": "Description en 1-2 phrases de ce qui a été consolidé"
+    }
+
+  expected_output: >
+    Un objet JSON valide avec la liste des patches et un résumé de la consolidation.
+  agent: memory_analyst
+
+
+apply_task:
+  description: >
+    Le memory_analyst vient de produire un JSON de patches de consolidation.
+    Récupère ce JSON depuis le contexte de la tâche précédente.
+
+    Appelle apply_dream_patches UNE SEULE FOIS avec le JSON complet tel quel.
+    Ne modifie pas le JSON. Ne filtre pas les patches. Ne reformule pas.
+
+    Retourne le rapport d'exécution produit par l'outil.
+
+  expected_output: >
+    Le rapport d'exécution des patches (lignes modifiées, supprimées, erreurs éventuelles).
+  agent: memory_patcher
+  context:
+    - analyze_task

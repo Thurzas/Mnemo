@@ -1609,6 +1609,86 @@ def settings_update(body: SettingsUpdate, _: Auth):
     return {"ok": True, "auto_approve_confirmations": body.auto_approve_confirmations}
 
 
+# ── Assistant identity (Phase A) ──────────────────────────────────
+
+class AssistantUpdate(BaseModel):
+    name: str | None = None
+    persona_short: str | None = None
+    persona_full: str | None = None
+    language_style: str | None = None
+    pronouns: str | None = None
+
+
+@app.get("/api/assistant")
+def assistant_get(username: Auth):
+    from Mnemo.tools.assistant_tools import get_assistant_config
+    return get_assistant_config(username)
+
+
+@app.put("/api/assistant")
+def assistant_update(body: AssistantUpdate, username: Auth):
+    from Mnemo.tools.assistant_tools import set_assistant_config
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="Aucun champ fourni")
+    return set_assistant_config(username, **updates)
+
+
+# ── DreamerCrew (Phase D6) ────────────────────────────────────────
+
+@app.post("/api/dream")
+def dream_trigger(username: Auth):
+    """
+    Déclenche manuellement un cycle DreamerCrew pour l'utilisateur.
+    Si un rêve est déjà en cours, retourne already_running=True sans en lancer un second.
+    """
+    import json
+    import threading
+    from Mnemo.scheduler import _run_dreamer
+
+    ws_path = USERS_DIR / username / "world_state.json"
+    ws: dict = {}
+    if ws_path.exists():
+        try:
+            ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    if ws.get("dreamer_running"):
+        return {"started": False, "already_running": True}
+
+    threading.Thread(
+        target=_run_dreamer,
+        args=(username,),
+        daemon=True,
+        name=f"dreamer-manual-{username}",
+    ).start()
+    return {"started": True, "already_running": False}
+
+
+@app.get("/api/dream/log")
+def dream_log(username: Auth):
+    """Retourne le contenu de dream_log.md (journal des consolidations)."""
+    import json
+    from Mnemo.context import get_data_dir
+    user_dir = get_data_dir()
+    log_path = user_dir / "dream_log.md"
+
+    ws_path = user_dir / "world_state.json"
+    ws: dict = {}
+    if ws_path.exists():
+        try:
+            ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    return {
+        "content":         log_path.read_text(encoding="utf-8") if log_path.exists() else "",
+        "last_dream_ts":   ws.get("last_dream_ts"),
+        "dreamer_running": ws.get("dreamer_running", False),
+    }
+
+
 # ── Projets sandbox (Phase 7) ──────────────────────────────────────
 
 
@@ -1758,7 +1838,7 @@ def project_run_command(slug: str, body: CommandRequest, _: Auth):
     res = run_command(slug, body.command)
     if res.get("error") and res.get("returncode") != 0:
         raise HTTPException(status_code=400, detail=res["error"])
-    return {"stdout": res.get("output", ""), "stderr": res.get("error", ""), "returncode": res.get("returncode", 0)}
+    return {"stdout": res.get("stdout", ""), "stderr": res.get("stderr", ""), "returncode": res.get("returncode", 0)}
 
 
 @app.delete("/api/projects/{slug}", status_code=200)

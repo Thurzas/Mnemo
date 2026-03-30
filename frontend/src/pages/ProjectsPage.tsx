@@ -239,11 +239,22 @@ export function ProjectsPage({ active, targetSlug }: Props) {
         const p = await api.getProject(slug)
         const newFiles = p.files ?? []
         setFiles(prev => {
-          // Mise à jour silencieuse : ne touche pas à l'éditeur
           if (JSON.stringify(prev) === JSON.stringify(newFiles)) return prev
           return newFiles
         })
-        // Si plan.md a changé et qu'il est ouvert, le recharger aussi
+        // Auto-expand tout dossier nouvellement apparu
+        const newDirs = newFiles
+          .filter(f => f.endsWith('/'))
+          .map(f => f.slice(0, -1))
+        setExpandedDirs(prev => {
+          const next = new Set(prev)
+          let changed = false
+          for (const d of newDirs) {
+            if (!next.has(d)) { next.add(d); changed = true }
+          }
+          return changed ? next : prev
+        })
+        // Si plan.md a changé, recharger les étapes
         if (newFiles.includes('plan.md')) {
           try {
             const r = await api.readProjectFile(slug, 'plan.md')
