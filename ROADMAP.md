@@ -132,15 +132,13 @@ Extend the planner with more actions and better planning structure.
 - [ ] Expose `GET /api/goap/state` — current world_state + active plan JSON
 - [ ] Dynamic goal injection: user can set a GOAP goal from the nodal UI
 
-### N3 — Guardrails & Risk Management
+### N3 — Guardrails & Risk Management ✅
 
-Structure the safety layer following the NIST framework (Govern → Map → Measure → Manage).
-
-- [ ] **Risk taxonomy**: classify all API actions as `low / medium / high / critical`
-- [ ] **Audit log**: `data/users/<username>/audit_log.jsonl` — every risky action logged with timestamp, action, result
-- [ ] **Sidecar middleware** (FastAPI): intercepts actions rated `high+` → forced confirmation, logged
-- [ ] **Kill-switch**: `POST /api/system/pause` / `POST /api/system/resume` — halts all scheduler autonomy
-- [ ] **Guardrails indicator** in dashboard (SettingsPage or new panel)
+- [x] **Risk taxonomy**: `RISK_REGISTRY` — low / medium / high / critical sur toutes les routes
+- [x] **Audit log**: `data/users/<username>/audit_log.jsonl` — toutes les actions MEDIUM+ loggées
+- [x] **Sidecar middleware** (FastAPI): bloque HIGH+ quand système en pause, log après réponse
+- [x] **Kill-switch**: `POST /api/system/pause` / `resume` — suspend scheduler + bloque actions HIGH+
+- [x] **Guardrails indicator** dans SettingsPage — état live, bouton pause/reprise, journal 20 dernières actions
 
 ### N4 — Plugin System v1
 

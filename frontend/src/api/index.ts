@@ -227,6 +227,21 @@ export interface GraphEdge {
   label: string
 }
 
+export interface AuditEntry {
+  ts: string
+  method: string
+  path: string
+  risk: 'low' | 'medium' | 'high' | 'critical'
+  status: number
+  detail: string
+}
+
+export interface SystemState {
+  paused: boolean
+  paused_at: string | null
+  resumed_at: string | null
+}
+
 export interface GoapAction {
   name: string
   preconditions: Record<string, boolean>
@@ -580,6 +595,18 @@ export const api = {
 
   clearGoapGoal: () =>
     request<{ ok: boolean }>('/api/goap/goal', { method: 'DELETE' }),
+
+  getSystemState: () =>
+    request<SystemState>('/api/system/state'),
+
+  pauseSystem: () =>
+    request<{ ok: boolean; paused: boolean }>('/api/system/pause', { method: 'POST' }),
+
+  resumeSystem: () =>
+    request<{ ok: boolean; paused: boolean }>('/api/system/resume', { method: 'POST' }),
+
+  getAudit: (limit = 50) =>
+    request<{ entries: AuditEntry[] }>(`/api/audit?limit=${limit}`),
 
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
     const token = auth.getToken()

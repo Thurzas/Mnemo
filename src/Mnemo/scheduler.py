@@ -876,6 +876,10 @@ def _dream_tick() -> None:
     Appelé à chaque tour de boucle scheduler.
     Lance _run_dreamer() dans un thread daemon si les conditions sont réunies.
     """
+    from Mnemo.guardrails import is_system_paused
+    if is_system_paused(DATA_PATH):
+        return
+
     import threading
 
     users_dir = DATA_PATH / "users"
@@ -902,6 +906,10 @@ def _goap_autonomy_tick() -> None:
     Scanne tous les projets sandbox actifs de tous les utilisateurs.
     Appelé toutes les 10s depuis run_scheduler().
     """
+    from Mnemo.guardrails import is_system_paused
+    if is_system_paused(DATA_PATH):
+        return
+
     users_dir = DATA_PATH / "users"
     if not users_dir.exists():
         return
@@ -1001,6 +1009,11 @@ def dispatch(task: dict) -> None:
     Tâches utilisateur (reminder) :
       → _ACTION_MAP direct (pas de GOAP nécessaire)
     """
+    from Mnemo.guardrails import is_system_paused
+    if is_system_paused(DATA_PATH):
+        log.info(f"[scheduler] Système en pause — tâche ignorée : {task.get('action')}")
+        return
+
     action  = task.get("action", "")
     payload = {}
     try:

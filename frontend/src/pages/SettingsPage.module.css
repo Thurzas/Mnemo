@@ -145,3 +145,142 @@
   0%, 100% { filter: brightness(1); }
   50%       { filter: brightness(1.6); }
 }
+
+/* ── Guardrails ───────────────────────────────────────────────── */
+
+.guardrailsRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.guardrailsDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.guardrailsActive {
+  background: #22c55e;
+}
+
+.guardrailsPaused {
+  background: #ef4444;
+  animation: pausePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pausePulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.guardrailsLabel {
+  font-size: 0.88rem;
+  color: var(--text);
+  flex: 1;
+}
+
+.pauseBtn {
+  background: none;
+  border: 1px solid #ef4444;
+  color: #f87171;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.pauseBtn:hover  { background: rgba(239,68,68,0.1); }
+.pauseBtn:disabled { opacity: 0.45; cursor: default; }
+
+.resumeBtn {
+  background: #16a34a;
+  border: none;
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.resumeBtn:hover   { opacity: 0.85; }
+.resumeBtn:disabled { opacity: 0.45; cursor: default; }
+
+.pauseNotice {
+  font-size: 0.78rem;
+  color: #f59e0b;
+  margin: 0;
+  padding: 8px 12px;
+  background: rgba(245,158,11,0.08);
+  border-left: 2px solid #f59e0b;
+  border-radius: 4px;
+}
+
+.auditTitle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 4px 0 6px;
+}
+
+.auditList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.auditEmpty {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.auditEntry {
+  display: grid;
+  grid-template-columns: 52px 1fr 60px 36px 70px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.74rem;
+}
+
+.auditEntry:last-child { border-bottom: none; }
+
+.auditMethod {
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.auditPath {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 0.7rem;
+}
+
+.auditRisk {
+  font-weight: 600;
+  text-align: center;
+}
+
+.auditStatus {
+  font-weight: 600;
+  text-align: center;
+  font-family: monospace;
+}
+
+.auditTs {
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}

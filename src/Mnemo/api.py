@@ -48,9 +48,11 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
 
 # Import anticipé de main.py — son code module-level appelle _set_data_dir("/data")
 # ce qui est inoffensif ici (contexte startup = root context, isolé des contextes
@@ -75,6 +77,64 @@ app = FastAPI(title="Mnemo Dashboard", docs_url=None, redoc_url=None)
 # Serve React build — mounted last so /api/* routes take priority
 if STATIC_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
+
+
+# ── Guardrails middleware (Phase N3) ──────────────────────────────────
+
+class _GuardrailsMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware sidecar N3 :
+    - Bloque les actions HIGH+ quand le système est en pause (503)
+    - Log toutes les actions MEDIUM+ dans audit_log.jsonl utilisateur
+    """
+    async def dispatch(self, request: StarletteRequest, call_next):
+        path   = request.url.path
+        method = request.method
+
+        # Skip non-API et WebSocket (déjà géré ailleurs)
+        if not path.startswith("/api/") or path == "/api/health":
+            return await call_next(request)
+
+        from Mnemo.guardrails import (
+            get_risk_level, is_at_least,
+            is_system_paused, log_audit,
+            resolve_username_from_token,
+        )
+
+        risk = get_risk_level(method, path)
+
+        # Kill-switch : bloquer HIGH+ quand le système est en pause
+        if is_at_least(risk, "high") and is_system_paused(DATA_PATH):
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Système en pause — reprendre via Paramètres > Guardrails."},
+            )
+
+        response = await call_next(request)
+
+        # Log MEDIUM+ dans l'audit
+        if is_at_least(risk, "medium"):
+            auth_header = request.headers.get("Authorization", "")
+            token = auth_header.removeprefix("Bearer ").strip()
+            if token:
+                username = resolve_username_from_token(token, DATA_PATH)
+                if username:
+                    user_dir = DATA_PATH / "users" / username
+                    try:
+                        log_audit(
+                            user_dir,
+                            method=method,
+                            path=path,
+                            risk=risk,
+                            status=response.status_code,
+                        )
+                    except Exception:
+                        pass
+
+        return response
+
+
+app.add_middleware(_GuardrailsMiddleware)
 
 
 # ── Gestion des utilisateurs ───────────────────────────────────────
@@ -1857,6 +1917,40 @@ def project_git_log(slug: str, _: Auth):
         raise HTTPException(status_code=404, detail="Projet introuvable.")
     _, out = _git(root, "log", "--oneline", "-20")
     return {"log": out}
+
+
+# ── System guardrails (Phase N3) ─────────────────────────────────
+
+@app.get("/api/system/state")
+def system_state(_: Auth):
+    """État du système (paused, paused_at, resumed_at)."""
+    from Mnemo.guardrails import get_system_state
+    return get_system_state(DATA_PATH)
+
+
+@app.post("/api/system/pause", status_code=200)
+def system_pause(_: Auth):
+    """Pause le scheduler autonome — bloque les actions HIGH+."""
+    from Mnemo.guardrails import set_system_paused
+    set_system_paused(DATA_PATH, True)
+    return {"ok": True, "paused": True}
+
+
+@app.post("/api/system/resume", status_code=200)
+def system_resume(_: Auth):
+    """Reprend le scheduler autonome."""
+    from Mnemo.guardrails import set_system_paused
+    set_system_paused(DATA_PATH, False)
+    return {"ok": True, "paused": False}
+
+
+@app.get("/api/audit")
+def get_audit(username: Auth, limit: int = 50):
+    """Retourne les N dernières entrées de l'audit log de l'utilisateur."""
+    from Mnemo.guardrails import read_audit
+    from Mnemo.context import get_data_dir
+    user_dir = get_data_dir()
+    return {"entries": read_audit(user_dir, limit=min(limit, 200))}
 
 
 # ── GOAP (Phase N2) ──────────────────────────────────────────────

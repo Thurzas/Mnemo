@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/api'
-import type { AssistantConfig, AssistantUpdate } from '@/api'
+import type { AssistantConfig, AssistantUpdate, AuditEntry, SystemState } from '@/api'
 import styles from './SettingsPage.module.css'
 
 interface Props {
@@ -83,6 +83,119 @@ function DreamerSection() {
         >
           {running ? 'En cours…' : 'Lancer maintenant'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Section Guardrails ────────────────────────────────────────────
+
+const RISK_COLOR: Record<string, string> = {
+  low:      '#64748b',
+  medium:   '#d97706',
+  high:     '#ef4444',
+  critical: '#7c3aed',
+}
+
+const METHOD_COLOR: Record<string, string> = {
+  GET:    '#22c55e',
+  POST:   '#3b82f6',
+  PUT:    '#f59e0b',
+  DELETE: '#ef4444',
+}
+
+function GuardrailsSection() {
+  const [sysState, setSysState] = useState<SystemState | null>(null)
+  const [audit, setAudit]       = useState<AuditEntry[]>([])
+  const [toggling, setToggling] = useState(false)
+  const [sysError, setSysError] = useState<string | null>(null)
+
+  const fetchAll = useCallback(async () => {
+    try {
+      const [sys, aud] = await Promise.all([
+        api.getSystemState(),
+        api.getAudit(20),
+      ])
+      setSysState(sys)
+      setAudit(aud.entries)
+    } catch { /* silence */ }
+  }, [])
+
+  useEffect(() => {
+    fetchAll()
+    const id = setInterval(fetchAll, 15_000)
+    return () => clearInterval(id)
+  }, [fetchAll])
+
+  const handleToggle = async () => {
+    if (!sysState) return
+    setToggling(true)
+    setSysError(null)
+    try {
+      if (sysState.paused) await api.resumeSystem()
+      else                 await api.pauseSystem()
+      await fetchAll()
+    } catch (e: unknown) {
+      setSysError(e instanceof Error ? e.message : 'Erreur inconnue')
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  return (
+    <div className={styles.section}>
+      <h3 className={styles.sectionTitle}>Guardrails</h3>
+
+      {sysState && (
+        <div className={styles.guardrailsRow}>
+          <span className={`${styles.guardrailsDot} ${sysState.paused ? styles.guardrailsPaused : styles.guardrailsActive}`} />
+          <span className={styles.guardrailsLabel}>
+            {sysState.paused
+              ? `Système en pause${sysState.paused_at ? ` — ${_timeAgo(sysState.paused_at)}` : ''}`
+              : 'Système actif'}
+          </span>
+          <button
+            className={sysState.paused ? styles.resumeBtn : styles.pauseBtn}
+            onClick={handleToggle}
+            disabled={toggling}
+          >
+            {toggling ? '…' : sysState.paused ? 'Reprendre' : 'Mettre en pause'}
+          </button>
+        </div>
+      )}
+
+      {sysError && <p className={styles.error}>{sysError}</p>}
+
+      {sysState?.paused && (
+        <p className={styles.pauseNotice}>
+          Le scheduler autonome (briefing, rêve, avancement projet) est suspendu.
+          Les actions HIGH+ sont bloquées par le middleware.
+        </p>
+      )}
+
+      <div className={styles.auditList}>
+        <p className={styles.auditTitle}>Journal d'actions récentes</p>
+        {audit.length === 0 && (
+          <p className={styles.auditEmpty}>Aucune action enregistrée.</p>
+        )}
+        {audit.map((e, i) => (
+          <div key={i} className={styles.auditEntry}>
+            <span
+              className={styles.auditMethod}
+              style={{ color: METHOD_COLOR[e.method] ?? '#94a3b8' }}
+            >{e.method}</span>
+            <span className={styles.auditPath}>{e.path}</span>
+            <span
+              className={styles.auditRisk}
+              style={{ color: RISK_COLOR[e.risk] ?? '#64748b' }}
+            >{e.risk}</span>
+            <span
+              className={styles.auditStatus}
+              style={{ color: e.status < 400 ? '#22c55e' : '#ef4444' }}
+            >{e.status}</span>
+            <span className={styles.auditTs}>{_timeAgo(e.ts)}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -225,6 +338,7 @@ export function SettingsPage({ active }: Props) {
       </div>
 
       <DreamerSection />
+      <GuardrailsSection />
     </div>
   )
 }
