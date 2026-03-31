@@ -18,6 +18,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'voice',     label: 'Voix' },
   { id: 'projects',  label: 'Projets' },
   { id: 'settings',  label: 'Paramètres' },
+  { id: 'nodal',     label: 'Réseau' },
 ]
 
 const STATUS_LABEL = { ok: 'connecté', error: 'hors ligne', connecting: 'connexion…' }

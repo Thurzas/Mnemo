@@ -207,16 +207,30 @@ def _build_scheduler_world_state() -> dict:
     except Exception:
         pass
 
+    # assistant_config_fresh : au moins un utilisateur a un assistant.json
+    assistant_config_fresh = False
+    users_dir = DATA_PATH / "users"
+    if users_dir.exists():
+        assistant_config_fresh = any(
+            (u / "assistant.json").exists()
+            for u in users_dir.iterdir() if u.is_dir()
+        )
+
     return {
-        "calendar_fetched":      calendar_fetched,
-        "memory_synced":         memory_synced,
-        "memory_gaps_known":     ws_persisted.get("memory_gaps_known", False),
-        "memory_blocking_gaps":  ws_persisted.get("memory_blocking_gaps", False),
-        "user_online":           False,   # scheduler = pas d'utilisateur présent
-        "briefing_fresh":        briefing_fresh,
-        "weekly_generated":      weekly_generated,
-        "deadline_alerts_sent":  ws_persisted.get("deadline_alerts_sent", False),
-        "knows_module":          ws_persisted.get("knows_module", False),
+        "calendar_fetched":       calendar_fetched,
+        "memory_synced":          memory_synced,
+        "memory_gaps_known":      ws_persisted.get("memory_gaps_known", False),
+        "memory_blocking_gaps":   ws_persisted.get("memory_blocking_gaps", False),
+        "user_online":            False,   # scheduler = pas d'utilisateur présent
+        "briefing_fresh":         briefing_fresh,
+        "weekly_generated":       weekly_generated,
+        "deadline_alerts_sent":   ws_persisted.get("deadline_alerts_sent", False),
+        "knows_module":           ws_persisted.get("knows_module", False),
+        # Phase N2
+        "memory_consolidated":    ws_persisted.get("memory_consolidated", False),
+        "old_sessions_archived":  ws_persisted.get("old_sessions_archived", False),
+        "assistant_config_fresh": assistant_config_fresh,
+        "web_context_available":  ws_persisted.get("web_context_available", False),
     }
 
 
@@ -261,6 +275,81 @@ def _scheduler_assess_gaps() -> None:
     if not ws.get("memory_gaps_known"):
         log.info("memory_gaps_known=False — rapport de gaps absent ou obsolète")
     _update_world_state({"memory_gaps_known": True})
+
+
+def _scheduler_trigger_dream() -> None:
+    """TriggerDream : déclenche _run_dreamer pour tous les utilisateurs sans session active."""
+    import threading
+    users_dir = DATA_PATH / "users"
+    if not users_dir.exists():
+        return
+    launched = False
+    for user_dir in sorted(users_dir.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        username = user_dir.name
+        if _has_active_session(username):
+            continue
+        user_ws_path = user_dir / "world_state.json"
+        ws: dict = {}
+        if user_ws_path.exists():
+            try:
+                ws = json.loads(user_ws_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        if ws.get("dreamer_running"):
+            continue
+        log.info(f"[goap] TriggerDream → {username}")
+        threading.Thread(
+            target=_run_dreamer,
+            args=(username,),
+            daemon=True,
+            name=f"dreamer-goap-{username}",
+        ).start()
+        launched = True
+    if launched:
+        _update_world_state({"memory_consolidated": True})
+
+
+def _scheduler_archive_memory() -> None:
+    """ArchiveMemory : prune_memory pour tous les utilisateurs."""
+    from Mnemo.tools.memory_archive import prune_memory
+    users_dir = DATA_PATH / "users"
+    if not users_dir.exists():
+        return
+    for user_dir in sorted(users_dir.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        try:
+            prune_memory(user_dir.name, data_path=DATA_PATH)
+            log.info(f"[goap] ArchiveMemory ✓ {user_dir.name}")
+        except Exception as e:
+            log.warning(f"[goap] ArchiveMemory échoué pour {user_dir.name}: {e}")
+    _update_world_state({"old_sessions_archived": True})
+
+
+def _scheduler_update_assistant_config() -> None:
+    """UpdateAssistantConfig : ensure_assistant_config pour tous les utilisateurs."""
+    from Mnemo.tools.assistant_tools import ensure_assistant_config
+    from Mnemo.context import set_data_dir
+    users_dir = DATA_PATH / "users"
+    if not users_dir.exists():
+        return
+    for user_dir in sorted(users_dir.iterdir()):
+        if not user_dir.is_dir():
+            continue
+        try:
+            set_data_dir(user_dir)
+            ensure_assistant_config()
+        except Exception as e:
+            log.warning(f"[goap] UpdateAssistantConfig échoué pour {user_dir.name}: {e}")
+    _update_world_state({"assistant_config_fresh": True})
+
+
+def _scheduler_fetch_web_context() -> None:
+    """FetchWebContext : marque le contexte web comme disponible (enrichissement passif)."""
+    _update_world_state({"web_context_available": True})
+    log.info("[goap] FetchWebContext ✓")
 
 
 # Registre d'exécuteurs GOAP pour le scheduler
@@ -829,6 +918,30 @@ def _goap_autonomy_tick() -> None:
         if not projects_dir.exists():
             continue
 
+        # ── Pending GOAP goal (Phase N2) ────────────────────────────
+        user_ws_path = user_dir / "world_state.json"
+        if user_ws_path.exists():
+            try:
+                user_ws = json.loads(user_ws_path.read_text(encoding="utf-8"))
+                pending_goal = user_ws.get("pending_goap_goal")
+                if pending_goal:
+                    log.info(f"[goap] Goal utilisateur détecté pour {username}: {pending_goal}")
+                    from Mnemo.context import set_data_dir
+                    set_data_dir(user_dir)
+                    try:
+                        goap_dispatch(pending_goal)
+                        # Goal accompli — on le retire
+                        user_ws.pop("pending_goap_goal", None)
+                        user_ws_path.write_text(
+                            json.dumps(user_ws, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        log.info(f"[goap] Goal accompli pour {username}")
+                    except Exception as e:
+                        log.warning(f"[goap] Goal échoué pour {username}: {e}")
+            except Exception:
+                pass
+
         for project_dir in sorted(projects_dir.iterdir()):
             manifest_file = project_dir / "project.json"
             if not manifest_file.exists():
@@ -851,12 +964,17 @@ def _goap_autonomy_tick() -> None:
 
 # Initialisation du registre GOAP après les définitions d'actions
 _SCHEDULER_EXECUTORS.update({
-    "FetchCalendar":    _scheduler_fetch_calendar,
-    "SyncMemory":       _scheduler_sync_memory,
-    "AssessMemoryGaps": _scheduler_assess_gaps,
-    "GenerateBriefing": action_briefing,
-    "GenerateWeekly":   action_weekly,
-    "SendDeadlineAlert": action_deadline_alert,
+    "FetchCalendar":         _scheduler_fetch_calendar,
+    "SyncMemory":            _scheduler_sync_memory,
+    "AssessMemoryGaps":      _scheduler_assess_gaps,
+    "GenerateBriefing":      action_briefing,
+    "GenerateWeekly":        action_weekly,
+    "SendDeadlineAlert":     action_deadline_alert,
+    # Phase N2
+    "TriggerDream":          _scheduler_trigger_dream,
+    "ArchiveMemory":         _scheduler_archive_memory,
+    "UpdateAssistantConfig": _scheduler_update_assistant_config,
+    "FetchWebContext":       _scheduler_fetch_web_context,
 })
 
 # Goals GOAP par type de tâche système
@@ -864,6 +982,8 @@ _SYSTEM_GOALS = {
     "briefing":       {"briefing_fresh": True},
     "weekly":         {"weekly_generated": True},
     "deadline_alert": {"deadline_alerts_sent": True},
+    "dream":          {"memory_consolidated": True},
+    "archive":        {"old_sessions_archived": True},
 }
 
 # _ACTION_MAP conservé pour les tâches utilisateur simples (reminder)

@@ -10,13 +10,14 @@ import { KnowledgePage } from '@/pages/KnowledgePage'
 import { VoicePage } from '@/pages/VoicePage'
 import { ProjectsPage } from '@/pages/ProjectsPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { NodalPage } from '@/pages/NodalPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { OnboardingModal } from '@/pages/OnboardingModal'
 import { api, auth } from '@/api'
 import type { OnboardingQuestion } from '@/api'
 import styles from './App.module.css'
 
-export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar' | 'knowledge' | 'voice' | 'projects' | 'settings'
+export type TabId = 'chat' | 'memory' | 'sessions' | 'calendar' | 'knowledge' | 'voice' | 'projects' | 'settings' | 'nodal'
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('chat')
@@ -138,6 +139,9 @@ export default function App() {
         </div>
         <div className={tab === 'settings' ? styles.visible : styles.hidden}>
           <SettingsPage active={tab === 'settings'} />
+        </div>
+        <div className={tab === 'nodal' ? styles.visible : styles.hidden}>
+          <NodalPage active={tab === 'nodal'} />
         </div>
       </main>
       {onboardingQuestions?.length ? (

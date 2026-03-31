@@ -1,0 +1,560 @@
+/* ── Page layout ──────────────────────────────────────────────── */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0f172a;
+  position: relative;
+}
+
+.canvas {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Live status bar ──────────────────────────────────────────── */
+
+.liveBar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 1rem;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.liveRunningDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.liveIdle {
+  color: #64748b;
+}
+
+.liveProject {
+  margin-left: auto;
+  color: #cbd5e1;
+}
+
+/* ── Custom node ──────────────────────────────────────────────── */
+
+.node {
+  background: #1e293b;
+  border: 2px solid #334155;
+  border-radius: 8px;
+  min-width: 150px;
+  max-width: 180px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  position: relative;
+  padding-bottom: 4px;
+}
+
+.node:hover {
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
+}
+
+.nodeRunning {
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.35);
+  animation: nodeGlow 1.8s ease-in-out infinite;
+}
+
+@keyframes nodeGlow {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.35); }
+  50%       { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.15); }
+}
+
+.nodeType {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 6px 6px 0 0;
+  text-align: center;
+}
+
+.nodeLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  padding: 6px 8px 4px;
+  text-align: center;
+  word-break: break-word;
+}
+
+.runningDot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+/* ── Detail panel ─────────────────────────────────────────────── */
+
+.panel {
+  position: absolute;
+  top: 48px;
+  right: 0;
+  width: 320px;
+  height: calc(100% - 48px);
+  background: #1e293b;
+  border-left: 1px solid #334155;
+  overflow-y: auto;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-left: 3px solid #334155;
+  padding-left: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.panelTypeTag {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.panelTitle {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  flex: 1;
+}
+
+.panelClose {
+  background: none;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.panelClose:hover {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.panelStatus {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #475569;
+  flex-shrink: 0;
+}
+
+.statusRunning {
+  background: #22c55e;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.panelDesc {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.panelSection {
+  border-top: 1px solid #334155;
+  padding-top: 0.75rem;
+}
+
+.panelSection h4 {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  margin: 0 0 0.5rem;
+}
+
+.panelItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: #0f172a;
+  border-radius: 4px;
+}
+
+.panelItemName {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.panelItemDesc {
+  font-size: 0.7rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.toolList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.toolTag {
+  font-size: 0.65rem;
+  background: #0f172a;
+  color: #16a34a;
+  border: 1px solid #166534;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: monospace;
+}
+
+/* ── View toggle ──────────────────────────────────────────────── */
+
+.viewToggle {
+  display: flex;
+  gap: 2px;
+  background: #0f172a;
+  border-radius: 6px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.viewBtn {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.viewBtn:hover {
+  color: #cbd5e1;
+}
+
+.viewBtnActive {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+/* ── GOAP Panel ───────────────────────────────────────────────── */
+
+.goapPanel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.goapLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: #64748b;
+  font-size: 0.875rem;
+}
+
+.goapSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.goapSectionTitle {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.goapEmpty {
+  font-size: 0.75rem;
+  color: #475569;
+  margin: 0;
+}
+
+/* World state chips */
+
+.wsGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.wsChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  color: #cbd5e1;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 2px 7px;
+  background: #0f172a;
+}
+
+.wsChipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Goal badge */
+
+.goapGoalBadge {
+  font-size: 0.65rem;
+  font-weight: 500;
+  background: #1e3a5f;
+  color: #93c5fd;
+  border-radius: 4px;
+  padding: 1px 6px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Plan steps */
+
+.planSteps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.planStep {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: #0f172a;
+  border-radius: 4px;
+  border-left: 2px solid #dc2626;
+}
+
+.planStepNum {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #dc2626;
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.planStepName {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  flex: 1;
+}
+
+.planStepCost {
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.goapPlanError {
+  font-size: 0.75rem;
+  color: #ef4444;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  background: #1a0a0a;
+  border-radius: 4px;
+  border-left: 2px solid #ef4444;
+}
+
+/* Goal injection form */
+
+.goalForm {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.goalSelect {
+  flex: 1;
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  outline: none;
+}
+
+.goalSelect:focus {
+  border-color: #3b82f6;
+}
+
+.goalSubmitBtn {
+  background: #1d4ed8;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.goalSubmitBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clearGoalBtn {
+  background: none;
+  border: 1px solid #dc2626;
+  color: #f87171;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  padding: 3px 10px;
+  cursor: pointer;
+  align-self: flex-start;
+  margin-top: 0.25rem;
+}
+
+.clearGoalBtn:hover {
+  background: #1a0a0a;
+}
+
+/* Action cards */
+
+.actionCard {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.actionCard:hover {
+  border-color: #475569;
+}
+
+.actionCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+}
+
+.actionName {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #f87171;
+  flex: 1;
+}
+
+.actionCost {
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.actionLock {
+  font-size: 0.65rem;
+}
+
+.actionChevron {
+  font-size: 0.65rem;
+  color: #475569;
+}
+
+.actionCardBody {
+  border-top: 1px solid #1e293b;
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.actionSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.actionSectionLabel {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #475569;
+}
+
+.actionConditions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.conditionTag {
+  font-size: 0.65rem;
+  font-family: monospace;
+  background: #1e293b;
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* ── Error state ──────────────────────────────────────────────── */
+
+.errorState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #ef4444;
+  font-size: 0.875rem;
+}

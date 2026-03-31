@@ -1859,6 +1859,320 @@ def project_git_log(slug: str, _: Auth):
     return {"log": out}
 
 
+# ── GOAP (Phase N2) ──────────────────────────────────────────────
+
+@app.get("/api/goap/state")
+def goap_state(username: Auth):
+    """Retourne world_state, actions disponibles et plan actif pour NodalPage."""
+    from Mnemo.context import get_data_dir
+    from Mnemo.goap import ACTION_REGISTRY
+    from Mnemo.goap.planner import plan as goap_plan, PlanningError
+
+    user_dir = get_data_dir()
+    ws_path = user_dir / "world_state.json"
+    ws: dict = {}
+    if ws_path.exists():
+        try:
+            ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    pending_goal = ws.get("pending_goap_goal")
+
+    active_plan: list[dict] = []
+    plan_error: str | None = None
+    if pending_goal:
+        try:
+            actions = goap_plan(pending_goal, ws)
+            active_plan = [
+                {"name": a.name, "cost": a.cost, "effects": a.effects}
+                for a in actions
+            ]
+        except PlanningError as e:
+            plan_error = str(e)
+
+    # Filtrer les clés internes (_ts_*) du world_state exposé
+    public_ws = {k: v for k, v in ws.items()
+                 if not k.startswith("_ts_") and k != "pending_goap_goal"}
+
+    return {
+        "world_state":  public_ws,
+        "pending_goal": pending_goal,
+        "active_plan":  active_plan,
+        "plan_error":   plan_error,
+        "actions": [
+            {
+                "name":          a.name,
+                "preconditions": a.preconditions,
+                "effects":       a.effects,
+                "cost":          a.cost,
+                "resource_lock": a.resource_lock,
+            }
+            for a in ACTION_REGISTRY
+        ],
+    }
+
+
+class GoapGoalRequest(BaseModel):
+    goal: dict
+
+
+@app.post("/api/goap/goal", status_code=200)
+def goap_set_goal(body: GoapGoalRequest, username: Auth):
+    """Injecte un goal GOAP dans le world_state de l'utilisateur."""
+    from Mnemo.context import get_data_dir
+    user_dir = get_data_dir()
+    ws_path = user_dir / "world_state.json"
+    ws: dict = {}
+    if ws_path.exists():
+        try:
+            ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    ws["pending_goap_goal"] = body.goal
+    ws_path.write_text(json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "pending_goal": body.goal}
+
+
+@app.delete("/api/goap/goal", status_code=200)
+def goap_clear_goal(username: Auth):
+    """Supprime le goal GOAP en attente."""
+    from Mnemo.context import get_data_dir
+    user_dir = get_data_dir()
+    ws_path = user_dir / "world_state.json"
+    ws: dict = {}
+    if ws_path.exists():
+        try:
+            ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    ws.pop("pending_goap_goal", None)
+    ws_path.write_text(json.dumps(ws, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
+# ── Graph (Phase N1) ─────────────────────────────────────────────
+
+_GRAPH_NODES: list[dict] = [
+    # ── Triggers ──────────────────────────────────────────────────
+    {"id": "trig_user_message", "type": "trigger", "label": "Message utilisateur",
+     "description": "Déclenché à chaque message envoyé via /api/message ou WebSocket.",
+     "position": {"x": 280, "y": 50}, "agents": [], "tools": []},
+    {"id": "trig_scheduler", "type": "trigger", "label": "Scheduler (cron)",
+     "description": "Boucle toutes les 60s — briefing, deadline scan, autonomie GOAP.",
+     "position": {"x": 840, "y": 50}, "agents": [], "tools": []},
+    {"id": "trig_inactivity", "type": "trigger", "label": "Inactivité (30 min)",
+     "description": "Déclenche DreamerCrew après 30 min d'inactivité (min 24h entre deux rêves).",
+     "position": {"x": 1120, "y": 50}, "agents": [], "tools": []},
+    {"id": "trig_plan_step", "type": "trigger", "label": "Avancement plan",
+     "description": "Scheduler avance l'étape courante d'un projet actif dans world_state.",
+     "position": {"x": 1680, "y": 50}, "agents": [], "tools": []},
+
+    # ── EvaluationCrew ────────────────────────────────────────────
+    {"id": "crew_evaluation", "type": "crew", "label": "EvaluationCrew",
+     "description": "Analyse l'intent du message et produit un JSON de routing "
+                    "(route, needs_memory, needs_web, needs_clarification…).",
+     "position": {"x": 840, "y": 250},
+     "agents": [
+         {"id": "agent_evaluator", "label": "evaluator",
+          "description": "Classifie le message et retourne un JSON de routing. Temp=0."},
+     ], "tools": []},
+
+    # ── Route targets ─────────────────────────────────────────────
+    {"id": "crew_conversation", "type": "crew", "label": "ConversationCrew",
+     "description": "Récupère la mémoire pertinente (FTS5 + vecteurs) et génère la réponse.",
+     "position": {"x": 0, "y": 450},
+     "agents": [
+         {"id": "agent_memory_retriever", "label": "memory_retriever",
+          "description": "Interroge memory.db via RRF (keyword + cosine) et retourne les chunks."},
+         {"id": "agent_main_agent", "label": "main_agent",
+          "description": "Génère la réponse en s'appuyant sur le contexte mémoire et calendrier."},
+     ],
+     "tools": ["RetrieveMemoryTool", "GetSessionMemoryTool",
+               "ListDocumentsTool", "GetCalendarTool", "WebSearchTool"]},
+
+    {"id": "crew_shell", "type": "crew", "label": "ShellCrew",
+     "description": "Exécute des commandes shell après validation par la whitelist.",
+     "position": {"x": 280, "y": 450},
+     "agents": [
+         {"id": "agent_shell_executor", "label": "shell_executor",
+          "description": "Construit et exécute la commande shell validée (whitelist pré-approuvée)."},
+     ],
+     "tools": ["ShellExecuteTool", "ReadPdfTool", "FileWriterTool"]},
+
+    {"id": "crew_notewriter", "type": "crew", "label": "NoteWriterCrew",
+     "description": "Écrit une note structurée directement dans memory.md.",
+     "position": {"x": 560, "y": 450},
+     "agents": [
+         {"id": "agent_note_writer", "label": "note_writer",
+          "description": "Classe et écrit la note dans la section appropriée de memory.md."},
+     ],
+     "tools": ["UpdateMarkdownTool", "SyncMemoryDbTool"]},
+
+    {"id": "crew_scheduler_crew", "type": "crew", "label": "SchedulerCrew",
+     "description": "Traduit une demande en langage naturel en tâche planifiée (DB scheduled_tasks).",
+     "position": {"x": 840, "y": 450},
+     "agents": [
+         {"id": "agent_scheduler_agent", "label": "scheduler_agent",
+          "description": "Interprète la demande et crée/modifie une tâche one_shot ou recurring."},
+     ],
+     "tools": []},
+
+    {"id": "crew_calendar", "type": "crew", "label": "CalendarWriteCrew",
+     "description": "Gestion des événements calendrier ICS (create/update/delete).",
+     "position": {"x": 1120, "y": 450},
+     "agents": [
+         {"id": "agent_calendar_writer", "label": "calendar_writer_agent",
+          "description": "Opère sur le fichier ICS local après confirmation pour les actions destructives."},
+     ],
+     "tools": []},
+
+    {"id": "crew_reconnaissance", "type": "crew", "label": "ReconnaissanceCrew",
+     "description": "Scanne le filesystem d'un projet et synthétise le contexte technique.",
+     "position": {"x": 1400, "y": 450},
+     "agents": [
+         {"id": "agent_recon_agent", "label": "recon_agent",
+          "description": "Lit les fichiers sources et produit un recon_context injecté dans world_state."},
+     ],
+     "tools": []},
+
+    {"id": "crew_planner", "type": "crew", "label": "PlannerCrew",
+     "description": "Décompose un objectif en plan d'étapes annotées (HTN, max_depth=2).",
+     "position": {"x": 1680, "y": 450},
+     "agents": [
+         {"id": "agent_planner_agent", "label": "planner_agent",
+          "description": "Produit plan.md avec étapes annotées (crew : shell/note/recon/planner)."},
+     ],
+     "tools": []},
+
+    # ── Background / autonomous crews ─────────────────────────────
+    {"id": "crew_consolidation", "type": "crew", "label": "ConsolidationCrew",
+     "description": "Fin de session : extrait les faits et les écrit dans memory.md + re-indexe.",
+     "position": {"x": 0, "y": 650},
+     "agents": [
+         {"id": "agent_session_consolidator", "label": "session_consolidator",
+          "description": "Extrait les faits mémorables de la session courante."},
+         {"id": "agent_memory_writer", "label": "memory_writer",
+          "description": "Écrit les faits dans memory.md et re-synchronise memory.db."},
+     ],
+     "tools": ["UpdateMarkdownTool", "SyncMemoryDbTool"]},
+
+    {"id": "crew_curiosity", "type": "crew", "label": "CuriosityCrew",
+     "description": "Post-consolidation : détecte les lacunes mémoire et formule des questions.",
+     "position": {"x": 350, "y": 650},
+     "agents": [
+         {"id": "agent_gap_detector", "label": "gap_detector",
+          "description": "Identifie les sections manquantes ou sous-renseignées dans memory.md."},
+         {"id": "agent_questionnaire_agent", "label": "questionnaire_agent",
+          "description": "Formule au plus 5 questions à poser à l'utilisateur lors de la prochaine session."},
+     ],
+     "tools": ["UpdateMarkdownTool", "SyncMemoryDbTool"]},
+
+    {"id": "crew_briefing", "type": "crew", "label": "BriefingCrew",
+     "description": "Génère briefing.md (quotidien) et weekly.md (hebdomadaire) via le scheduler.",
+     "position": {"x": 700, "y": 650},
+     "agents": [
+         {"id": "agent_briefing_agent", "label": "briefing_agent",
+          "description": "Synthétise agenda, deadlines et priorités en un briefing structuré."},
+     ],
+     "tools": []},
+
+    {"id": "crew_sandbox", "type": "crew", "label": "SandboxCrew",
+     "description": "Travail isolé sur un projet sandbox : lecture/écriture/shell confinés.",
+     "position": {"x": 1050, "y": 650},
+     "agents": [
+         {"id": "agent_sandbox_agent", "label": "sandbox_agent",
+          "description": "Opère sur les fichiers du projet dans le sandbox (path confinement + git auto-commit)."},
+     ],
+     "tools": ["SandboxReadTool", "SandboxWriteTool", "SandboxShellTool", "SandboxListTool"]},
+
+    {"id": "crew_dreamer", "type": "crew", "label": "DreamerCrew",
+     "description": "Consolidation mémoire long terme : détecte doublons, applique patches, archive.",
+     "position": {"x": 1400, "y": 650},
+     "agents": [
+         {"id": "agent_memory_analyst", "label": "memory_analyst",
+          "description": "Analyse memory.md (sections chaudes ou rotation) et produit un JSON de patches."},
+         {"id": "agent_memory_patcher", "label": "memory_patcher",
+          "description": "Applique les patches sur memory.md via ApplyDreamPatchesTool."},
+     ],
+     "tools": ["ApplyDreamPatchesTool"]},
+]
+
+_GRAPH_EDGES: list[dict] = [
+    # Triggers → EvaluationCrew
+    {"id": "e_msg_eval",    "source": "trig_user_message", "target": "crew_evaluation",    "label": ""},
+    # Scheduler → BriefingCrew
+    {"id": "e_sched_brief", "source": "trig_scheduler",    "target": "crew_briefing",      "label": "daily/weekly"},
+    # Inactivity → DreamerCrew
+    {"id": "e_idle_dream",  "source": "trig_inactivity",   "target": "crew_dreamer",       "label": "idle 30min"},
+    # Plan step → Planner / Recon / Sandbox
+    {"id": "e_plan_planner","source": "trig_plan_step",    "target": "crew_planner",       "label": "new project"},
+    {"id": "e_plan_recon",  "source": "trig_plan_step",    "target": "crew_reconnaissance","label": "recon step"},
+    {"id": "e_plan_sandbox","source": "trig_plan_step",    "target": "crew_sandbox",       "label": "shell/note step"},
+    # EvaluationCrew routing
+    {"id": "e_eval_conv",   "source": "crew_evaluation",   "target": "crew_conversation",  "label": "conversation"},
+    {"id": "e_eval_shell",  "source": "crew_evaluation",   "target": "crew_shell",         "label": "shell"},
+    {"id": "e_eval_note",   "source": "crew_evaluation",   "target": "crew_notewriter",    "label": "note"},
+    {"id": "e_eval_sched",  "source": "crew_evaluation",   "target": "crew_scheduler_crew","label": "scheduler"},
+    {"id": "e_eval_cal",    "source": "crew_evaluation",   "target": "crew_calendar",      "label": "calendar"},
+    {"id": "e_eval_plan",   "source": "crew_evaluation",   "target": "crew_planner",       "label": "plan"},
+    # Session lifecycle
+    {"id": "e_conv_consol", "source": "crew_conversation", "target": "crew_consolidation", "label": "fin de session"},
+    {"id": "e_consol_cur",  "source": "crew_consolidation","target": "crew_curiosity",     "label": "post-consolidation"},
+    # Planner → Recon → Sandbox
+    {"id": "e_plan_rec2",   "source": "crew_planner",      "target": "crew_reconnaissance","label": "needs_recon"},
+    {"id": "e_plan_sand2",  "source": "crew_planner",      "target": "crew_sandbox",       "label": "exécution"},
+]
+
+
+@app.get("/api/graph")
+def get_graph(username: Auth):
+    """Retourne le graphe crew/agent/tool avec statut live pour NodalPage."""
+    from Mnemo.context import get_data_dir
+    user_dir = get_data_dir()
+
+    ws: dict = {}
+    ws_path = user_dir / "world_state.json"
+    if ws_path.exists():
+        try:
+            ws = json.loads(ws_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    dreamer_running    = ws.get("dreamer_running", False)
+    active_project_raw = ws.get("active_project")
+    # active_project peut être un string (slug) ou un dict {slug, goal, step}
+    if isinstance(active_project_raw, dict):
+        active_project: str | None = active_project_raw.get("slug")
+    elif isinstance(active_project_raw, str):
+        active_project = active_project_raw
+    else:
+        active_project = None
+
+    running_set: set[str] = set()
+    if dreamer_running:
+        running_set.add("crew_dreamer")
+    if active_project:
+        running_set.add("crew_sandbox")
+        running_set.add("crew_planner")
+
+    nodes_out = []
+    for node in _GRAPH_NODES:
+        n = dict(node)
+        n["status"] = "running" if node["id"] in running_set else "idle"
+        nodes_out.append(n)
+
+    return {
+        "nodes": nodes_out,
+        "edges": _GRAPH_EDGES,
+        "live": {
+            "running_crews": list(running_set),
+            "active_project": active_project,
+            "dreamer_running": dreamer_running,
+        },
+    }
+
+
 # ── SPA catch-all — DOIT être en dernier pour ne pas écraser /api/* ──
 # FastAPI matche les routes dans l'ordre de définition.
 # Ce catch-all doit être après toutes les routes /api/*.

@@ -117,6 +117,33 @@ ACTION_REGISTRY: list[Action] = [
         effects       = {"deadline_alerts_sent": True},
         cost          = 2,
     ),
+    # ── Phase N2 ─────────────────────────────────────────────────
+    Action(
+        name          = "TriggerDream",
+        preconditions = {"memory_synced": True},
+        effects       = {"memory_consolidated": True},
+        cost          = 10,
+        resource_lock = "memory.db",
+    ),
+    Action(
+        name          = "ArchiveMemory",
+        preconditions = {"memory_consolidated": True},
+        effects       = {"old_sessions_archived": True},
+        cost          = 5,
+        resource_lock = "memory.db",
+    ),
+    Action(
+        name          = "UpdateAssistantConfig",
+        preconditions = {},
+        effects       = {"assistant_config_fresh": True},
+        cost          = 2,
+    ),
+    Action(
+        name          = "FetchWebContext",
+        preconditions = {},
+        effects       = {"web_context_available": True},
+        cost          = 4,
+    ),
 ]
 
 

@@ -1,182 +1,183 @@
 # 🗺️ Mnemo — Roadmap
 
-> Long-term goal: transform Mnemo into an intelligent,  
-> modular and extensible desktop assistant — capable of powering interfaces as diverse  
-> as a terminal, a Raspberry Pi robot, or a Unity desktop pet.
+> Long-term goal: transform Mnemo into an intelligent, modular and extensible personal assistant —
+> capable of powering interfaces as diverse as a terminal, a React dashboard, a Raspberry Pi robot,
+> or a Unity desktop pet.
 
 ---
 
 ## ✅ Phase 0 — Memory Foundations *(completed)*
 
-The core of the project. Everything else builds on top of it.
-
 - [x] Hybrid memory architecture (short-term JSON + long-term Markdown)
 - [x] Dual SQLite index: FTS5 keyword + vector (nomic-embed-text, 768d)
 - [x] Hybrid retrieval using Reciprocal Rank Fusion (RRF)
-- [x] Chunk weighting: importance by category × freshness (exponential half-life decay)
-- [x] `memory.md` ↔ SQLite desynchronization detection (MD5 hash + mtime)
+- [x] Chunk weighting: category × freshness (exponential half-life decay)
+- [x] `memory.md` ↔ SQLite desynchronization detection (MD5 + mtime)
 - [x] ConversationCrew (Evaluator → MemoryRetriever → Main Agent)
 - [x] ConsolidationCrew (SessionConsolidator → MemoryWriter)
-- [x] CTRL+C protection via `finally` + orphaned session recovery
-- [x] Unicode surrogate sanitization (Ollama bug)
-- [x] Separate YAML per crew (CrewAI KeyError fix)
-- [x] Ollama Modelfile with `num_ctx 8192` (`num_ctx 16 384`)
+- [x] Orphaned session recovery on startup
 
 ---
 
 ## ✅ Phase 1 — Stabilization *(completed)*
 
-Make the system reliable over time before adding new features.
-
-- [x] **Level 1 unit tests** — low-level building blocks without LLM
-  - [x] `parse_markdown_chunks` — correct splitting of `##` / `###`
-  - [x] `compute_hash` — determinism and change sensitivity
-  - [x] `update_markdown_section` — upsert without duplication, neighboring sections intact
-  - [x] `sync_markdown_to_db` — chunk addition, update, deletion
-  - [x] `load_session_json` — handle empty, corrupted, or missing files
-  - [x] `freshness_score` / `importance_score` — correct values and decay behavior
-- [x] **Level 2 tests** — hybrid retrieval (with Ollama, without reasoning LLM)
-  - [x] Manual chunk insertion → verify top-1 retrieval result
-  - [x] Short query → adaptive_weights switches to keyword mode
-  - [x] Empty query → no crash
-- [x] **Level 3 tests** — full session cycle (without LLM)
-  - [x] `update_session_memory` × N → correct accumulation
-  - [x] Empty session scenario → "nothing to consolidate" without crash
-- [x] Add a `CONTRIBUTING.md` and GitHub issue templates
-- [?] Support for CrewAI `knowledge/` as an optional documentation layer  
-  *(static, factual — distinct from episodic `memory.md` memory)*
+- [x] Level 1–3 unit tests (memory, retrieval, session cycle)
+- [x] Active learning: weight regression + uncertain case audit trail
+- [x] ML router (sklearn pipeline, confidence thresholds per route)
+- [x] `CONTRIBUTING.md` + GitHub issue templates
 
 ---
 
-## 🔧 Phase 2 — Perception *(completed)*
+## ✅ Phase 2 — Perception *(completed)*
 
-Give Mnemo the ability to perceive its environment beyond typed text.
-
-- [x] **File ingestion**
-  - [x] PDF → text extraction + chunking → long-term memory injection
-  - [x] DOCX, TXT, Markdown
-  - [x] Source code (with language detection)
-- [x] **Temporal awareness**
-  - [x] Automatic injection of current date/time into each session
-  - [x] Connection to a local ICS calendar (read-only at first)
-  - [x] Awareness of upcoming deadlines and events
-- [x] **Occasional web access** *(security verified)*
-  - [x] Self-hosted SearXNG integration via Docker (zero tracking)
-  - [x] DuckDuckGo API fallback if SearXNG is unavailable
-  - [x] `web_search` tool available only upon explicit request
-  - [x] Security audit of network dependencies before activation
+- [x] PDF / DOCX / TXT / Markdown / source code ingestion
+- [x] Temporal context: current date/time injected into every session
+- [x] ICS calendar integration (read + CRUD)
+- [x] Web search: SearXNG self-hosted + DuckDuckGo fallback (PII guards, audit log)
 
 ---
 
-## ⚡ Phase 3 — Action & Local Interface *(completed)*
+## ✅ Phase 3 — Action & Local Interface *(completed)*
 
-Move from an agent that responds to an agent that acts — and give it a window onto the desktop.
-
-- [x] **Action tools**
-  - [x] Shell command execution (mandatory confirmation, never autonomous)
-  - [x] File management (create, move, rename)
-  - [x] Structured note-taking → direct writing into `memory.md` or project files
-- [x] **Local web dashboard**
-  - [x] Lightweight `localhost` interface (FastAPI + minimal frontend)
-  - [x] Visualization of `memory.md` and sessions
-  - [x] Agenda with CRUD backend
-  - [x] Send messages from the browser (CLI alternative)
-  - [x] *Why web over system tray: better WSL2 portability,  
-    naturally prepares the Phase 4 API*
-- [x] **Scheduler**
-  - [x] Scheduled tasks (reminders, daily summary)
-  - [x] Morning briefing: today’s agenda + last session + key memory highlights
+- [x] Shell execution (whitelist + mandatory confirmation)
+- [x] Structured note-taking → direct write to `memory.md`
+- [x] FastAPI dashboard: memory, sessions, calendar, chat
+- [x] Scheduler: daily briefing, weekly summary, deadline scan
 
 ---
 
-## 🌐 Phase 4 — API & External Interfaces *(In progress)*
+## ✅ Phase 4 — API & Voice *(completed)*
 
-Turn Mnemo into a headless brain callable from any interface.
-
-- [x] **REST API (FastAPI)**
-  - [x] `POST /message` — send a message, receive a response
-  - [x] `GET /memory` — read long-term memory
-  - [x] `POST /memory` — write a fact directly into memory
-  - [x] `GET /session/{id}` — session history
-  - [x] Lightweight authentication (local token, no public exposure)
-  - [x] WebSocket for token-by-token response streaming
-- [x] **Local TTS / STT**
-  - [x] Speech-to-Text via Whisper.cpp (offline, WSL compatible)
-  - [x] Text-to-Speech via Piper TTS (lightweight local voice)
-  - [x] Voice → Mnemo → Voice pipeline
----
-
-## 🔧 Phase 5 — Proactivity *(in progress)*
-
-The agent takes initiative without waiting to be prompted.
-
-- [x] Routing CoR refactored (KeywordHandler → MLHandler → LLMHandler)
-- [x] Contextual weighting per profile (`learned_weights_{profile}.json`)
-- [x] Active learning: weight regression + audit trail
-- [x] `MemoryGapReport` + `WorldState` — CuriosityCrew as a GOAP sensing action
-- [x] `PlannerCrew` + `ReconnaissanceCrew` — plan route operational
-- [ ] Pattern detection ("you work on X every Monday")
-- [ ] Alerts for approaching deadlines
-- [ ] Automatic compaction of `memory.md` when it becomes too large
-- [ ] Multi-profiles (separate identities for personal vs professional use)
+- [x] REST API: `/message`, `/memory`, `/sessions`, `/calendar`, `/confirmations`
+- [x] WebSocket token streaming
+- [x] JWT-style local auth (token per user, SHA-256 hash)
+- [x] STT (Whisper.cpp offline) + TTS (Kokoro + RVC pipeline)
+- [x] VoicePage + settings in dashboard
 
 ---
 
-## ✅ Phase 6 — GOAP Planner & Persistent Planning *(completed)*
+## ✅ Phase 5 — Proactivity & Routing *(completed)*
 
-Goal-Oriented Action Planning layer — the scheduler and planning crews reason
-about *goals* rather than executing actions directly.
-
-- [x] **GOAP planner** (`goap/planner.py`)
-  - [x] `Action` dataclass: preconditions, effects, cost, resource_lock
-  - [x] `ACTION_REGISTRY` — 9 actions (FetchCalendar, SyncMemory, AssessMemoryGaps, FillBlockingGaps, ReconModule, CreatePlan, GenerateBriefing, GenerateWeekly, SendDeadlineAlert)
-  - [x] Backward chaining + topological sort
-  - [x] Handles both True and False effects
-- [x] **PlanStore** (`tools/plan_tools.py`)
-  - [x] Markdown plan file I/O with `[ ]`/`[x]` checkboxes
-  - [x] Sections: Étapes / Bloquants / Journal / Statut
-  - [x] `create()`, `mark_done()`, `add_blocker()`, `append_log()`
-- [x] **PlanRunner** — executes steps via `_STEP_EXECUTOR`, stops at first blocker
-- [x] **Route "plan"** in CoR routing — keyword detection + LLM arbitration
-- [x] **PlannerCrew** — loads WorldState gaps, LLM generates plan, `PlanStore.create()`
-- [x] **ReconnaissanceCrew** — reads source files in Python (no LLM hallucinations), single LLM synthesis → `recon_context`
-- [x] **Scheduler migrated to GOAP** — `goap_dispatch(goal)` replaces flat `_ACTION_MAP` for system tasks
-- [x] `check_active_plans()` called at session startup for inter-session plan continuity
-- [x] 190+ tests covering all 7 étapes
+- [x] Hybrid CoR routing: KeywordHandler → MLHandler → LLMHandler
+- [x] CuriosityCrew: memory gap detection + questions to user
+- [x] WorldState + GOAP planner (backward chaining, A* ready)
+- [x] PlannerCrew + ReconnaissanceCrew (HTN, max depth 2)
+- [x] PlanRunner: `_run_shell`, `_run_note`, `_run_recon`, `_try_reformulate`
+- [x] Stack detection: `_detect_stack()` + `_read_src_files()` for context-aware code gen
+- [x] Phase E: project index (E.1) + doc RAG context (E.2)
+- [x] Phase B: KG feedback ±0.1 per step, shell writes to `src/`
 
 ---
 
-## Phase 7 — Deployment on external platforms *(industrial planning)*
+## ✅ Phase 6 — Dashboard & Projects *(completed)*
 
-- [ ] **Raspberry Pi integration**
-  - [ ] Lightweight Python client consuming the REST API
-  - [ ] Latency optimization for embedded hardware responses
-  - [ ] Fallback mode if Mnemo is unreachable (local cache responses)
-- [ ] **Unity integration (desktop pet)**
-  - [ ] C# client consuming the REST API
-  - [ ] State protocol: mood, attention, reaction to messages
-  - [ ] Token streaming to animate the character in real time
-  - [ ] Events: `on_thinking`, `on_response`, `on_memory_write`
+- [x] React dashboard: ChatPage, MemoryPage, SessionsPage, CalendarPage
+- [x] KnowledgePage (doc ingestion + list)
+- [x] ProjectsPage: Monaco editor + FileTree + Plan panel + Terminal
+- [x] VoicePage: Kokoro voice settings + RVC model management
+- [x] `pending_confirmations` → approval flow in ProjectsPage
+- [x] Sandbox tools: `create/read/write/run_command`, git integration, path confinement
+
+---
+
+## ✅ Phase A — Assistant Identity *(completed — 2026-03-28)*
+
+Configurable assistant persona, injected into all crews at runtime.
+
+- [x] `assistant.json` per user (`data/users/<username>/assistant.json`)
+- [x] `tools/assistant_tools.py`: `get/ensure/set_assistant_config`, `get_assistant_context`
+- [x] Injection pipeline: `dispatch.py` → `base_inputs` → all crew YAML agents
+- [x] `config/conversation_agents.yaml`: `{assistant_name}` / `{assistant_persona}`
+- [x] `config/consolidation_agents.yaml` + `curiosity_agents.yaml`: persona voice
+- [x] `GET /api/assistant` + `PUT /api/assistant`
+- [x] `SettingsPage.tsx`: form with name / pronouns / persona_short / persona_full / language_style
+
+---
+
+## ✅ Phase D — DreamerCrew *(completed — 2026-03-30)*
+
+Inactivity-triggered memory consolidation — the assistant "dreams" while the user is away.
+
+- [x] **D0** Inactivity detector: `_should_dream()`, `_dream_tick()` in scheduler
+  - Triggers after 30 min idle + 24h since last dream
+- [x] **D1** `dreamer_tools.py`: `scan_sessions()`, `resolve_dates()` (FR relative → ISO)
+- [x] **D2** `dreamer_tools.py`: `detect_exact_duplicates()`, `detect_dead_references()`, `build_dedup_report()`
+- [x] **D3** `DreamerCrew` (CrewAI): `memory_analyst` (patches JSON) → `memory_patcher` (ApplyDreamPatchesTool)
+- [x] **D4** `memory_archive.py`: `archive_old_sessions()` (>90d), `archive_completed_projects()` (✅ >30d), `prune_memory()`
+- [x] **D5** `_run_dreamer()`: DreamerCrew → prune_memory → sync DB (full pipeline)
+- [x] **D6** `POST /api/dream` + `GET /api/dream/log` + DreamerSection in SettingsPage
+- [x] **Context compression**: Option A (hot sections if issues) > Option B (section rotation via `last_dream_section_idx`)
+
+---
+
+## 🔧 Phase N — Nodal Interface & Augmented Autonomy
+
+> Source: *Architecture de l'autonomie augmentée — refactorisation nodale et orchestration GOAP*
+>
+> Transform Mnemo from a crew-based pipeline into a visually configurable,
+> plugin-extensible autonomous agent system.
+
+### N1 — Visual Node Interface ✅
+
+- [x] `GET /api/graph` — expose the crew/agent/tool graph as JSON
+- [x] `NodalPage.tsx` — React Flow canvas, node types colour-coded, live status overlay, click → detail panel
+- [x] `nodal` tab in NavBar + App.tsx
+
+### N2 — GOAP Enrichment
+
+Extend the planner with more actions and better planning structure.
+
+- [ ] Add actions to `ACTION_REGISTRY`: `TriggerDream`, `ArchiveMemory`, `UpdateAssistantConfig`, `FetchWebContext`
+- [ ] GOAP graph visualization in NodalPage (current world_state → active plan path)
+- [ ] Expose `GET /api/goap/state` — current world_state + active plan JSON
+- [ ] Dynamic goal injection: user can set a GOAP goal from the nodal UI
+
+### N3 — Guardrails & Risk Management
+
+Structure the safety layer following the NIST framework (Govern → Map → Measure → Manage).
+
+- [ ] **Risk taxonomy**: classify all API actions as `low / medium / high / critical`
+- [ ] **Audit log**: `data/users/<username>/audit_log.jsonl` — every risky action logged with timestamp, action, result
+- [ ] **Sidecar middleware** (FastAPI): intercepts actions rated `high+` → forced confirmation, logged
+- [ ] **Kill-switch**: `POST /api/system/pause` / `POST /api/system/resume` — halts all scheduler autonomy
+- [ ] **Guardrails indicator** in dashboard (SettingsPage or new panel)
+
+### N4 — Plugin System v1
+
+Allow users to define and register custom tools without modifying source code.
+
+- [ ] JSON schema for tool definition: `{name, description, type, inputs, outputs, handler_path}`
+- [ ] `tools/plugin_registry.py`: `register_tool()`, `load_plugins()`, `list_plugins()`
+- [ ] `GET /api/plugins` + `POST /api/plugins` + `DELETE /api/plugins/{name}`
+- [ ] Plugin node type in NodalPage: drag-and-drop to connect to a crew
+- [ ] Plugins persisted in `data/users/<username>/plugins/`
+
+---
+
+## 👁️ Phase 7 — External Deployments *(planned)*
+
+- [ ] Raspberry Pi lightweight client (REST API consumer)
+- [ ] Unity desktop pet (C# client, streaming events: `on_thinking`, `on_response`, `on_memory_write`)
+- [ ] Fine-tuning pipeline: LoRA adapter from accumulated session data (Unsloth + GGUF → Ollama)
+
+---
 
 ## 🔐 Cross-cutting Principles
 
-These constraints apply to all phases:
-
 - **Privacy first** — no personal data leaves the machine without explicit consent
-- **Offline first** — every feature must work without a connection; the web is a bonus, never a dependency
-- **Confirmation before action** — any irreversible action (file, shell, sending) requires validation
-- **Auditability** — `memory.md` remains human-readable and editable at all times
-- **Web tool security** — every network tool is audited before integration
+- **Offline first** — every feature must work without a connection
+- **Confirmation before action** — any irreversible action requires explicit approval (HITL)
+- **Auditability** — `memory.md` remains human-readable at all times; `audit_log.jsonl` for actions
+- **Algorithm over LLM** — deterministic Python handles what doesn't need reasoning; LLM is last resort
 
 ---
 
 ## 📌 Legend
 
 | Symbol | Meaning |
-|---|---|
-| ✅ | Completed |
-| 🔧 | In progress |
+|--------|---------|
+| ✅ | Phase completed |
+| 🔧 | In progress this week |
 | 👁️ | Planned — short term |
 | ⚡ | Planned — mid term |
 | 🌐 | Vision — long term |
-| 🚀 | Advanced vision |

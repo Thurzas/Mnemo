@@ -203,6 +203,63 @@ export interface AssistantUpdate {
   pronouns?: string
 }
 
+export interface GraphNodeAgent {
+  id: string
+  label: string
+  description: string
+}
+
+export interface GraphNode {
+  id: string
+  type: 'crew' | 'agent' | 'tool' | 'trigger' | 'goap'
+  label: string
+  description: string
+  position: { x: number; y: number }
+  status: 'idle' | 'running' | 'blocked'
+  agents: GraphNodeAgent[]
+  tools: string[]
+}
+
+export interface GraphEdge {
+  id: string
+  source: string
+  target: string
+  label: string
+}
+
+export interface GoapAction {
+  name: string
+  preconditions: Record<string, boolean>
+  effects: Record<string, boolean>
+  cost: number
+  resource_lock: string | null
+}
+
+export interface GoapPlanStep {
+  name: string
+  cost: number
+  effects: Record<string, boolean>
+}
+
+export interface GoapStateResponse {
+  world_state: Record<string, unknown>
+  pending_goal: Record<string, boolean> | null
+  active_plan: GoapPlanStep[]
+  plan_error: string | null
+  actions: GoapAction[]
+}
+
+export interface GraphResponse {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  live: {
+    running_crews: string[]
+    // peut être un objet {slug, goal, step} si le backend est ancien — normalisé côté frontend
+    active_project: string | { slug?: string; [key: string]: unknown } | null
+    dreamer_running: boolean
+  }
+}
+
 export interface VoiceSettings {
   rvc_enabled: boolean
   kokoro_voice_fr: string
@@ -508,6 +565,21 @@ export const api = {
 
   triggerDream: () =>
     request<{ started: boolean; already_running: boolean }>('/api/dream', { method: 'POST' }),
+
+  getGraph: () =>
+    request<GraphResponse>('/api/graph'),
+
+  getGoapState: () =>
+    request<GoapStateResponse>('/api/goap/state'),
+
+  setGoapGoal: (goal: Record<string, boolean>) =>
+    request<{ ok: boolean; pending_goal: Record<string, boolean> }>('/api/goap/goal', {
+      method: 'POST',
+      body: JSON.stringify({ goal }),
+    }),
+
+  clearGoapGoal: () =>
+    request<{ ok: boolean }>('/api/goap/goal', { method: 'DELETE' }),
 
   testVoice: async (settings?: Partial<VoiceSettings>, text?: string): Promise<Blob> => {
     const token = auth.getToken()
